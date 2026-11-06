@@ -1,0 +1,548 @@
+#include "runtime/payload_update_preflight.h"
+
+#include <fcntl.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <array>
+#include <algorithm>
+#include <cerrno>
+#include <cstddef>
+#include <cstring>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "runtime/helper_environment.h"
+
+extern char** environ;
+
+#ifndef BLOX7_INSTALL_LIBDIR
+#define BLOX7_INSTALL_LIBDIR "lib"
+#endif
+
+namespace blox7 {
+namespace runtime {
+namespace {
+
+constexpr char kProgressFinishedPacket = 'S';
+
+bool Enabled(const Environment& environment, std::string_view name) {
+  const auto value = environment.Get(name);
+  return value.has_value() && !value->empty() && *value != "0";
+}
+
+bool HasDisplay(const Environment& environment) {
+  return environment.HasNonEmpty("DISPLAY") ||
+         environment.HasNonEmpty("WAYLAND_DISPLAY");
+}
+
+bool IsExecutableRegularFile(const std::filesystem::path& path) {
+  std::error_code error;
+  return std::filesystem::is_regular_file(path, error) &&
+         !std::filesystem::is_symlink(path, error) &&
+         access(path.c_str(), X_OK) == 0;
+}
+
+std::filesystem::path UpdateHelper(const Environment& environment) {
+  const auto helper_override = environment.Get("BLOX7_UPDATE_HELPER");
+  if (helper_override.has_value()) {
+    const std::filesystem::path helper(*helper_override);
+    if (helper.is_absolute() && IsExecutableRegularFile(helper)) {
+      return helper;
+    }
+    return {};
+  }
+
+  const auto project_override = environment.Get("BLOX7_PROJECT_ROOT");
+  if (project_override.has_value()) {
+    const std::filesystem::path root(*project_override);
+    if (!root.is_absolute()) {
+      return {};
+    }
+    for (const std::filesystem::path& helper :
+         {root / "build" / "blox7_updater",
+          root / "bin" / "blox7_updater"}) {
+      if (IsExecutableRegularFile(helper)) {
+        return helper;
+      }
+    }
+    return {};
+  }
+
+  std::error_code error;
+  const std::filesystem::path executable =
+      std::filesystem::read_symlink("/proc/self/exe", error);
+  if (error || executable.empty()) {
+    return {};
+  }
+  const std::filesystem::path executable_dir = executable.parent_path();
+  const std::vector<std::filesystem::path> candidates = {
+      executable_dir / "blox7_updater",
+      executable_dir.parent_path() / "libexec" / "blox7" /
+          "blox7_updater",
+      executable_dir.parent_path() / BLOX7_INSTALL_LIBDIR / "blox7" /
+          "blox7_updater",
+  };
+  for (const std::filesystem::path& candidate : candidates) {
+    if (IsExecutableRegularFile(candidate)) {
+      return candidate;
+    }
+  }
+  return {};
+}
+
+std::filesystem::path ProgressHelper(const Environment& environment) {
+  const auto helper_override =
+      environment.Get("BLOX7_UPDATE_PROGRESS_HELPER");
+  if (helper_override.has_value()) {
+    const std::filesystem::path helper(*helper_override);
+    return helper.is_absolute() && IsExecutableRegularFile(helper)
+               ? helper
+               : std::filesystem::path{};
+  }
+
+  std::error_code error;
+  const std::filesystem::path executable =
+      std::filesystem::read_symlink("/proc/self/exe", error);
+  if (error || executable.empty()) {
+    return {};
+  }
+  const std::filesystem::path helper =
+      executable.parent_path() / "blox7_failure_dialog";
+  return IsExecutableRegularFile(helper) ? helper : std::filesystem::path{};
+}
+
+void WaitForProcess(pid_t process) {
+  if (process <= 0) {
+    return;
+  }
+  while (waitpid(process, nullptr, 0) < 0 && errno == EINTR) {
+  }
+}
+
+class UpdateProgressMonitor final {
+ public:
+  UpdateProgressMonitor() = default;
+  ~UpdateProgressMonitor() { Finish(); }
+
+  UpdateProgressMonitor(const UpdateProgressMonitor&) = delete;
+  UpdateProgressMonitor& operator=(const UpdateProgressMonitor&) = delete;
+
+  static UpdateProgressMonitor Start(const Environment& environment) {
+    if (Enabled(environment, "BLOX7_DISABLE_UPDATE_PROGRESS") ||
+        Enabled(environment, "BLOX7_DISABLE_FAILURE_DIALOG") ||
+        Enabled(environment, "BLOX7_ISOLATED_CANARY") ||
+        Enabled(environment, "BLOX7_HEADLESS") || !HasDisplay(environment)) {
+      return {};
+    }
+    const std::filesystem::path helper = ProgressHelper(environment);
+    if (helper.empty()) {
+      return {};
+    }
+
+    int sockets[2] = {-1, -1};
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets) != 0) {
+      return {};
+    }
+    if (sockets[0] <= STDERR_FILENO) {
+      const int descriptor =
+          fcntl(sockets[0], F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+      close(sockets[0]);
+      if (descriptor < 0) {
+        close(sockets[1]);
+        return {};
+      }
+      sockets[0] = descriptor;
+    }
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0) {
+      close(sockets[0]);
+      close(sockets[1]);
+      return {};
+    }
+    int action_status = 0;
+    if (sockets[0] == STDIN_FILENO) {
+      action_status = posix_spawn_file_actions_addclose(&actions, sockets[0]);
+    }
+    if (action_status == 0 && sockets[1] != STDIN_FILENO) {
+      action_status =
+          posix_spawn_file_actions_adddup2(&actions, sockets[1], STDIN_FILENO);
+    }
+    if (action_status == 0 && sockets[0] != STDIN_FILENO) {
+      action_status = posix_spawn_file_actions_addclose(&actions, sockets[0]);
+    }
+    if (action_status == 0 && sockets[1] != STDIN_FILENO) {
+      action_status = posix_spawn_file_actions_addclose(&actions, sockets[1]);
+    }
+
+    std::string helper_string = helper.string();
+    char progress_option[] = "--progress-monitor";
+    char* arguments[] = {helper_string.data(), progress_option, nullptr};
+    pid_t child = -1;
+    int spawn_status = action_status;
+    if (spawn_status == 0) {
+      const auto child_environment = BuildHelperEnvironment(environ);
+      spawn_status = posix_spawn(&child, helper.c_str(), &actions, nullptr,
+                                 arguments, child_environment.data());
+    }
+    posix_spawn_file_actions_destroy(&actions);
+    close(sockets[1]);
+    if (spawn_status != 0) {
+      close(sockets[0]);
+      return {};
+    }
+    return UpdateProgressMonitor(sockets[0], child);
+  }
+
+  bool active() const { return socket_ >= 0; }
+  int socket() const { return socket_; }
+
+ private:
+  UpdateProgressMonitor(int socket, pid_t process)
+      : socket_(socket), process_(process) {}
+
+  void Finish() {
+    if (!active()) {
+      return;
+    }
+    (void)send(socket_, &kProgressFinishedPacket,
+               sizeof(kProgressFinishedPacket), MSG_NOSIGNAL);
+    (void)shutdown(socket_, SHUT_RDWR);
+    close(socket_);
+    socket_ = -1;
+    WaitForProcess(process_);
+    process_ = -1;
+  }
+
+  int socket_ = -1;
+  pid_t process_ = -1;
+};
+
+bool IsEnvironmentEntry(std::string_view entry, std::string_view name) {
+  return entry.size() > name.size() && entry[name.size()] == '=' &&
+         entry.substr(0, name.size()) == name;
+}
+
+bool IsOverriddenEnvironmentEntry(
+    std::string_view entry,
+    const std::vector<std::pair<std::string_view, std::filesystem::path>>&
+        overrides) {
+  for (const auto& [name, ignored] : overrides) {
+    if (IsEnvironmentEntry(entry, name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+class UpdaterStderrRelay final {
+ public:
+  UpdaterStderrRelay() {
+    if (pipe2(descriptors_, O_CLOEXEC) != 0) {
+      descriptors_[0] = -1;
+      descriptors_[1] = -1;
+    }
+  }
+
+  ~UpdaterStderrRelay() {
+    CloseDescriptor(&descriptors_[0]);
+    CloseWrite();
+  }
+
+  UpdaterStderrRelay(const UpdaterStderrRelay&) = delete;
+  UpdaterStderrRelay& operator=(const UpdaterStderrRelay&) = delete;
+
+  bool active() const { return descriptors_[0] >= 0; }
+  int write_descriptor() const { return descriptors_[1]; }
+  void CloseWrite() { CloseDescriptor(&descriptors_[1]); }
+  const std::string& failure() const { return failure_; }
+
+  void Drain() {
+    if (!active()) {
+      return;
+    }
+    std::string pending;
+    std::array<char, 4096> buffer{};
+    while (true) {
+      const ssize_t received =
+          read(descriptors_[0], buffer.data(), buffer.size());
+      if (received < 0 && errno == EINTR) {
+        continue;
+      }
+      if (received <= 0) {
+        break;
+      }
+      const auto bytes = static_cast<std::size_t>(received);
+      WriteAll(buffer.data(), bytes);
+      pending.append(buffer.data(), bytes);
+      for (std::size_t end = pending.find('\n'); end != std::string::npos;
+           end = pending.find('\n')) {
+        RecordLine(std::string_view(pending).substr(0, end));
+        pending.erase(0, end + 1);
+      }
+    }
+    RecordLine(pending);
+    CloseDescriptor(&descriptors_[0]);
+  }
+
+ private:
+  static constexpr std::size_t kMaximumFailureBytes = 400;
+
+  static void CloseDescriptor(int* descriptor) {
+    if (*descriptor >= 0) {
+      close(*descriptor);
+      *descriptor = -1;
+    }
+  }
+
+  static void WriteAll(const char* data, std::size_t bytes) {
+    std::size_t offset = 0;
+    while (offset < bytes) {
+      const ssize_t written =
+          write(STDERR_FILENO, data + offset, bytes - offset);
+      if (written < 0 && errno == EINTR) {
+        continue;
+      }
+      if (written <= 0) {
+        return;
+      }
+      offset += static_cast<std::size_t>(written);
+    }
+  }
+
+  static std::string_view TrimToCharacterBoundary(std::string_view text) {
+    if (text.size() <= kMaximumFailureBytes) {
+      return text;
+    }
+    std::size_t size = kMaximumFailureBytes;
+    while (size > 0 &&
+           (static_cast<unsigned char>(text[size]) & 0xC0U) == 0x80U) {
+      --size;
+    }
+    return text.substr(0, size);
+  }
+
+  void RecordLine(std::string_view line) {
+    constexpr std::string_view kPrefix = "[native-updater] ";
+    constexpr std::string_view kWarningPrefix = "warning: ";
+    if (line.size() <= kPrefix.size() ||
+        line.substr(0, kPrefix.size()) != kPrefix) {
+      return;
+    }
+    const std::string_view detail = line.substr(kPrefix.size());
+    if (detail.substr(0, kWarningPrefix.size()) == kWarningPrefix) {
+      return;
+    }
+    failure_.assign(TrimToCharacterBoundary(detail));
+  }
+
+  int descriptors_[2] = {-1, -1};
+  std::string failure_;
+};
+
+std::vector<std::string> ChildEnvironment(const RuntimePaths& paths,
+                                          int progress_descriptor = -1) {
+  const std::vector<std::pair<std::string_view, std::filesystem::path>>
+      overrides = {
+          {"BLOX7_CONFIG_FILE", paths.config_file()},
+          {"BLOX7_CONFIG_ROOT", paths.config_root()},
+          {"BLOX7_DATA_ROOT", paths.data_root()},
+          {"BLOX7_CACHE_ROOT", paths.cache_root()},
+          {"BLOX7_STATE_ROOT", paths.state_root()},
+      };
+  std::vector<std::string> child_environment;
+  for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+    if (!IsOverriddenEnvironmentEntry(*entry, overrides) &&
+        !IsEnvironmentEntry(*entry, "BLOX7_UPDATE_PROGRESS_FD")) {
+      child_environment.emplace_back(*entry);
+    }
+  }
+  for (const auto& [name, value] : overrides) {
+    child_environment.emplace_back(std::string(name) + "=" + value.string());
+  }
+  if (progress_descriptor >= 0) {
+    child_environment.emplace_back("BLOX7_UPDATE_PROGRESS_FD=" +
+                                   std::to_string(progress_descriptor));
+  }
+  return child_environment;
+}
+
+}  // namespace
+
+PayloadUpdatePreflightResult RunPayloadUpdatePreflight(
+    const Environment& environment, const RuntimePaths& paths,
+    bool force_run_latest) {
+  PayloadUpdatePreflightResult result;
+  if (!force_run_latest &&
+      (Enabled(environment, "BLOX7_SKIP_UPDATE_CHECK") ||
+       environment.HasNonEmpty("ROBLOX_LIB_PATH"))) {
+    return result;
+  }
+
+  const std::filesystem::path helper = UpdateHelper(environment);
+  if (helper.empty()) {
+    if (force_run_latest ||
+        environment.HasNonEmpty("BLOX7_RUNTIME_LIBRARY_DIR")) {
+      result.error = "cannot locate the Blox7 update helper";
+    }
+    return result;
+  }
+
+  result.attempted = true;
+  std::string helper_string = helper.string();
+  char update[] = "update";
+  char startup_preflight[] = "--startup-preflight";
+  char force_latest[] = "--force-run-latest";
+  char* arguments[] = {helper_string.data(), update,
+                       force_run_latest ? force_latest : startup_preflight,
+                       nullptr};
+  UpdateProgressMonitor progress = UpdateProgressMonitor::Start(environment);
+  std::vector<std::string> child_environment =
+      ChildEnvironment(paths, progress.socket());
+  std::vector<char*> child_environment_pointers;
+  child_environment_pointers.reserve(child_environment.size() + 1);
+  for (std::string& entry : child_environment) {
+    child_environment_pointers.push_back(entry.data());
+  }
+  child_environment_pointers.push_back(nullptr);
+  UpdaterStderrRelay stderr_relay;
+  posix_spawn_file_actions_t actions;
+  bool actions_initialized = false;
+  int action_status = 0;
+  if (progress.active() || stderr_relay.active()) {
+    action_status = posix_spawn_file_actions_init(&actions);
+    actions_initialized = action_status == 0;
+  }
+  if (action_status == 0 && progress.active()) {
+    action_status = posix_spawn_file_actions_adddup2(
+        &actions, progress.socket(), progress.socket());
+  }
+  if (action_status == 0 && stderr_relay.active()) {
+    action_status = posix_spawn_file_actions_adddup2(
+        &actions, stderr_relay.write_descriptor(), STDERR_FILENO);
+  }
+  if (action_status != 0) {
+    if (actions_initialized) {
+      posix_spawn_file_actions_destroy(&actions);
+    }
+    result.error = "cannot prepare Roblox update progress channel: " +
+                   std::string(std::strerror(action_status));
+    return result;
+  }
+  pid_t child = -1;
+  const int spawn_status = posix_spawn(
+      &child, helper.c_str(), actions_initialized ? &actions : nullptr, nullptr,
+      arguments, child_environment_pointers.data());
+  if (actions_initialized) {
+    posix_spawn_file_actions_destroy(&actions);
+  }
+  if (spawn_status != 0) {
+    result.error = "cannot start Roblox update preflight: " +
+                   std::string(std::strerror(spawn_status));
+    return result;
+  }
+
+  stderr_relay.CloseWrite();
+  stderr_relay.Drain();
+
+  int child_status = 0;
+  while (waitpid(child, &child_status, 0) < 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    result.error = "cannot wait for Roblox update preflight: " +
+                   std::string(std::strerror(errno));
+    return result;
+  }
+  if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0) {
+    result.error = force_run_latest ? "forced latest Roblox run failed"
+                                     : "Roblox update preflight failed";
+    result.details = stderr_relay.failure();
+    if (WIFSIGNALED(child_status)) {
+      const int signal = WTERMSIG(child_status);
+      std::string termination =
+          "Roblox updater terminated by signal " + std::to_string(signal);
+      if (const char* description = strsignal(signal)) {
+        termination += " (" + std::string(description) + ")";
+      }
+      termination += ".";
+      if (!result.details.empty()) termination += "\n" + result.details;
+      result.details = std::move(termination);
+    } else if (WIFEXITED(child_status) && result.details.empty()) {
+      result.details = "Roblox updater exited with code " +
+                       std::to_string(WEXITSTATUS(child_status)) +
+                       " without an error message.";
+    } else if (result.details.empty()) {
+      result.details = "Roblox updater returned unexpected process status " +
+                       std::to_string(child_status) + ".";
+    }
+  }
+  return result;
+}
+
+BackgroundPayloadUpdate::~BackgroundPayloadUpdate() { Stop(); }
+
+void BackgroundPayloadUpdate::Start(const Environment& environment,
+                                    const RuntimePaths& paths,
+                                    std::chrono::milliseconds interval) {
+  if (worker_.joinable() || interval.count() <= 0 ||
+      Enabled(environment, "BLOX7_SKIP_UPDATE_CHECK") ||
+      Enabled(environment, "BLOX7_ISOLATED_CANARY") ||
+      environment.HasNonEmpty("ROBLOX_LIB_PATH"))
+    return;
+  const auto helper = UpdateHelper(environment);
+  if (helper.empty()) return;
+  auto child_environment = ChildEnvironment(paths);
+  stopped_ = false;
+  worker_ =
+      std::thread([this, helper, interval,
+                   child_environment = std::move(child_environment)]() mutable {
+        std::vector<char*> environment_pointers;
+        for (auto& entry : child_environment)
+          environment_pointers.push_back(entry.data());
+        environment_pointers.push_back(nullptr);
+        std::string executable = helper.string();
+        char update[] = "update";
+        char download_only[] = "--download-only";
+        char* arguments[] = {executable.data(), update, download_only, nullptr};
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto delay = std::min(interval, std::chrono::milliseconds(5000));
+        while (!wake_.wait_for(lock, delay, [this] { return stopped_; })) {
+          delay = interval;
+          pid_t process = -1;
+          const int status =
+              posix_spawn(&process, executable.c_str(), nullptr, nullptr,
+                          arguments, environment_pointers.data());
+          if (status != 0) continue;
+          child_ = process;
+          while (child_ > 0) {
+            const pid_t exited = waitpid(child_, nullptr, WNOHANG);
+            if (exited == child_ || (exited < 0 && errno == ECHILD)) {
+              child_ = -1;
+            } else {
+              wake_.wait_for(lock, std::chrono::milliseconds(50));
+            }
+          }
+        }
+      });
+}
+
+void BackgroundPayloadUpdate::Stop() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stopped_ = true;
+    if (child_ > 0) kill(child_, SIGTERM);
+  }
+  wake_.notify_all();
+  if (worker_.joinable()) worker_.join();
+}
+
+}  // namespace runtime
+}  // namespace blox7

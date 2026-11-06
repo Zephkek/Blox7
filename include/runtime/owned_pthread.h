@@ -1,0 +1,63 @@
+#ifndef BLOX7_RUNTIME_OWNED_PTHREAD_H_
+#define BLOX7_RUNTIME_OWNED_PTHREAD_H_
+
+#include <pthread.h>
+
+#include <cstddef>
+
+namespace blox7 {
+namespace runtime {
+
+using PthreadEntryPoint = void* (*)(void* context);
+using PthreadWaitPump = void (*)(void* context);
+
+enum class OwnedPthreadWaitStatus {
+  kJoined,
+  kTimedOut,
+  kPlatformError,
+};
+
+struct OwnedPthreadWaitResult {
+  OwnedPthreadWaitStatus status = OwnedPthreadWaitStatus::kPlatformError;
+  int platform_error = 0;
+
+  bool joined() const { return status == OwnedPthreadWaitStatus::kJoined; }
+};
+
+struct OwnedPthreadCancelResult {
+  int cancel_error = 0;
+  OwnedPthreadWaitResult wait;
+};
+
+class OwnedPthread final {
+ public:
+  OwnedPthread() = default;
+  ~OwnedPthread();
+
+  OwnedPthread(const OwnedPthread&) = delete;
+  OwnedPthread& operator=(const OwnedPthread&) = delete;
+
+  int Start(PthreadEntryPoint entry_point, void* context,
+            std::size_t stack_size);
+  OwnedPthreadWaitResult WaitFor(int timeout_ms, int poll_interval_ms,
+                                 PthreadWaitPump pump = nullptr,
+                                 void* pump_context = nullptr);
+  OwnedPthreadCancelResult CancelAndJoinFor(int timeout_ms,
+                                            int poll_interval_ms,
+                                            PthreadWaitPump pump = nullptr,
+                                            void* pump_context = nullptr);
+  int Signal(int signal_number) const;
+
+  bool joinable() const { return joinable_; }
+
+ private:
+  pthread_t thread_{};
+  bool joinable_ = false;
+};
+
+const char* OwnedPthreadWaitStatusName(OwnedPthreadWaitStatus status);
+
+}  // namespace runtime
+}  // namespace blox7
+
+#endif  // BLOX7_RUNTIME_OWNED_PTHREAD_H_

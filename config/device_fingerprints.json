@@ -1,0 +1,3189 @@
+{
+  "mobile-s22-ultra": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 8,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 384,
+      "height": 823,
+      "devicePixelRatio": 3.75,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Samsung Electronics Co., Ltd.)",
+      "unmasked_renderer": "ANGLE (Samsung Electronics Co. Ltd., ANGLE ((Samsung Xclipse 920) on Vulkan 1.3.279), OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      },
+      "canvas_hash_expected": "10e7f98c0e4395e9e86c84752af28401abbb54843b8a72be6c61e6e5ddf0f387"
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Samsung Electronics Co., Ltd.)",
+      "unmasked_renderer": "ANGLE (Samsung Electronics Co. Ltd., ANGLE ((Samsung Xclipse 920) on Vulkan 1.3.279), OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      },
+      "canvas_hash_expected": "10e7f98c0e4395e9e86c84752af28401abbb54843b8a72be6c61e6e5ddf0f387"
+    },
+    "source": "collected"
+  },
+  "mobile-s22": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 8,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 384,
+      "height": 832,
+      "devicePixelRatio": 2.8125,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Samsung Electronics Co., Ltd.)",
+      "unmasked_renderer": "ANGLE (Samsung Electronics Co. Ltd., ANGLE ((Samsung Xclipse 920) on Vulkan 1.3.279), OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Samsung Electronics Co., Ltd.)",
+      "unmasked_renderer": "ANGLE (Samsung Electronics Co. Ltd., ANGLE ((Samsung Xclipse 920) on Vulkan 1.3.279), OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-s23-ultra": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 12,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 384,
+      "height": 823,
+      "devicePixelRatio": 3.75,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-s24-ultra": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 12,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 384,
+      "height": 832,
+      "devicePixelRatio": 3.75,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 750, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 750, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-pixel-7": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 8,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 412,
+      "height": 915,
+      "devicePixelRatio": 2.625,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (ARM)",
+      "unmasked_renderer": "ANGLE (ARM, Mali-G710, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (ARM)",
+      "unmasked_renderer": "ANGLE (ARM, Mali-G710, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-pixel-8": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 8,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 412,
+      "height": 915,
+      "devicePixelRatio": 2.625,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (ARM)",
+      "unmasked_renderer": "ANGLE (ARM, Mali-G715, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (ARM)",
+      "unmasked_renderer": "ANGLE (ARM, Mali-G715, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-oneplus-11": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 16,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 412,
+      "height": 920,
+      "devicePixelRatio": 3.495,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-xiaomi-13": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 12,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 393,
+      "height": 873,
+      "devicePixelRatio": 2.75,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (Qualcomm)",
+      "unmasked_renderer": "ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "mobile-a54": {
+    "schema": 1,
+    "navigator": {
+      "platform": "Linux armv81",
+      "vendor": "Google Inc.",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en-GB",
+        "ar-TN",
+        "ar",
+        "en",
+        "fr",
+        "ru"
+      ],
+      "hardwareConcurrency": 8,
+      "deviceMemory": 8,
+      "maxTouchPoints": 5,
+      "pdfViewerEnabled": false,
+      "doNotTrack": null,
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 50,
+        "downlink": 1.45,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.49
+      }
+    },
+    "screen": {
+      "width": 384,
+      "height": 832,
+      "devicePixelRatio": 2.8125,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "media_queries": {
+      "(pointer: coarse)": true,
+      "(pointer: fine)": false,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": true,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": false,
+      "(hover: none)": true,
+      "(any-hover: hover)": false,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": false,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": true,
+      "ontouchstart_in_document": true,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Africa/Tunis",
+    "timezone_offset_minutes": -60,
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi"
+      ]
+    },
+    "fonts": {
+      "present": [
+        "sans-serif-thin"
+      ],
+      "hidden": [
+        "ARNO PRO",
+        "Agency FB",
+        "Arabic Typesetting",
+        "Arial Unicode MS",
+        "AvantGarde Bk BT",
+        "BankGothic Md BT",
+        "Batang",
+        "Bitstream Vera Sans Mono",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Clarendon",
+        "EUROSTILE",
+        "Franklin Gothic",
+        "Futura Bk BT",
+        "Futura Md BT",
+        "GOTHAM",
+        "Gill Sans",
+        "HELV",
+        "Haettenschweiler",
+        "Helvetica Neue",
+        "Humanst521 BT",
+        "Leelawadee",
+        "Letter Gothic",
+        "Levenim MT",
+        "Lucida Bright",
+        "Lucida Sans",
+        "Menlo",
+        "MS Mincho",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "MYRIAD PRO",
+        "Marlett",
+        "Meiryo UI",
+        "Microsoft Uighur",
+        "Minion Pro",
+        "Monotype Corsiva",
+        "PMingLiU",
+        "Pristina",
+        "SCRIPTINA",
+        "Segoe UI Light",
+        "Serifa",
+        "SimHei",
+        "Small Fonts",
+        "Staccato222 BT",
+        "TRAJAN PRO",
+        "Univers CE 55 Medium",
+        "Vrinda",
+        "ZWAdobeF"
+      ]
+    },
+    "canvas2d_hash_expected": "89e3850f9091c93926de829f6c51b4b9d7c4d0456890f6ca24f72451f128c8d2",
+    "audio_hash_expected": "3192b76af935e0345be712245fc8f4733b8435171450306c18b5be64bc6a9000",
+    "webgl1": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (ARM)",
+      "unmasked_renderer": "ANGLE (ARM, Mali-G68, OpenGL ES 3.2)",
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      }
+    },
+    "webgl2": {
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (ARM)",
+      "unmasked_renderer": "ANGLE (ARM, Mali-G68, OpenGL ES 3.2)",
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_astc",
+        "WEBGL_compressed_texture_etc",
+        "WEBGL_compressed_texture_etc1",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_render_shared_exponent",
+        "WEBGL_stencil_texturing"
+      ],
+      "params": {
+        "MAX_TEXTURE_SIZE": 8192,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 8192,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 64,
+        "MAX_VERTEX_UNIFORM_VECTORS": 1024,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          16384,
+          16384
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          8191.875
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          8191.875
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 4,
+        "MAX_3D_TEXTURE_SIZE": 8192,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 2147483647,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 2147483647
+      }
+    },
+    "source": "derived"
+  },
+  "pc-windows-11": {
+    "name": "pc-windows-11",
+    "collected_at": "2026-11-06T18:13:47.058Z",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    "user_agent_data": {
+      "brands": [
+        {
+          "brand": "Not:A-Brand",
+          "version": "8"
+        },
+        {
+          "brand": "Chromium",
+          "version": "156"
+        },
+        {
+          "brand": "Google Chrome",
+          "version": "156"
+        }
+      ],
+      "mobile": false,
+      "platform": "Windows",
+      "high_entropy": {
+        "architecture": "x86",
+        "bitness": "64",
+        "brands": [
+          {
+            "brand": "Not:A-Brand",
+            "version": "8"
+          },
+          {
+            "brand": "Chromium",
+            "version": "156"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "156"
+          }
+        ],
+        "fullVersionList": [
+          {
+            "brand": "Not:A-Brand",
+            "version": "8.0.0.0"
+          },
+          {
+            "brand": "Chromium",
+            "version": "156.0.8078.80"
+          },
+          {
+            "brand": "Google Chrome",
+            "version": "156.0.8078.80"
+          }
+        ],
+        "mobile": false,
+        "model": "",
+        "platform": "Windows",
+        "platformVersion": "19.0.0",
+        "uaFullVersion": "156.0.8078.80",
+        "wow64": false
+      }
+    },
+    "navigator": {
+      "platform": "Win32",
+      "vendor": "Google Inc.",
+      "product": "Gecko",
+      "productSub": "20030107",
+      "appName": "Netscape",
+      "appVersion": "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "language": "en-US",
+      "languages": [
+        "en-US",
+        "en"
+      ],
+      "hardwareConcurrency": 24,
+      "deviceMemory": 32,
+      "maxTouchPoints": 0,
+      "pdfViewerEnabled": true,
+      "webdriver": false,
+      "doNotTrack": null,
+      "plugins": [
+        "PDF Viewer",
+        "Chrome PDF Viewer",
+        "Chromium PDF Viewer",
+        "Microsoft Edge PDF Viewer",
+        "WebKit built-in PDF"
+      ],
+      "mimeTypes": [
+        "application/pdf",
+        "text/pdf"
+      ],
+      "connection": {
+        "effectiveType": "4g",
+        "rtt": 100,
+        "downlink": 1.7,
+        "saveData": false
+      },
+      "bluetooth": true,
+      "getBattery": true,
+      "battery": {
+        "charging": true,
+        "level": 0.8
+      }
+    },
+    "chrome": {
+      "keys": [
+        "loadTimes",
+        "csi",
+        "app"
+      ],
+      "runtime_id": ""
+    },
+    "screen": {
+      "width": 1707,
+      "height": 1067,
+      "availWidth": 1707,
+      "availHeight": 1019,
+      "availTop": 0,
+      "availLeft": 0,
+      "colorDepth": 30,
+      "pixelDepth": 30,
+      "devicePixelRatio": 1.5,
+      "orientation": {
+        "type": "landscape-primary",
+        "angle": 0
+      }
+    },
+    "window": {
+      "innerWidth": 886,
+      "innerHeight": 606,
+      "outerWidth": 900,
+      "outerHeight": 700,
+      "screenX": 10,
+      "screenY": 10,
+      "visualViewport": {
+        "width": 886,
+        "height": 606,
+        "scale": 1
+      }
+    },
+    "media_queries": {
+      "(pointer: coarse)": false,
+      "(pointer: fine)": true,
+      "(pointer: none)": false,
+      "(any-pointer: coarse)": false,
+      "(any-pointer: fine)": true,
+      "(hover: hover)": true,
+      "(hover: none)": false,
+      "(any-hover: hover)": true,
+      "(prefers-color-scheme: light)": false,
+      "(prefers-color-scheme: dark)": true,
+      "(prefers-reduced-motion: reduce)": false,
+      "(dynamic-range: high)": true,
+      "(forced-colors: active)": false
+    },
+    "touch": {
+      "ontouchstart_in_window": false,
+      "ontouchstart_in_document": false,
+      "TouchEvent": "function",
+      "PointerEvent": "function"
+    },
+    "timezone": "Europe/Berlin",
+    "fonts": {
+      "present": [
+        "Agency FB",
+        "Calibri",
+        "Century",
+        "Century Gothic",
+        "Franklin Gothic",
+        "Haettenschweiler",
+        "Leelawadee",
+        "Lucida Bright",
+        "Lucida Sans",
+        "MS Outlook",
+        "MS Reference Specialty",
+        "MS UI Gothic",
+        "MT Extra",
+        "Marlett",
+        "Microsoft Uighur",
+        "Monotype Corsiva",
+        "Pristina",
+        "Segoe UI Light"
+      ],
+      "measured": {
+        "sans-serif-thin": [
+          343,
+          384,
+          389
+        ],
+        "ARNO PRO": [
+          343,
+          384,
+          389
+        ],
+        "Agency FB": [
+          246,
+          246,
+          246
+        ],
+        "Arabic Typesetting": [
+          343,
+          384,
+          389
+        ],
+        "Arial Unicode MS": [
+          343,
+          384,
+          389
+        ],
+        "AvantGarde Bk BT": [
+          343,
+          384,
+          389
+        ],
+        "BankGothic Md BT": [
+          343,
+          384,
+          389
+        ],
+        "Batang": [
+          343,
+          384,
+          389
+        ],
+        "Bitstream Vera Sans Mono": [
+          343,
+          384,
+          389
+        ],
+        "Calibri": [
+          362,
+          362,
+          362
+        ],
+        "Century": [
+          427,
+          427,
+          427
+        ],
+        "Century Gothic": [
+          404,
+          404,
+          404
+        ],
+        "Clarendon": [
+          343,
+          384,
+          389
+        ],
+        "EUROSTILE": [
+          343,
+          384,
+          389
+        ],
+        "Franklin Gothic": [
+          380,
+          380,
+          380
+        ],
+        "Futura Bk BT": [
+          343,
+          384,
+          389
+        ],
+        "Futura Md BT": [
+          343,
+          384,
+          389
+        ],
+        "GOTHAM": [
+          343,
+          384,
+          389
+        ],
+        "Gill Sans": [
+          343,
+          384,
+          389
+        ],
+        "HELV": [
+          343,
+          384,
+          389
+        ],
+        "Haettenschweiler": [
+          248,
+          248,
+          248
+        ],
+        "Helvetica Neue": [
+          343,
+          384,
+          389
+        ],
+        "Humanst521 BT": [
+          343,
+          384,
+          389
+        ],
+        "Leelawadee": [
+          388,
+          388,
+          388
+        ],
+        "Letter Gothic": [
+          343,
+          384,
+          389
+        ],
+        "Levenim MT": [
+          343,
+          384,
+          389
+        ],
+        "Lucida Bright": [
+          416,
+          416,
+          416
+        ],
+        "Lucida Sans": [
+          408,
+          408,
+          408
+        ],
+        "Menlo": [
+          343,
+          384,
+          389
+        ],
+        "MS Mincho": [
+          343,
+          384,
+          389
+        ],
+        "MS Outlook": [
+          400,
+          440,
+          440
+        ],
+        "MS Reference Specialty": [
+          474,
+          474,
+          474
+        ],
+        "MS UI Gothic": [
+          341,
+          341,
+          341
+        ],
+        "MT Extra": [
+          380,
+          384,
+          384
+        ],
+        "MYRIAD PRO": [
+          343,
+          384,
+          389
+        ],
+        "Marlett": [
+          516,
+          533,
+          544
+        ],
+        "Meiryo UI": [
+          343,
+          384,
+          389
+        ],
+        "Microsoft Uighur": [
+          267,
+          267,
+          267
+        ],
+        "Minion Pro": [
+          343,
+          384,
+          389
+        ],
+        "Monotype Corsiva": [
+          352,
+          352,
+          352
+        ],
+        "PMingLiU": [
+          343,
+          384,
+          389
+        ],
+        "Pristina": [
+          336,
+          336,
+          336
+        ],
+        "SCRIPTINA": [
+          343,
+          384,
+          389
+        ],
+        "Segoe UI Light": [
+          359,
+          359,
+          359
+        ],
+        "Serifa": [
+          343,
+          384,
+          389
+        ],
+        "SimHei": [
+          343,
+          384,
+          389
+        ],
+        "Small Fonts": [
+          343,
+          384,
+          389
+        ],
+        "Staccato222 BT": [
+          343,
+          384,
+          389
+        ],
+        "TRAJAN PRO": [
+          343,
+          384,
+          389
+        ],
+        "Univers CE 55 Medium": [
+          343,
+          384,
+          389
+        ],
+        "Vrinda": [
+          343,
+          384,
+          389
+        ],
+        "ZWAdobeF": [
+          343,
+          384,
+          389
+        ]
+      }
+    },
+    "canvas2d_hash": "59f34a64a693f6f46ee4bfd26f7919e24c0769cd342e103a13d8232abcc486a3",
+    "audio_hash": "5ec71a03c5139d0d9d10034c2545658895b9343265ed7a8a588a32df32f9f9da",
+    "webgl1": {
+      "available": true,
+      "params": {
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_UNIFORM_VECTORS": 4095,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          32767,
+          32767
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          1
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          1024
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1
+      },
+      "extensions": [
+        "ANGLE_instanced_arrays",
+        "EXT_blend_minmax",
+        "EXT_clip_control",
+        "EXT_color_buffer_half_float",
+        "EXT_depth_clamp",
+        "EXT_disjoint_timer_query",
+        "EXT_float_blend",
+        "EXT_frag_depth",
+        "EXT_polygon_offset_clamp",
+        "EXT_shader_texture_lod",
+        "EXT_texture_compression_bptc",
+        "EXT_texture_compression_rgtc",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_sRGB",
+        "KHR_parallel_shader_compile",
+        "OES_element_index_uint",
+        "OES_fbo_render_mipmap",
+        "OES_standard_derivatives",
+        "OES_texture_float",
+        "OES_texture_float_linear",
+        "OES_texture_half_float",
+        "OES_texture_half_float_linear",
+        "OES_vertex_array_object",
+        "WEBGL_blend_func_extended",
+        "WEBGL_color_buffer_float",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_depth_texture",
+        "WEBGL_draw_buffers",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode"
+      ],
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (NVIDIA)",
+      "unmasked_renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 5080 Laptop GPU (0x00002C59) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "canvas_hash": "10e7f98c0e4395e9e86c84752af28401abbb54843b8a72be6c61e6e5ddf0f387"
+    },
+    "webgl2": {
+      "available": true,
+      "params": {
+        "MAX_TEXTURE_SIZE": 16384,
+        "MAX_CUBE_MAP_TEXTURE_SIZE": 16384,
+        "MAX_VERTEX_ATTRIBS": 16,
+        "MAX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_VERTEX_TEXTURE_IMAGE_UNITS": 16,
+        "MAX_COMBINED_TEXTURE_IMAGE_UNITS": 32,
+        "MAX_VERTEX_UNIFORM_VECTORS": 4095,
+        "MAX_VARYING_VECTORS": 30,
+        "MAX_FRAGMENT_UNIFORM_VECTORS": 1024,
+        "MAX_RENDERBUFFER_SIZE": 16384,
+        "MAX_VIEWPORT_DIMS": [
+          32767,
+          32767
+        ],
+        "ALIASED_LINE_WIDTH_RANGE": [
+          1,
+          1
+        ],
+        "ALIASED_POINT_SIZE_RANGE": [
+          1,
+          1024
+        ],
+        "RED_BITS": 8,
+        "GREEN_BITS": 8,
+        "BLUE_BITS": 8,
+        "ALPHA_BITS": 8,
+        "DEPTH_BITS": 24,
+        "STENCIL_BITS": 0,
+        "SUBPIXEL_BITS": 4,
+        "SAMPLES": 4,
+        "SAMPLE_BUFFERS": 1,
+        "MAX_SAMPLES": 8,
+        "MAX_3D_TEXTURE_SIZE": 2048,
+        "MAX_ARRAY_TEXTURE_LAYERS": 2048,
+        "MAX_ELEMENT_INDEX": 4294967294,
+        "MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS": 212988,
+        "MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS": 200704
+      },
+      "extensions": [
+        "EXT_clip_control",
+        "EXT_color_buffer_float",
+        "EXT_color_buffer_half_float",
+        "EXT_conservative_depth",
+        "EXT_depth_clamp",
+        "EXT_disjoint_timer_query_webgl2",
+        "EXT_float_blend",
+        "EXT_polygon_offset_clamp",
+        "EXT_render_snorm",
+        "EXT_texture_compression_bptc",
+        "EXT_texture_compression_rgtc",
+        "EXT_texture_filter_anisotropic",
+        "EXT_texture_mirror_clamp_to_edge",
+        "EXT_texture_norm16",
+        "KHR_parallel_shader_compile",
+        "NV_shader_noperspective_interpolation",
+        "OES_draw_buffers_indexed",
+        "OES_sample_variables",
+        "OES_shader_multisample_interpolation",
+        "OES_texture_float_linear",
+        "OVR_multiview2",
+        "WEBGL_blend_func_extended",
+        "WEBGL_clip_cull_distance",
+        "WEBGL_compressed_texture_s3tc",
+        "WEBGL_compressed_texture_s3tc_srgb",
+        "WEBGL_debug_renderer_info",
+        "WEBGL_debug_shaders",
+        "WEBGL_lose_context",
+        "WEBGL_multi_draw",
+        "WEBGL_polygon_mode",
+        "WEBGL_provoking_vertex",
+        "WEBGL_stencil_texturing"
+      ],
+      "vendor": "WebKit",
+      "renderer": "WebKit WebGL",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "shading_language_version": "WebGL GLSL ES 3.00 (OpenGL ES GLSL ES 3.0 Chromium)",
+      "unmasked_vendor": "Google Inc. (NVIDIA)",
+      "unmasked_renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 5080 Laptop GPU (0x00002C59) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "canvas_hash": "10e7f98c0e4395e9e86c84752af28401abbb54843b8a72be6c61e6e5ddf0f387"
+    },
+    "source": "collected"
+  }
+}

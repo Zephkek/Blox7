@@ -1,0 +1,2764 @@
+#include "update/host_abi_deriver.h"
+
+#define JSON_NOEXCEPTION 1
+#include <capstone.h>
+#include <elf.h>
+#include <fcntl.h>
+#include <gelf.h>
+#include <libelf.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <iterator>
+#include <map>
+#include <nlohmann/json.hpp>
+#include <optional>
+#include <set>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "compat/elf_build_id.h"
+#include "compat/fmod_output_device_contract.h"
+#include "compat/guest_abi.h"
+#include "update/payload_integrity.h"
+
+namespace blox7::update {
+namespace {
+
+using Json = nlohmann::json;
+
+constexpr std::uint64_t kMaximumElfBytes = 512ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t kMaximumJsonBytes = 1024ULL * 1024ULL;
+constexpr std::size_t kMaximumRelocations = 4U * 1024U * 1024U;
+constexpr std::size_t kMaximumInitArrayEntries = 64U * 1024U;
+constexpr std::size_t kRegistryInitializerMaximumBytes = 0x1000;
+constexpr std::uint32_t kAndroidRelaSection = 0x60000002U;
+constexpr std::uint32_t kRelativeRelocation = 8U;
+constexpr std::int64_t kGroupedByInfo = 1;
+constexpr std::int64_t kGroupedByOffsetDelta = 2;
+constexpr std::int64_t kGroupedByAddend = 4;
+constexpr std::int64_t kGroupHasAddend = 8;
+
+constexpr std::array<std::string_view, 7> kRequiredExports = {
+    "JNI_OnLoad",
+    "Java_com_roblox_engine_jni_NativeGLInterface_nativeGameGlobalInit",
+    "Java_com_roblox_engine_jni_NativeGLInterface_nativeUpdateAdapterInit",
+    "Java_com_roblox_engine_jni_NativeGLInterface_"
+    "nativeAppBridgeV2InitWithParams",
+    "Java_com_roblox_engine_jni_NativeGLInterface_"
+    "nativeAppBridgeStartLuaAppDM",
+    "Java_com_roblox_engine_jni_NativeGLInterface_"
+    "nativeAppBridgeV2StartAppWithParams",
+    "Java_com_roblox_engine_jni_NativeGLInterface_"
+    "nativeCallMessagesFromMainThread",
+};
+
+constexpr std::array<std::string_view, 2> kToolchainMarkers = {
+    "Android (13624864, +pgo, +bolt, +lto, +mlgo, based on r530567e) "
+    "clang version 19.0.1",
+    "Linker: LLD 19.0.1",
+};
+
+bool IsLowerHex(std::string_view value, std::size_t size) {
+  return value.size() == size &&
+         std::all_of(value.begin(), value.end(), [](unsigned char character) {
+           return (character >= '0' && character <= '9') ||
+                  (character >= 'a' && character <= 'f');
+         });
+}
+
+bool CheckedRange(std::uint64_t offset, std::uint64_t size,
+                  std::uint64_t limit) {
+  return offset <= limit && size <= limit - offset;
+}
+
+std::string ReadSmallRegular(const std::filesystem::path& path,
+                             std::uint64_t maximum, std::string* error) {
+  const int descriptor = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (descriptor < 0) {
+    *error = "cannot open JSON input: " + path.string();
+    return {};
+  }
+  struct stat metadata = {};
+  if (fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
+      metadata.st_size <= 0 ||
+      static_cast<std::uint64_t>(metadata.st_size) > maximum) {
+    close(descriptor);
+    *error = "JSON input is not a bounded regular file";
+    return {};
+  }
+  std::string contents(static_cast<std::size_t>(metadata.st_size), '\0');
+  std::size_t offset = 0;
+  while (offset < contents.size()) {
+    const ssize_t read_size =
+        read(descriptor, contents.data() + offset, contents.size() - offset);
+    if (read_size < 0 && errno == EINTR) continue;
+    if (read_size <= 0) {
+      close(descriptor);
+      *error = "cannot read JSON input";
+      return {};
+    }
+    offset += static_cast<std::size_t>(read_size);
+  }
+  close(descriptor);
+  return contents;
+}
+
+std::optional<Json> ReadJson(const std::filesystem::path& path,
+                             std::string* error) {
+  const std::string contents = ReadSmallRegular(path, kMaximumJsonBytes, error);
+  if (!error->empty()) return std::nullopt;
+  Json document = Json::parse(contents, nullptr, false, true);
+  if (document.is_discarded() || !document.is_object()) {
+    *error = "JSON input must contain one object: " + path.string();
+    return std::nullopt;
+  }
+  return document;
+}
+
+bool WritePrivate(const std::filesystem::path& path, std::string_view contents,
+                  std::string* error) {
+  const int descriptor = open(
+      path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (descriptor < 0) {
+    *error = "cannot create derived HostAbi artifact";
+    return false;
+  }
+  std::size_t offset = 0;
+  while (offset < contents.size()) {
+    const ssize_t written =
+        write(descriptor, contents.data() + offset, contents.size() - offset);
+    if (written < 0 && errno == EINTR) continue;
+    if (written <= 0) {
+      close(descriptor);
+      *error = "cannot write derived HostAbi artifact";
+      return false;
+    }
+    offset += static_cast<std::size_t>(written);
+  }
+  const bool durable = fsync(descriptor) == 0;
+  close(descriptor);
+  if (!durable) *error = "cannot persist derived HostAbi artifact";
+  return durable;
+}
+
+struct Segment {
+  std::uint64_t offset = 0;
+  std::uint64_t address = 0;
+  std::uint64_t file_size = 0;
+  std::uint64_t memory_size = 0;
+  std::uint32_t flags = 0;
+
+  bool ContainsMemory(std::uint64_t rva, std::uint64_t size) const {
+    return rva >= address && CheckedRange(rva - address, size, memory_size);
+  }
+
+  bool ContainsFile(std::uint64_t rva, std::uint64_t size) const {
+    return rva >= address && CheckedRange(rva - address, size, file_size);
+  }
+};
+
+struct Section {
+  std::size_t index = 0;
+  std::string name;
+  std::uint32_t type = 0;
+  std::uint64_t flags = 0;
+  std::uint64_t address = 0;
+  std::uint64_t offset = 0;
+  std::uint64_t size = 0;
+  std::size_t link = 0;
+  std::uint64_t entry_size = 0;
+};
+
+class ElfImage final {
+ public:
+  ~ElfImage() {
+    if (elf_ != nullptr) elf_end(elf_);
+    if (mapping_ != MAP_FAILED) munmap(mapping_, file_size_);
+    if (descriptor_ >= 0) close(descriptor_);
+  }
+
+  ElfImage(const ElfImage&) = delete;
+  ElfImage& operator=(const ElfImage&) = delete;
+  ElfImage() = default;
+
+  bool Open(const std::filesystem::path& path, std::string* error) {
+    path_ = path;
+    descriptor_ = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor_ < 0) {
+      *error = "cannot open ELF input: " + path.string();
+      return false;
+    }
+    struct stat metadata = {};
+    if (fstat(descriptor_, &metadata) != 0 || !S_ISREG(metadata.st_mode) ||
+        metadata.st_size < static_cast<off_t>(sizeof(Elf64_Ehdr)) ||
+        static_cast<std::uint64_t>(metadata.st_size) > kMaximumElfBytes) {
+      *error = "ELF input is not a bounded regular file";
+      return false;
+    }
+    file_size_ = static_cast<std::size_t>(metadata.st_size);
+    mapping_ =
+        mmap(nullptr, file_size_, PROT_READ, MAP_PRIVATE, descriptor_, 0);
+    if (mapping_ == MAP_FAILED) {
+      *error = "cannot map ELF input";
+      return false;
+    }
+    if (elf_version(EV_CURRENT) == EV_NONE) {
+      *error = "libelf cannot initialise";
+      return false;
+    }
+    elf_ = elf_begin(descriptor_, ELF_C_READ, nullptr);
+    GElf_Ehdr header{};
+    if (elf_ == nullptr || elf_kind(elf_) != ELF_K_ELF ||
+        gelf_getehdr(elf_, &header) == nullptr ||
+        gelf_getclass(elf_) != ELFCLASS64 || header.e_type != ET_DYN ||
+        header.e_machine != compat::kGuestElfMachine ||
+        header.e_version != EV_CURRENT ||
+        header.e_ident[EI_DATA] != ELFDATA2LSB) {
+      *error = "candidate must be a little-endian guest-abi ET_DYN ELF";
+      return false;
+    }
+    std::size_t program_count = 0;
+    if (elf_getphdrnum(elf_, &program_count) != 0 || program_count == 0) {
+      *error = "ELF has no program headers";
+      return false;
+    }
+    for (std::size_t index = 0; index < program_count; ++index) {
+      GElf_Phdr program{};
+      if (gelf_getphdr(elf_, index, &program) == nullptr) {
+        *error = "cannot inspect ELF program header";
+        return false;
+      }
+      if (program.p_type == PT_GNU_RELRO) {
+        if (program.p_memsz == 0 ||
+            program.p_vaddr > UINT64_MAX - program.p_memsz) {
+          *error = "ELF PT_GNU_RELRO range is invalid";
+          return false;
+        }
+        relro_ranges_.emplace_back(program.p_vaddr, program.p_memsz);
+      }
+      if (program.p_type != PT_LOAD) continue;
+      if (program.p_filesz > program.p_memsz ||
+          !CheckedRange(program.p_offset, program.p_filesz, file_size_)) {
+        *error = "ELF PT_LOAD exceeds file bounds";
+        return false;
+      }
+      segments_.push_back({program.p_offset, program.p_vaddr, program.p_filesz,
+                           program.p_memsz, program.p_flags});
+    }
+    if (segments_.empty()) {
+      *error = "ELF has no PT_LOAD segments";
+      return false;
+    }
+    std::size_t section_count = 0;
+    std::size_t names_index = 0;
+    if (elf_getshdrnum(elf_, &section_count) != 0 || section_count == 0 ||
+        elf_getshdrstrndx(elf_, &names_index) != 0) {
+      *error = "cannot enumerate ELF sections";
+      return false;
+    }
+    sections_.reserve(section_count);
+    for (std::size_t index = 0; index < section_count; ++index) {
+      Elf_Scn* section = elf_getscn(elf_, index);
+      GElf_Shdr header_value{};
+      if (section == nullptr ||
+          gelf_getshdr(section, &header_value) == nullptr) {
+        *error = "cannot inspect ELF section";
+        return false;
+      }
+      const char* name = elf_strptr(elf_, names_index, header_value.sh_name);
+      if (name == nullptr ||
+          (header_value.sh_type != SHT_NOBITS &&
+           !CheckedRange(header_value.sh_offset, header_value.sh_size,
+                         file_size_))) {
+        *error = "ELF section exceeds file bounds";
+        return false;
+      }
+      Section parsed{index,
+                     name,
+                     header_value.sh_type,
+                     header_value.sh_flags,
+                     header_value.sh_addr,
+                     header_value.sh_offset,
+                     header_value.sh_size,
+                     header_value.sh_link,
+                     header_value.sh_entsize};
+      if (!parsed.name.empty() &&
+          by_name_.find(parsed.name) != by_name_.end()) {
+        *error = "ELF contains duplicate section " + parsed.name;
+        return false;
+      }
+      if (!parsed.name.empty()) by_name_[parsed.name] = sections_.size();
+      sections_.push_back(std::move(parsed));
+    }
+    if (!ValidateSections(error)) return false;
+    const compat::BuildIdResult identity =
+        compat::ReadElfBuildId(path.string());
+    if (!identity || !IsLowerHex(identity.build_id, 40)) {
+      *error = identity ? "ELF Build ID is not 20 bytes" : identity.error;
+      return false;
+    }
+    build_id_ = identity.build_id;
+    sha256_ = HashRegularFile(path, error);
+    return error->empty();
+  }
+
+  const std::string& build_id() const { return build_id_; }
+  const std::string& sha256() const { return sha256_; }
+  std::size_t file_size() const { return file_size_; }
+
+  const Section* FindSection(std::string_view name) const {
+    const auto found = by_name_.find(std::string(name));
+    return found == by_name_.end() ? nullptr : &sections_[found->second];
+  }
+
+  std::string_view Bytes(std::uint64_t offset, std::uint64_t size,
+                         std::string* error) const {
+    if (!CheckedRange(offset, size, file_size_)) {
+      *error = "ELF byte range exceeds file bounds";
+      return {};
+    }
+    return {static_cast<const char*>(mapping_) + offset,
+            static_cast<std::size_t>(size)};
+  }
+
+  std::string_view SectionBytes(const Section& section,
+                                std::string* error) const {
+    return Bytes(section.offset, section.size, error);
+  }
+
+  const Segment* SegmentForMemory(std::uint64_t rva, std::uint64_t size) const {
+    const Segment* result = nullptr;
+    for (const Segment& segment : segments_) {
+      if (!segment.ContainsMemory(rva, size)) continue;
+      if (result != nullptr) return nullptr;
+      result = &segment;
+    }
+    return result;
+  }
+
+  bool RequireCode(std::uint64_t rva, std::uint64_t size,
+                   std::string* error) const {
+    const Segment* segment = SegmentForMemory(rva, size);
+    if (segment == nullptr || !segment->ContainsFile(rva, size) ||
+        (segment->flags & (PF_R | PF_X)) != (PF_R | PF_X) ||
+        (segment->flags & PF_W) != 0) {
+      *error = "RVA is not in a read/execute ELF segment";
+      return false;
+    }
+    return true;
+  }
+
+  bool RequireWritable(std::uint64_t rva, std::uint64_t size,
+                       std::string* error) const {
+    const Segment* segment = SegmentForMemory(rva, size);
+    if (segment == nullptr ||
+        (segment->flags & (PF_R | PF_W)) != (PF_R | PF_W) ||
+        (segment->flags & PF_X) != 0) {
+      *error = "RVA is not in a non-executable read/write ELF segment";
+      return false;
+    }
+    return true;
+  }
+
+  bool RequireRelro(std::uint64_t rva, std::uint64_t size,
+                    std::string* error) const {
+    std::size_t matches = 0;
+    for (const auto& [begin, length] : relro_ranges_) {
+      if (rva >= begin && CheckedRange(rva - begin, size, length)) ++matches;
+    }
+    if (matches != 1) {
+      *error = "RVA is not in a unique PT_GNU_RELRO range";
+      return false;
+    }
+    return true;
+  }
+
+  std::optional<std::uint64_t> OffsetForRva(std::uint64_t rva,
+                                            std::uint64_t size,
+                                            std::string* error) const {
+    const Segment* selected = nullptr;
+    for (const Segment& segment : segments_) {
+      if (!segment.ContainsFile(rva, size)) continue;
+      if (selected != nullptr) {
+        *error = "RVA has no unique file mapping";
+        return std::nullopt;
+      }
+      selected = &segment;
+    }
+    if (selected == nullptr) {
+      *error = "RVA has no file mapping";
+      return std::nullopt;
+    }
+    return selected->offset + rva - selected->address;
+  }
+
+  bool ValidateToolchain(std::string* error) const {
+    const Section* comment = FindSection(".comment");
+    if (comment == nullptr) {
+      *error = "ELF is missing .comment";
+      return false;
+    }
+    const std::string_view bytes = SectionBytes(*comment, error);
+    if (!error->empty()) return false;
+    for (const std::string_view marker : kToolchainMarkers) {
+      if (bytes.find(marker) == bytes.npos) {
+        *error = "ELF compiler/linker family differs from approved reference";
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool HasRequiredExports(std::string* error) const {
+    const Section* symbols = FindSection(".dynsym");
+    if (symbols == nullptr || symbols->link >= sections_.size()) {
+      *error = "ELF dynamic symbols are invalid";
+      return false;
+    }
+    const Section& strings = sections_[symbols->link];
+    if (strings.name != ".dynstr") {
+      *error = "ELF .dynsym does not reference .dynstr";
+      return false;
+    }
+    std::set<std::string> exported;
+    Elf_Scn* section = elf_getscn(elf_, symbols->index);
+    Elf_Data* data =
+        section == nullptr ? nullptr : elf_getdata(section, nullptr);
+    if (data == nullptr || symbols->entry_size == 0) {
+      *error = "cannot read ELF dynamic symbols";
+      return false;
+    }
+    const std::size_t count = symbols->size / symbols->entry_size;
+    for (std::size_t index = 0; index < count; ++index) {
+      GElf_Sym symbol{};
+      if (gelf_getsym(data, index, &symbol) == nullptr) {
+        *error = "cannot decode ELF dynamic symbol";
+        return false;
+      }
+      if (GELF_ST_TYPE(symbol.st_info) != STT_FUNC ||
+          (GELF_ST_BIND(symbol.st_info) != STB_GLOBAL &&
+           GELF_ST_BIND(symbol.st_info) != STB_WEAK) ||
+          symbol.st_shndx == SHN_UNDEF || symbol.st_name == 0) {
+        continue;
+      }
+      const char* name = elf_strptr(elf_, symbols->link, symbol.st_name);
+      if (name != nullptr) exported.insert(name);
+    }
+    for (const std::string_view required : kRequiredExports) {
+      if (exported.find(std::string(required)) == exported.end()) {
+        *error = "candidate is missing required JNI export: " +
+                 std::string(required);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  std::optional<std::vector<std::uint64_t>> InitArray(std::string* error) const;
+  std::optional<std::map<std::uint64_t, std::uint64_t>> RelativeRelocations(
+      std::string* error) const;
+
+ private:
+  bool ValidateSections(std::string* error) const {
+    const Section* text = FindSection(".text");
+    const Section* init = FindSection(".init_array");
+    const Section* rela = FindSection(".rela.dyn");
+    const Section* dynsym = FindSection(".dynsym");
+    const Section* dynstr = FindSection(".dynstr");
+    const Section* note = FindSection(".note.gnu.build-id");
+    const Section* comment = FindSection(".comment");
+    if (text == nullptr || text->type != SHT_PROGBITS ||
+        (text->flags & (SHF_ALLOC | SHF_EXECINSTR)) !=
+            (SHF_ALLOC | SHF_EXECINSTR) ||
+        (text->flags & SHF_WRITE) != 0 || init == nullptr ||
+        init->type != SHT_INIT_ARRAY ||
+        (init->flags & (SHF_ALLOC | SHF_WRITE)) != (SHF_ALLOC | SHF_WRITE) ||
+        (init->flags & SHF_EXECINSTR) != 0 || init->size == 0 ||
+        init->size % sizeof(std::uint64_t) != 0 ||
+        init->size / sizeof(std::uint64_t) > kMaximumInitArrayEntries ||
+        (init->entry_size != 0 && init->entry_size != sizeof(std::uint64_t)) ||
+        rela == nullptr || rela->type != kAndroidRelaSection ||
+        dynsym == nullptr || dynsym->type != SHT_DYNSYM || dynstr == nullptr ||
+        dynstr->type != SHT_STRTAB || note == nullptr ||
+        note->type != SHT_NOTE || comment == nullptr ||
+        comment->type != SHT_PROGBITS) {
+      *error = "ELF required section layout is unsupported";
+      return false;
+    }
+    return RequireCode(text->address, text->size, error) &&
+           RequireWritable(init->address, init->size, error);
+  }
+
+  std::filesystem::path path_;
+  int descriptor_ = -1;
+  std::size_t file_size_ = 0;
+  void* mapping_ = MAP_FAILED;
+  Elf* elf_ = nullptr;
+  std::vector<Segment> segments_;
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> relro_ranges_;
+  std::vector<Section> sections_;
+  std::map<std::string, std::size_t> by_name_;
+  std::string build_id_;
+  std::string sha256_;
+};
+
+class SlebReader final {
+ public:
+  explicit SlebReader(std::string_view bytes) : bytes_(bytes) {}
+
+  std::optional<std::int64_t> Pop(std::string* error) {
+    std::uint64_t value = 0;
+    unsigned shift = 0;
+    unsigned char byte = 0;
+    do {
+      if (position_ >= bytes_.size() || shift >= 70) {
+        *error = "invalid or truncated APS2 SLEB128 value";
+        return std::nullopt;
+      }
+      byte = static_cast<unsigned char>(bytes_[position_++]);
+      value |= static_cast<std::uint64_t>(byte & 0x7fU) << shift;
+      shift += 7;
+    } while ((byte & 0x80U) != 0);
+    if (shift < 64 && (byte & 0x40U) != 0) value |= ~0ULL << shift;
+    return static_cast<std::int64_t>(value);
+  }
+
+  bool at_end() const { return position_ == bytes_.size(); }
+
+ private:
+  std::string_view bytes_;
+  std::size_t position_ = 0;
+};
+
+struct Relocation {
+  std::uint64_t offset = 0;
+  std::uint64_t info = 0;
+  std::uint64_t addend = 0;
+};
+
+std::optional<std::vector<Relocation>> DecodeAps2(std::string_view encoded,
+                                                  std::string* error) {
+  if (encoded.size() < 4 || encoded.substr(0, 4) != "APS2") {
+    *error = ".rela.dyn does not use APS2 encoding";
+    return std::nullopt;
+  }
+  SlebReader reader(encoded.substr(4));
+  const auto count_value = reader.Pop(error);
+  const auto first_offset = reader.Pop(error);
+  if (!count_value.has_value() || !first_offset.has_value() ||
+      *count_value < 0 ||
+      static_cast<std::uint64_t>(*count_value) > kMaximumRelocations ||
+      *first_offset < 0) {
+    if (error->empty()) *error = "APS2 relocation header is invalid";
+    return std::nullopt;
+  }
+  const std::size_t count = static_cast<std::size_t>(*count_value);
+  std::int64_t relocation_offset = *first_offset;
+  std::int64_t relocation_info = 0;
+  std::int64_t relocation_addend = 0;
+  std::vector<Relocation> result;
+  result.reserve(count);
+  while (result.size() < count) {
+    const auto group_size_value = reader.Pop(error);
+    const auto flags_value = reader.Pop(error);
+    if (!group_size_value.has_value() || !flags_value.has_value() ||
+        *group_size_value <= 0 ||
+        static_cast<std::uint64_t>(*group_size_value) > count - result.size() ||
+        *flags_value < 0 || (*flags_value & ~0x0fLL) != 0) {
+      if (error->empty()) *error = "APS2 relocation group is invalid";
+      return std::nullopt;
+    }
+    const std::int64_t flags = *flags_value;
+    std::int64_t offset_delta = 0;
+    if ((flags & kGroupedByOffsetDelta) != 0) {
+      const auto value = reader.Pop(error);
+      if (!value.has_value()) return std::nullopt;
+      offset_delta = *value;
+    }
+    if ((flags & kGroupedByInfo) != 0) {
+      const auto value = reader.Pop(error);
+      if (!value.has_value()) return std::nullopt;
+      relocation_info = *value;
+    }
+    const std::int64_t addend_mode =
+        flags & (kGroupHasAddend | kGroupedByAddend);
+    if (addend_mode == (kGroupHasAddend | kGroupedByAddend)) {
+      const auto value = reader.Pop(error);
+      if (!value.has_value()) return std::nullopt;
+      relocation_addend += *value;
+    } else if (addend_mode != kGroupHasAddend) {
+      relocation_addend = 0;
+    }
+    for (std::int64_t index = 0; index < *group_size_value; ++index) {
+      if ((flags & kGroupedByOffsetDelta) != 0) {
+        relocation_offset += offset_delta;
+      } else {
+        const auto value = reader.Pop(error);
+        if (!value.has_value()) return std::nullopt;
+        relocation_offset += *value;
+      }
+      if ((flags & kGroupedByInfo) == 0) {
+        const auto value = reader.Pop(error);
+        if (!value.has_value()) return std::nullopt;
+        relocation_info = *value;
+      }
+      if (addend_mode == kGroupHasAddend) {
+        const auto value = reader.Pop(error);
+        if (!value.has_value()) return std::nullopt;
+        relocation_addend += *value;
+      }
+      if (relocation_offset < 0 || relocation_info < 0 ||
+          relocation_addend < 0) {
+        *error = "APS2 relocation exceeds unsigned bounds";
+        return std::nullopt;
+      }
+      result.push_back({static_cast<std::uint64_t>(relocation_offset),
+                        static_cast<std::uint64_t>(relocation_info),
+                        static_cast<std::uint64_t>(relocation_addend)});
+    }
+  }
+  if (!reader.at_end()) {
+    *error = "APS2 relocation stream contains trailing bytes";
+    return std::nullopt;
+  }
+  return result;
+}
+
+std::optional<std::map<std::uint64_t, std::uint64_t>>
+ElfImage::RelativeRelocations(std::string* error) const {
+  const Section* rela = FindSection(".rela.dyn");
+  if (rela == nullptr) {
+    *error = "ELF relative relocation metadata is unavailable";
+    return std::nullopt;
+  }
+  const auto decoded = DecodeAps2(SectionBytes(*rela, error), error);
+  if (!decoded.has_value()) return std::nullopt;
+  std::map<std::uint64_t, std::uint64_t> result;
+  for (const Relocation& relocation : *decoded) {
+    if ((relocation.info & 0xffffffffULL) != kRelativeRelocation ||
+        (relocation.info >> 32U) != 0) {
+      continue;
+    }
+    if (!result.emplace(relocation.offset, relocation.addend).second) {
+      *error = "ELF contains duplicate relative relocations";
+      return std::nullopt;
+    }
+  }
+  return result;
+}
+
+std::optional<std::vector<std::uint64_t>> ElfImage::InitArray(
+    std::string* error) const {
+  const Section* init = FindSection(".init_array");
+  const Section* rela = FindSection(".rela.dyn");
+  if (init == nullptr || rela == nullptr) {
+    *error = "ELF init-array metadata is unavailable";
+    return std::nullopt;
+  }
+  const auto decoded = DecodeAps2(SectionBytes(*rela, error), error);
+  if (!decoded.has_value()) return std::nullopt;
+  const std::size_t count = init->size / sizeof(std::uint64_t);
+  std::vector<std::optional<std::uint64_t>> selected(count);
+  for (const Relocation& relocation : *decoded) {
+    if (relocation.offset < init->address ||
+        relocation.offset >= init->address + init->size) {
+      continue;
+    }
+    if (relocation.offset % sizeof(std::uint64_t) != 0 ||
+        (relocation.info & 0xffffffffULL) != kRelativeRelocation ||
+        (relocation.info >> 32U) != 0) {
+      *error = ".init_array contains a non-relative relocation";
+      return std::nullopt;
+    }
+    const std::size_t index = static_cast<std::size_t>(
+        (relocation.offset - init->address) / sizeof(std::uint64_t));
+    if (selected[index].has_value() ||
+        !RequireCode(relocation.addend, 1, error)) {
+      if (error->empty()) *error = ".init_array relocation is duplicated";
+      return std::nullopt;
+    }
+    selected[index] = relocation.addend;
+  }
+  std::vector<std::uint64_t> result;
+  result.reserve(count);
+  for (const auto& entry : selected) {
+    if (!entry.has_value()) {
+      *error = ".init_array is not fully covered by APS2 relocations";
+      return std::nullopt;
+    }
+    result.push_back(*entry);
+  }
+  return result;
+}
+
+std::optional<std::uint64_t> ParseRva(const Json& value,
+                                      std::string_view description,
+                                      std::string* error) {
+  if (!value.is_string()) {
+    *error = std::string(description) + " must be a nonzero hex RVA";
+    return std::nullopt;
+  }
+  const std::string encoded = value.get<std::string>();
+  if (encoded.size() < 3 || encoded.substr(0, 2) != "0x" || encoded[2] == '0' ||
+      !std::all_of(encoded.begin() + 2, encoded.end(),
+                   [](unsigned char character) {
+                     return (character >= '0' && character <= '9') ||
+                            (character >= 'a' && character <= 'f');
+                   })) {
+    *error = std::string(description) + " must be a canonical nonzero hex RVA";
+    return std::nullopt;
+  }
+  std::uint64_t result = 0;
+  for (const unsigned char character : std::string_view(encoded).substr(2)) {
+    const unsigned value =
+        character <= '9' ? character - '0' : character - 'a' + 10;
+    if (result > (UINT64_MAX - value) / 16U) {
+      *error = std::string(description) + " RVA exceeds 64 bits";
+      return std::nullopt;
+    }
+    result = result * 16U + value;
+  }
+  return result;
+}
+
+std::string FormatRva(std::uint64_t value) {
+  constexpr char kDigits[] = "0123456789abcdef";
+  std::string reversed;
+  while (value != 0) {
+    reversed.push_back(kDigits[value & 0xfU]);
+    value >>= 4U;
+  }
+  std::reverse(reversed.begin(), reversed.end());
+  return "0x" + reversed;
+}
+
+struct Operand {
+  enum class Type { kRegister, kImmediate, kMemory };
+  Type type = Type::kRegister;
+  std::string register_name;
+  std::string segment_name;
+  std::string base_name;
+  std::string index_name;
+  int scale = 0;
+  std::int64_t value = 0;
+  std::uint8_t size = 0;
+  bool rip_relative = false;
+};
+
+struct Instruction {
+  std::uint64_t address = 0;
+  std::uint16_t size = 0;
+  std::string mnemonic;
+  std::vector<Operand> operands;
+  std::uint8_t immediate_offset = 0;
+  std::uint8_t immediate_size = 0;
+  std::uint8_t displacement_offset = 0;
+  std::uint8_t displacement_size = 0;
+  bool control_flow = false;
+  bool returns = false;
+};
+
+class Disassembler final {
+ public:
+  ~Disassembler() {
+    if (handle_ != 0) cs_close(&handle_);
+  }
+
+  bool Open(std::string* error) {
+    int major = 0;
+    int minor = 0;
+    cs_version(&major, &minor);
+    if (major != 5 || cs_open(CS_ARCH_X86, CS_MODE_64, &handle_) != CS_ERR_OK ||
+        cs_option(handle_, CS_OPT_DETAIL, CS_OPT_ON) != CS_ERR_OK) {
+      *error = "native Capstone major version 5 is required";
+      return false;
+    }
+    return true;
+  }
+
+  std::optional<std::vector<Instruction>> Decode(const ElfImage& image,
+                                                 std::uint64_t rva,
+                                                 std::size_t count,
+                                                 std::size_t maximum_bytes,
+                                                 std::string* error) const {
+    if (count == 0 || count > 256 || !image.RequireCode(rva, 1, error)) {
+      if (error->empty()) *error = "signature instruction count is invalid";
+      return std::nullopt;
+    }
+    const auto offset = image.OffsetForRva(rva, 1, error);
+    if (!offset.has_value()) return std::nullopt;
+    const std::size_t available =
+        std::min(maximum_bytes, image.file_size() - *offset);
+    const std::string_view bytes = image.Bytes(*offset, available, error);
+    if (!error->empty()) return std::nullopt;
+    cs_insn* decoded = nullptr;
+    const std::size_t decoded_count =
+        cs_disasm(handle_, reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                  bytes.size(), rva, count, &decoded);
+    if (decoded_count != count || decoded == nullptr) {
+      if (decoded != nullptr) cs_free(decoded, decoded_count);
+      *error = "cannot decode normalized instruction signature";
+      return std::nullopt;
+    }
+    std::vector<Instruction> result;
+    result.reserve(count);
+    std::uint64_t expected_address = rva;
+    for (std::size_t index = 0; index < count; ++index) {
+      const cs_insn& source = decoded[index];
+      if (source.address != expected_address || source.size == 0 ||
+          source.detail == nullptr) {
+        cs_free(decoded, decoded_count);
+        *error = "instruction signature is not contiguous";
+        return std::nullopt;
+      }
+      Instruction target;
+      target.address = source.address;
+      target.size = source.size;
+      target.mnemonic = source.mnemonic;
+      target.control_flow = cs_insn_group(handle_, &source, CS_GRP_CALL) ||
+                            cs_insn_group(handle_, &source, CS_GRP_JUMP);
+      target.returns = cs_insn_group(handle_, &source, CS_GRP_RET);
+      const cs_x86& x86 = source.detail->x86;
+      target.immediate_offset = x86.encoding.imm_offset;
+      target.immediate_size = x86.encoding.imm_size;
+      target.displacement_offset = x86.encoding.disp_offset;
+      target.displacement_size = x86.encoding.disp_size;
+      for (std::uint8_t operand_index = 0; operand_index < x86.op_count;
+           ++operand_index) {
+        const cs_x86_op& source_operand = x86.operands[operand_index];
+        Operand operand;
+        operand.size = source_operand.size;
+        if (source_operand.type == X86_OP_REG) {
+          operand.type = Operand::Type::kRegister;
+          const char* name = cs_reg_name(handle_, source_operand.reg);
+          operand.register_name = name == nullptr ? "" : name;
+        } else if (source_operand.type == X86_OP_IMM) {
+          operand.type = Operand::Type::kImmediate;
+          operand.value = source_operand.imm;
+        } else if (source_operand.type == X86_OP_MEM) {
+          operand.type = Operand::Type::kMemory;
+          const x86_op_mem& memory = source_operand.mem;
+          const char* segment = cs_reg_name(handle_, memory.segment);
+          const char* base = cs_reg_name(handle_, memory.base);
+          const char* memory_index = cs_reg_name(handle_, memory.index);
+          operand.segment_name = segment == nullptr ? "" : segment;
+          operand.base_name = base == nullptr ? "" : base;
+          operand.index_name = memory_index == nullptr ? "" : memory_index;
+          operand.scale = memory.scale;
+          operand.value = memory.disp;
+          operand.rip_relative = memory.base == X86_REG_RIP;
+        } else {
+          cs_free(decoded, decoded_count);
+          *error = "signature contains an unsupported x86 operand";
+          return std::nullopt;
+        }
+        target.operands.push_back(std::move(operand));
+      }
+      result.push_back(std::move(target));
+      expected_address += source.size;
+    }
+    cs_free(decoded, decoded_count);
+    if (!image.RequireCode(rva, expected_address - rva, error)) {
+      return std::nullopt;
+    }
+    return result;
+  }
+
+ private:
+  csh handle_ = 0;
+};
+
+struct SignatureSpec {
+  std::string name;
+  std::uint64_t reference_rva = 0;
+  std::size_t instruction_count = 0;
+  bool registry_size_may_change = false;
+  std::size_t minimum_anchor_bytes = 6;
+  std::array<std::size_t, 2> registry_size_indices = {8, 12};
+};
+
+struct SignatureMatch {
+  std::uint64_t rva = 0;
+  std::vector<Instruction> reference;
+  std::vector<Instruction> candidate;
+};
+
+bool SameSemanticOperand(const Operand& left, const Operand& right,
+                         bool control_flow, bool wildcard_size) {
+  if (left.type != right.type || left.size != right.size) return false;
+  if (left.type == Operand::Type::kRegister) {
+    return left.register_name == right.register_name;
+  }
+  if (left.type == Operand::Type::kImmediate) {
+    return control_flow || wildcard_size || left.value == right.value;
+  }
+  return left.segment_name == right.segment_name &&
+         left.base_name == right.base_name &&
+         left.index_name == right.index_name && left.scale == right.scale &&
+         left.rip_relative == right.rip_relative &&
+         (left.rip_relative || left.value == right.value);
+}
+
+bool ValidateSemantics(const std::vector<Instruction>& reference,
+                       const std::vector<Instruction>& candidate,
+                       const SignatureSpec& spec, std::string* error) {
+  if (reference.size() != candidate.size()) {
+    *error = "normalized signature instruction count changed";
+    return false;
+  }
+  for (std::size_t index = 0; index < reference.size(); ++index) {
+    const Instruction& left = reference[index];
+    const Instruction& right = candidate[index];
+    const bool wildcard =
+        spec.registry_size_may_change &&
+        (index == spec.registry_size_indices[0] ||
+         index == spec.registry_size_indices[1]);
+    if (left.mnemonic != right.mnemonic ||
+        left.operands.size() != right.operands.size()) {
+      *error = "normalized instruction semantics changed at index " +
+               std::to_string(index);
+      return false;
+    }
+    for (std::size_t operand = 0; operand < left.operands.size(); ++operand) {
+      if (!SameSemanticOperand(left.operands[operand], right.operands[operand],
+                               left.control_flow, wildcard)) {
+        *error = "normalized instruction operand changed at index " +
+                 std::to_string(index);
+        return false;
+      }
+    }
+  }
+  if (spec.registry_size_may_change) {
+    std::array<std::int64_t, 2> sizes{};
+    for (std::size_t output = 0; output < sizes.size(); ++output) {
+      const std::size_t index = spec.registry_size_indices[output];
+      if (index >= candidate.size()) {
+        *error = "registry initializer size index is outside its signature";
+        return false;
+      }
+      const Instruction& instruction = candidate[index];
+      if (instruction.operands.size() != 2 ||
+          instruction.operands[1].type != Operand::Type::kImmediate) {
+        *error = "registry initializer size operands changed";
+        return false;
+      }
+      sizes[output] = instruction.operands[1].value;
+    }
+    if (sizes[0] != sizes[1] || sizes[0] < 0x100 || sizes[0] > 0x1000 ||
+        sizes[0] % 8 != 0) {
+      *error = "registry initializer object size is inconsistent";
+      return false;
+    }
+  }
+  return true;
+}
+
+std::optional<std::vector<SignatureMatch>> FindSignatureMatches(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    bool allow_multiple_candidates, std::string* error) {
+  const auto reference_instructions = disassembler.Decode(
+      reference, spec.reference_rva, spec.instruction_count, 4096, error);
+  if (!reference_instructions.has_value()) return std::nullopt;
+  const std::uint64_t signature_size = reference_instructions->back().address +
+                                       reference_instructions->back().size -
+                                       spec.reference_rva;
+  const auto reference_offset =
+      reference.OffsetForRva(spec.reference_rva, signature_size, error);
+  if (!reference_offset.has_value()) return std::nullopt;
+  const std::string_view encoded =
+      reference.Bytes(*reference_offset, signature_size, error);
+  if (!error->empty()) return std::nullopt;
+  std::vector<bool> mask(encoded.size(), true);
+  for (const Instruction& instruction : *reference_instructions) {
+    const std::size_t base =
+        static_cast<std::size_t>(instruction.address - spec.reference_rva);
+    for (const auto [offset, size] :
+         {std::pair{instruction.immediate_offset, instruction.immediate_size},
+          std::pair{instruction.displacement_offset,
+                    instruction.displacement_size}}) {
+      if (size == 0) continue;
+      if (offset == 0 ||
+          static_cast<std::size_t>(offset) + size > instruction.size) {
+        *error = "Capstone returned an invalid operand encoding range";
+        return std::nullopt;
+      }
+      for (std::size_t index = offset; index < offset + size; ++index) {
+        mask[base + index] = false;
+      }
+    }
+  }
+  std::size_t anchor_offset = 0;
+  std::size_t anchor_size = 0;
+  std::size_t run_start = 0;
+  bool running = false;
+  for (std::size_t index = 0; index <= mask.size(); ++index) {
+    const bool enabled = index < mask.size() && mask[index];
+    if (enabled && !running) {
+      run_start = index;
+      running = true;
+    } else if (!enabled && running) {
+      if (index - run_start > anchor_size) {
+        anchor_offset = run_start;
+        anchor_size = index - run_start;
+      }
+      running = false;
+    }
+  }
+  if (anchor_size < spec.minimum_anchor_bytes) {
+    *error = "normalized signature has no selective fixed anchor";
+    return std::nullopt;
+  }
+  const Section* text = candidate.FindSection(".text");
+  if (text == nullptr) {
+    *error = "candidate has no .text section";
+    return std::nullopt;
+  }
+  const std::string_view candidate_text = candidate.SectionBytes(*text, error);
+  if (!error->empty()) return std::nullopt;
+  const std::string_view anchor = encoded.substr(anchor_offset, anchor_size);
+  std::vector<std::size_t> matches;
+  auto search = candidate_text.begin();
+  while (search != candidate_text.end()) {
+    const auto found =
+        std::search(search, candidate_text.end(), anchor.begin(), anchor.end());
+    if (found == candidate_text.end()) break;
+    const std::size_t anchor_position =
+        static_cast<std::size_t>(found - candidate_text.begin());
+    if (anchor_position >= anchor_offset) {
+      const std::size_t signature_offset = anchor_position - anchor_offset;
+      if (CheckedRange(signature_offset, encoded.size(),
+                       candidate_text.size())) {
+        bool same = true;
+        for (std::size_t index = 0; index < encoded.size(); ++index) {
+          if (mask[index] &&
+              candidate_text[signature_offset + index] != encoded[index]) {
+            same = false;
+            break;
+          }
+        }
+        if (same) matches.push_back(signature_offset);
+      }
+    }
+    search = found + 1;
+  }
+  if (matches.empty()) {
+    *error = "signature " + spec.name + " matched " +
+             "0 candidate locations";
+    return std::nullopt;
+  }
+  std::vector<SignatureMatch> semantic_matches;
+  std::string first_semantic_error;
+  for (const std::size_t match : matches) {
+    const std::uint64_t match_rva = text->address + match;
+    std::string semantic_error;
+    const auto candidate_instructions = disassembler.Decode(
+        candidate, match_rva, spec.instruction_count, 4096, &semantic_error);
+    if (!candidate_instructions.has_value() ||
+        !ValidateSemantics(*reference_instructions, *candidate_instructions,
+                           spec, &semantic_error)) {
+      if (first_semantic_error.empty()) {
+        first_semantic_error = std::move(semantic_error);
+      }
+      continue;
+    }
+    semantic_matches.push_back(SignatureMatch{
+        match_rva, *reference_instructions, *candidate_instructions});
+  }
+  if (semantic_matches.empty() && matches.size() == 1U &&
+      !first_semantic_error.empty()) {
+    *error = std::move(first_semantic_error);
+    return std::nullopt;
+  }
+  if (!allow_multiple_candidates && semantic_matches.size() != 1U) {
+    *error = "signature " + spec.name + " matched " +
+             std::to_string(semantic_matches.size()) +
+             " semantic candidate locations";
+    return std::nullopt;
+  }
+  return semantic_matches;
+}
+
+std::optional<SignatureMatch> FindSignatureMatch(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    std::string* error) {
+  auto matches =
+      FindSignatureMatches(reference, candidate, disassembler, spec, false,
+                           error);
+  if (!matches.has_value()) return std::nullopt;
+  if (matches->size() != 1U) {
+    *error = "signature " + spec.name + " matched " +
+             std::to_string(matches->size()) + " candidate locations";
+    return std::nullopt;
+  }
+  return std::move(matches->front());
+}
+
+std::optional<SignatureMatch> FindUniqueSemanticSignatureMatch(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    std::string* error) {
+  auto matches = FindSignatureMatches(reference, candidate, disassembler, spec,
+                                      true, error);
+  if (!matches.has_value()) return std::nullopt;
+  if (matches->size() != 1U) {
+    *error = "signature " + spec.name + " matched " +
+             std::to_string(matches->size()) +
+             " semantic candidate locations";
+    return std::nullopt;
+  }
+  return std::move(matches->front());
+}
+
+struct FmodRuntimeAnchors {
+  std::uint64_t vtable = 0;
+  std::uint64_t string_constructor = 0;
+  std::uint64_t count_method = 0;
+  std::uint64_t info_method = 0;
+  std::uint64_t current_method = 0;
+  std::uint64_t select_method = 0;
+  int layout_version = 1;
+  std::array<std::uint64_t, 4> input_methods{};
+  std::array<std::size_t, 4> input_indexes() const {
+    return layout_version == 2 ? std::array<std::size_t, 4>{9, 10, 12, 18}
+                               : std::array<std::size_t, 4>{8, 9, 10, 16};
+  }
+
+  std::size_t current_index() const { return layout_version == 2 ? 8 : 7; }
+  std::size_t select_index() const { return layout_version == 2 ? 19 : 17; }
+
+  bool operator==(const FmodRuntimeAnchors& other) const {
+    return vtable == other.vtable &&
+           string_constructor == other.string_constructor &&
+           count_method == other.count_method &&
+           info_method == other.info_method &&
+           current_method == other.current_method &&
+           select_method == other.select_method &&
+           layout_version == other.layout_version &&
+           input_methods == other.input_methods;
+  }
+};
+
+struct RuntimeCompatibilityAnchors {
+  std::optional<std::uint64_t> fullscreen_setter;
+  std::optional<FmodRuntimeAnchors> fmod;
+};
+
+std::optional<RuntimeCompatibilityAnchors> LoadRuntimeCompatibilityAnchors(
+    const std::vector<std::filesystem::path>& paths,
+    std::string_view reference_build_id, std::string* error) {
+  RuntimeCompatibilityAnchors result;
+  for (const std::filesystem::path& path : paths) {
+    const auto document = ReadJson(path, error);
+    if (!document.has_value()) return std::nullopt;
+    if (document->value("schema_version", 0) != 1 ||
+        !document->contains("profiles") ||
+        !(*document)["profiles"].is_array()) {
+      *error = "reference compatibility manifest schema is unsupported";
+      return std::nullopt;
+    }
+    for (const Json& profile : (*document)["profiles"]) {
+      if (!profile.is_object() ||
+          profile.value("elf_build_id", "") != reference_build_id) {
+        continue;
+      }
+      if (profile.contains("user_game_settings_fullscreen_setter_rva")) {
+        const auto value = ParseRva(
+            profile["user_game_settings_fullscreen_setter_rva"],
+            "reference fullscreen setter", error);
+        if (!value.has_value()) return std::nullopt;
+        if (result.fullscreen_setter.has_value() &&
+            *result.fullscreen_setter != *value) {
+          *error = "reference compatibility manifests disagree on fullscreen "
+                   "setter";
+          return std::nullopt;
+        }
+        result.fullscreen_setter = *value;
+      }
+      if (!profile.contains("fmod_output_device_bridge")) continue;
+      const Json& bridge = profile["fmod_output_device_bridge"];
+      constexpr std::array<std::string_view, 6> kFields = {
+          "vtable_rva",       "string_constructor_rva", "count_method_rva",
+          "info_method_rva", "current_method_rva",     "select_method_rva",
+      };
+      constexpr std::array<std::string_view, 4> input_fields = {
+          "input_count_method_rva", "input_info_method_rva",
+          "input_current_method_rva", "input_select_method_rva"};
+      const bool has_input = bridge.contains(input_fields[0]);
+      const bool has_layout = bridge.contains("vtable_layout_version");
+      if (!bridge.is_object() ||
+          bridge.size() !=
+              kFields.size() + (has_layout ? 1U : 0U) + (has_input ? 4U : 0U) ||
+          !profile.value("allow_host_abi_bridges", false)) {
+        *error = "reference FMOD output-device profile is incomplete";
+        return std::nullopt;
+      }
+      std::array<std::uint64_t, kFields.size()> values{};
+      for (std::size_t index = 0; index < kFields.size(); ++index) {
+        if (!bridge.contains(kFields[index])) {
+          *error = "reference FMOD output-device profile is incomplete";
+          return std::nullopt;
+        }
+        const auto value =
+            ParseRva(bridge[kFields[index]], kFields[index], error);
+        if (!value.has_value()) return std::nullopt;
+        values[index] = *value;
+      }
+      int layout = 1;
+      if (has_layout) {
+        const Json& value = bridge["vtable_layout_version"];
+        if (!value.is_number_integer() || (value != 1 && value != 2)) {
+          *error = "reference FMOD vtable layout is unsupported";
+          return std::nullopt;
+        }
+        layout = value.get<int>();
+      }
+      FmodRuntimeAnchors discovered = {values[0], values[1], values[2],
+                                       values[3], values[4], values[5],
+                                       layout};
+      if (has_input) {
+        for (std::size_t i = 0; i < input_fields.size(); ++i) {
+          if (!bridge.contains(input_fields[i])) {
+            *error = "reference FMOD input profile is incomplete";
+            return std::nullopt;
+          }
+          auto value =
+              ParseRva(bridge[input_fields[i]], input_fields[i], error);
+          if (!value)
+            return std::nullopt;
+          discovered.input_methods[i] = *value;
+        }
+      }
+      auto previous = result.fmod;
+      if (previous) {
+        if (previous->input_methods[0] == 0)
+          previous->input_methods = discovered.input_methods;
+        if (discovered.input_methods[0] == 0)
+          discovered.input_methods = previous->input_methods;
+      }
+      if (previous.has_value() && !(*previous == discovered)) {
+        *error =
+            "reference compatibility manifests disagree on FMOD anchors";
+        return std::nullopt;
+      }
+      result.fmod = discovered;
+    }
+  }
+  return result;
+}
+
+bool ContainsBytes(std::string_view bytes, std::string_view expected,
+                   std::size_t limit = std::string_view::npos) {
+  if (limit < bytes.size()) bytes = bytes.substr(0, limit);
+  return !expected.empty() && bytes.find(expected) != bytes.npos;
+}
+
+bool HasFullscreenSetterContract(const ElfImage& image, std::uint64_t rva) {
+  constexpr std::size_t kContractBytes = 96;
+  std::string local_error;
+  if (!image.RequireCode(rva, kContractBytes, &local_error)) return false;
+  const auto offset = image.OffsetForRva(rva, kContractBytes, &local_error);
+  if (!offset.has_value()) return false;
+  const std::string_view code =
+      image.Bytes(*offset, kContractBytes, &local_error);
+  if (!local_error.empty() || code.substr(0, 4) != "\x55\x48\x89\xe5" ||
+      !ContainsBytes(code, "\x89\xf3", 24)) {
+    return false;
+  }
+  return (ContainsBytes(
+              code, std::string_view("\x38\x98\x59\x01\x00\x00", 6)) &&
+          ContainsBytes(
+              code, std::string_view("\x88\x98\x59\x01\x00\x00", 6))) ||
+         (ContainsBytes(
+              code, std::string_view("\x38\x98\x61\x01\x00\x00", 6)) &&
+          ContainsBytes(
+              code, std::string_view("\x88\x98\x61\x01\x00\x00", 6)));
+}
+
+bool HasFmodStringConstructorContract(const ElfImage& image,
+                                      std::uint64_t rva) {
+  constexpr std::string_view kExpected =
+      "\x55\x48\x89\xe5\x41\x57\x41\x56\x41\x54\x53\x48"
+      "\x89\xd3\x49\x89\xf6\x49\x89\xff\x48\x83\xfa\x16";
+  std::string local_error;
+  if (!image.RequireCode(rva, kExpected.size(), &local_error)) return false;
+  const auto offset = image.OffsetForRva(rva, kExpected.size(), &local_error);
+  return offset.has_value() &&
+         image.Bytes(*offset, kExpected.size(), &local_error) == kExpected &&
+         local_error.empty();
+}
+
+bool HasFmodInputMethodContracts(const ElfImage& image,
+                                 const std::array<std::uint64_t, 4>& methods) {
+  for (std::size_t i = 0; i < methods.size(); ++i) {
+    const std::size_t size = compat::kFmodInputMethodContracts[i].size();
+    std::string local_error;
+    if (methods[i] == 0 || !image.RequireCode(methods[i], size, &local_error)) {
+      return false;
+    }
+    const auto offset = image.OffsetForRva(methods[i], size, &local_error);
+    if (!offset.has_value() ||
+        !compat::HasFmodInputMethodContract(
+            i, image.Bytes(*offset, size, &local_error)) ||
+        !local_error.empty()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool HasFmodDeviceListsSelectContract(const ElfImage& image,
+                                      std::uint64_t rva) {
+  constexpr std::size_t kSize =
+      compat::kFmodDeviceListsSelectContractMaximumSize;
+  std::string local_error;
+  if (!image.RequireCode(rva, kSize, &local_error)) return false;
+  const auto offset = image.OffsetForRva(rva, kSize, &local_error);
+  return offset.has_value() &&
+         compat::HasFmodDeviceListsSelectContract(
+             image.Bytes(*offset, kSize, &local_error)) &&
+         local_error.empty();
+}
+
+std::string VtableClassName(
+    const ElfImage& image,
+    const std::map<std::uint64_t, std::uint64_t>& relocations,
+    std::uint64_t vtable) {
+  constexpr std::uint64_t kMaximumNameBytes = 512;
+  if (vtable < 8) return {};
+  const auto typeinfo = relocations.find(vtable - 8);
+  if (typeinfo == relocations.end()) return {};
+  const auto name = relocations.find(typeinfo->second + 8);
+  if (name == relocations.end()) return {};
+  std::string local_error;
+  const auto offset = image.OffsetForRva(name->second, 1, &local_error);
+  if (!offset.has_value()) return {};
+  const std::string_view bytes = image.Bytes(
+      *offset, std::min(kMaximumNameBytes, image.file_size() - *offset),
+      &local_error);
+  const std::size_t end = bytes.find('\0');
+  if (!local_error.empty() || end == std::string_view::npos || end == 0) {
+    return {};
+  }
+  return std::string(bytes.substr(0, end));
+}
+
+std::optional<Json> DeriveRuntimeCompatibility(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler,
+    const RuntimeCompatibilityAnchors& source, std::string* error) {
+  Json result = Json::object();
+  if (source.fullscreen_setter.has_value()) {
+    if (!HasFullscreenSetterContract(reference, *source.fullscreen_setter)) {
+      *error = "reference fullscreen setter contract changed";
+      return std::nullopt;
+    }
+    const auto setter = FindUniqueSemanticSignatureMatch(
+        reference, candidate, disassembler,
+        {"fullscreen-setter", *source.fullscreen_setter, 32, false, 3},
+        error);
+    if (!setter.has_value()) return std::nullopt;
+    if (!HasFullscreenSetterContract(candidate, setter->rva)) {
+      *error = "candidate fullscreen setter contract changed";
+      return std::nullopt;
+    }
+    result["user_game_settings_fullscreen_setter_rva"] =
+        FormatRva(setter->rva);
+  }
+  if (!source.fmod.has_value()) return result;
+
+  constexpr std::size_t kCountIndex = 5;
+  constexpr std::size_t kInfoIndex = 6;
+  FmodRuntimeAnchors old = *source.fmod;
+  if (!reference.RequireRelro(old.vtable, (old.select_index() + 1) * 8, error)) {
+    return std::nullopt;
+  }
+  const auto reference_relocations = reference.RelativeRelocations(error);
+  if (!reference_relocations.has_value()) return std::nullopt;
+  for (const auto [index, method] :
+       {std::pair{kCountIndex, old.count_method},
+        std::pair{kInfoIndex, old.info_method},
+        std::pair{old.current_index(), old.current_method},
+        std::pair{old.select_index(), old.select_method}}) {
+    const auto found = reference_relocations->find(old.vtable + index * 8);
+    if (found == reference_relocations->end() || found->second != method ||
+        !reference.RequireCode(method, 1, error)) {
+      if (error->empty()) {
+        *error = "reference FMOD vtable does not match its methods";
+      }
+      return std::nullopt;
+    }
+  }
+  if (!HasFmodStringConstructorContract(reference, old.string_constructor)) {
+    *error = "reference FMOD string constructor contract changed";
+    return std::nullopt;
+  }
+  // older profiles forgot the mic half of the vtable, the reference still has it
+  if (old.input_methods[0] == 0 && old.layout_version == 2) {
+    std::array<std::uint64_t, 4> methods{};
+    const auto slots = old.input_indexes();
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+      const auto found = reference_relocations->find(old.vtable + slots[i] * 8);
+      methods[i] = found != reference_relocations->end() ? found->second : 0;
+    }
+    if (HasFmodInputMethodContracts(reference, methods)) {
+      old.input_methods = methods;
+    }
+  }
+  const auto string_constructor = FindUniqueSemanticSignatureMatch(
+      reference, candidate, disassembler,
+      {"fmod-string-constructor", old.string_constructor, 32, false, 3},
+      error);
+  // 2.743 dropped the device-name branch, so find the vtable from the count method
+  std::string info_error;
+  const auto info_method = FindUniqueSemanticSignatureMatch(
+      reference, candidate, disassembler,
+      {"fmod-output-info", old.info_method, 18, false, 3}, &info_error);
+  std::string select_error;
+  const auto select_method = FindUniqueSemanticSignatureMatch(
+      reference, candidate, disassembler,
+      {"fmod-output-select", old.select_method, 18, false, 3}, &select_error);
+  if (!string_constructor.has_value()) return std::nullopt;
+  const std::string reference_class =
+      info_method.has_value()
+          ? std::string()
+          : VtableClassName(reference, *reference_relocations, old.vtable);
+  if (!info_method.has_value() && reference_class.empty()) {
+    *error = info_error + "; reference FMOD vtable has no RTTI class name";
+    return std::nullopt;
+  }
+  const auto count_matches = FindSignatureMatches(
+      reference, candidate, disassembler,
+      {"fmod-output-count", old.count_method, 24, false, 3}, true, error);
+  const auto current_matches = FindSignatureMatches(
+      reference, candidate, disassembler,
+      {"fmod-output-current", old.current_method, 24, false, 3}, true,
+      error);
+  if (!count_matches.has_value() || !current_matches.has_value()) {
+    return std::nullopt;
+  }
+  std::set<std::uint64_t> count_candidates;
+  std::set<std::uint64_t> current_candidates;
+  for (const SignatureMatch& match : *count_matches)
+    count_candidates.insert(match.rva);
+  for (const SignatureMatch& match : *current_matches)
+    current_candidates.insert(match.rva);
+  if (count_candidates.empty() || current_candidates.empty()) {
+    *error = "FMOD count/current method signatures have no candidates";
+    return std::nullopt;
+  }
+  const auto relocations = candidate.RelativeRelocations(error);
+  if (!relocations.has_value()) return std::nullopt;
+  std::vector<FmodRuntimeAnchors> candidates;
+  const std::size_t anchor_index =
+      info_method.has_value() ? kInfoIndex : kCountIndex;
+  for (const auto& [offset, addend] : *relocations) {
+    if (offset < anchor_index * 8 ||
+        (info_method.has_value()
+             ? addend != info_method->rva
+             : count_candidates.find(addend) == count_candidates.end())) {
+      continue;
+    }
+    const std::uint64_t vtable = offset - anchor_index * 8;
+    const auto info = relocations->find(vtable + kInfoIndex * 8);
+    std::string code_error;
+    if (info == relocations->end() ||
+        !candidate.RequireCode(info->second, 1, &code_error) ||
+        (!info_method.has_value() &&
+         VtableClassName(candidate, *relocations, vtable) != reference_class)) {
+      continue;
+    }
+    const auto count = relocations->find(vtable + kCountIndex * 8);
+    for (const int layout : {1, 2}) {
+      FmodRuntimeAnchors derived;
+      derived.layout_version = layout;
+      const auto current = relocations->find(vtable + derived.current_index() * 8);
+      const auto select = relocations->find(vtable + derived.select_index() * 8);
+      std::string relro_error;
+      if (vtable % 8 != 0 || count == relocations->end() ||
+          current == relocations->end() || select == relocations->end() ||
+          count_candidates.find(count->second) == count_candidates.end() ||
+          current_candidates.find(current->second) == current_candidates.end() ||
+          count->second == current->second ||
+          !candidate.RequireRelro(vtable, (derived.select_index() + 1) * 8,
+                                  &relro_error)) {
+        continue;
+      }
+      if (layout == 1) {
+        if (old.layout_version != 1 || !select_method.has_value() ||
+            select->second != select_method->rva) continue;
+      } else if (!HasFmodDeviceListsSelectContract(candidate, select->second)) {
+        continue;
+      }
+      candidates.push_back({vtable, string_constructor->rva, count->second,
+                            info->second, current->second, select->second,
+                            layout});
+    }
+  }
+  if (candidates.size() != 1U) {
+    *error = "FMOD output vtable matched " +
+             std::to_string(candidates.size()) + " candidate locations";
+    return std::nullopt;
+  }
+  const FmodRuntimeAnchors& derived = candidates.front();
+  if (!HasFmodStringConstructorContract(candidate,
+                                        derived.string_constructor)) {
+    *error = "candidate FMOD string constructor contract changed";
+    return std::nullopt;
+  }
+  result["fmod_output_device_bridge"] = {
+      {"vtable_rva", FormatRva(derived.vtable)},
+      {"string_constructor_rva", FormatRva(derived.string_constructor)},
+      {"count_method_rva", FormatRva(derived.count_method)},
+      {"info_method_rva", FormatRva(derived.info_method)},
+      {"current_method_rva", FormatRva(derived.current_method)},
+      {"select_method_rva", FormatRva(derived.select_method)},
+  };
+  if (old.input_methods[0] != 0) {
+    constexpr std::array<std::string_view, 4> fields = {
+        "input_count_method_rva", "input_info_method_rva",
+        "input_current_method_rva", "input_select_method_rva"};
+    constexpr std::array<std::size_t, 4> lengths = {4, 16, 12, 16};
+    const auto old_slots = old.input_indexes();
+    const auto new_slots = derived.input_indexes();
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+      const auto old_method =
+          reference_relocations->find(old.vtable + old_slots[i] * 8);
+      const auto new_method =
+          relocations->find(derived.vtable + new_slots[i] * 8);
+      if (old_method == reference_relocations->end() ||
+          old_method->second != old.input_methods[i] ||
+          new_method == relocations->end()) {
+        *error = "FMOD input vtable does not match its methods";
+        return std::nullopt;
+      }
+      const auto matches = FindSignatureMatches(
+          reference, candidate, disassembler,
+          {std::string(fields[i]), old.input_methods[i], lengths[i], false, 3},
+          true, error);
+      if (!matches || !std::any_of(matches->begin(), matches->end(),
+                                   [&](const auto &match) {
+                                     return match.rva == new_method->second;
+                                   })) {
+        if (error->empty())
+          *error = "candidate FMOD input contract changed";
+        return std::nullopt;
+      }
+      result["fmod_output_device_bridge"][fields[i]] =
+          FormatRva(new_method->second);
+    }
+  }
+  if (derived.layout_version != 1) {
+    result["fmod_output_device_bridge"]["vtable_layout_version"] =
+        derived.layout_version;
+  }
+  return result;
+}
+
+std::optional<std::uint64_t> FindRegistryFunctionEntry(
+    const ElfImage& image, const Disassembler& disassembler,
+    std::uint64_t body_rva,
+    const std::vector<Instruction>& reference_prologue, std::string* error) {
+  constexpr std::size_t kPrologueInstructionCount = 8;
+  constexpr std::uint64_t kMaximumPrologueBytes = 64;
+  if (reference_prologue.size() != kPrologueInstructionCount ||
+      body_rva < kMaximumPrologueBytes) {
+    *error = "reference registry prologue shape is invalid";
+    return std::nullopt;
+  }
+  std::vector<std::uint64_t> entries;
+  for (std::uint64_t rva = body_rva - kMaximumPrologueBytes; rva < body_rva;
+       ++rva) {
+    std::string decode_error;
+    const auto candidate = disassembler.Decode(
+        image, rva, kPrologueInstructionCount,
+        static_cast<std::size_t>(body_rva - rva), &decode_error);
+    if (!candidate.has_value() ||
+        candidate->back().address + candidate->back().size != body_rva) {
+      continue;
+    }
+    bool same = true;
+    for (std::size_t index = 0; index < candidate->size() && same; ++index) {
+      const Instruction& left = reference_prologue[index];
+      const Instruction& right = (*candidate)[index];
+      if (left.mnemonic != right.mnemonic ||
+          left.operands.size() != right.operands.size()) {
+        same = false;
+        break;
+      }
+      for (std::size_t operand = 0; operand < left.operands.size(); ++operand) {
+        if (!SameSemanticOperand(left.operands[operand],
+                                 right.operands[operand], left.control_flow,
+                                 index == 7)) {
+          same = false;
+          break;
+        }
+      }
+    }
+    const Instruction& frame = candidate->back();
+    if (same && frame.mnemonic == "sub" && frame.operands.size() == 2 &&
+        frame.operands[0].type == Operand::Type::kRegister &&
+        frame.operands[0].register_name == "rsp" &&
+        frame.operands[1].type == Operand::Type::kImmediate &&
+        frame.operands[1].value >= 0x20 &&
+        frame.operands[1].value <= 0x400 &&
+        frame.operands[1].value % 8 == 0) {
+      entries.push_back(rva);
+    }
+  }
+  if (entries.size() != 1U) {
+    *error = "registry initializer body has no unique bounded prologue";
+    return std::nullopt;
+  }
+  return entries.front();
+}
+
+bool NormalizeRegistryRegisters(std::vector<Instruction>* instructions) {
+  if (instructions->size() != 11) return false;
+  auto& zero = (*instructions)[3];
+  auto& factor = (*instructions)[8];
+  auto& store = (*instructions)[9];
+  auto& begin = (*instructions)[10];
+  const auto reg = [](const Instruction& instruction, std::size_t index,
+                      std::size_t size) -> std::string {
+    if (index >= instruction.operands.size() ||
+        instruction.operands[index].type != Operand::Type::kRegister ||
+        instruction.operands[index].size != size)
+      return {};
+    return instruction.operands[index].register_name;
+  };
+  const std::string zero_reg = reg(zero, 0, 4);
+  const std::string factor_reg = reg(factor, 0, 4);
+  const std::string begin_reg = reg(begin, 0, 8);
+  const std::set<std::string> saved32 = {"r12d", "r13d", "r14d", "r15d"};
+  const std::set<std::string> pointers = {"rcx", "r12", "r13", "r14", "r15"};
+  if (zero.mnemonic != "xor" || saved32.count(zero_reg) != 1 ||
+      reg(zero, 1, 4) != zero_reg || factor.mnemonic != "mov" ||
+      (factor_reg != "eax" && saved32.count(factor_reg) != 1) ||
+      store.mnemonic != "mov" || reg(store, 1, 4) != factor_reg ||
+      begin.mnemonic != "lea" || pointers.count(begin_reg) != 1 ||
+      zero_reg == factor_reg || zero_reg == begin_reg + "d" ||
+      factor_reg == begin_reg + "d")
+    return false;
+  zero.operands[0].register_name = "registry-zero";
+  zero.operands[1].register_name = "registry-zero";
+  factor.operands[0].register_name = "registry-factor";
+  store.operands[1].register_name = "registry-factor";
+  begin.operands[0].register_name = "registry-begin";
+  return true;
+}
+
+std::optional<SignatureMatch> FindRegistrySignatureMatch(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    std::string* error) {
+  constexpr std::size_t kBodyInstructionIndex = 8;
+  constexpr std::size_t kBodyInstructionCount = 11;
+  const auto reference_full = disassembler.Decode(
+      reference, spec.reference_rva, spec.instruction_count, 4096, error);
+  if (!reference_full.has_value() ||
+      reference_full->size() < kBodyInstructionIndex + kBodyInstructionCount) {
+    if (error->empty()) *error = "reference registry signature is incomplete";
+    return std::nullopt;
+  }
+  const SignatureSpec body_spec{
+      "registry-initializer-body",
+      (*reference_full)[kBodyInstructionIndex].address,
+      kBodyInstructionCount,
+      true,
+      spec.minimum_anchor_bytes,
+      {0, 4},
+  };
+  const std::vector<Instruction> reference_prologue(
+      reference_full->begin(),
+      std::next(reference_full->begin(), kBodyInstructionIndex));
+  std::optional<SignatureMatch> body_match;
+  std::vector<Instruction> normalized_reference(
+      reference_full->begin() + kBodyInstructionIndex,
+      reference_full->begin() + kBodyInstructionIndex + kBodyInstructionCount);
+  if (NormalizeRegistryRegisters(&normalized_reference)) {
+    const SignatureSpec clear_spec{"registry-size-and-clear",
+                                   (*reference_full)[12].address,
+                                   4,
+                                   true,
+                                   spec.minimum_anchor_bytes,
+                                   {0, 0}};
+    const auto clear_matches = FindSignatureMatches(
+        reference, candidate, disassembler, clear_spec, true, error);
+    if (!clear_matches.has_value()) return std::nullopt;
+    std::vector<SignatureMatch> valid;
+    for (const auto& clear : *clear_matches) {
+      if (clear.rva < 16) continue;
+      std::string candidate_error;
+      const auto body =
+          disassembler.Decode(candidate, clear.rva - 16, kBodyInstructionCount,
+                              4096, &candidate_error);
+      if (!body.has_value() || (*body)[4].address != clear.rva) continue;
+      auto normalized = *body;
+      if (!NormalizeRegistryRegisters(&normalized) ||
+          !ValidateSemantics(normalized_reference, normalized, body_spec,
+                             &candidate_error) ||
+          !FindRegistryFunctionEntry(candidate, disassembler, clear.rva - 16,
+                                     reference_prologue, &candidate_error))
+        continue;
+      valid.push_back({clear.rva - 16, normalized_reference, *body});
+    }
+    if (valid.size() != 1) {
+      *error = "registry register contract matched " +
+               std::to_string(valid.size()) + " candidate locations";
+      return std::nullopt;
+    }
+    body_match = std::move(valid.front());
+  } else {
+    body_match = FindSignatureMatch(reference, candidate, disassembler,
+                                    body_spec, error);
+    if (!body_match.has_value()) return std::nullopt;
+  }
+  const auto candidate_entry = FindRegistryFunctionEntry(
+      candidate, disassembler, body_match->rva, reference_prologue, error);
+  if (!candidate_entry.has_value()) return std::nullopt;
+  const auto candidate_full = disassembler.Decode(
+      candidate, *candidate_entry, spec.instruction_count, 4096, error);
+  if (!candidate_full.has_value() ||
+      (*candidate_full)[kBodyInstructionIndex].address != body_match->rva) {
+    if (error->empty()) *error = "candidate registry signature is incomplete";
+    return std::nullopt;
+  }
+  return SignatureMatch{*candidate_entry, *reference_full, *candidate_full};
+}
+
+std::optional<std::uint64_t> DirectCallTarget(
+    const Instruction& instruction, std::string_view description,
+    std::string* error) {
+  if (instruction.mnemonic != "call" || instruction.operands.size() != 1U ||
+      instruction.operands[0].type != Operand::Type::kImmediate ||
+      instruction.operands[0].value < 0) {
+    *error = std::string(description) + " is not one direct call";
+    return std::nullopt;
+  }
+  return static_cast<std::uint64_t>(instruction.operands[0].value);
+}
+
+std::optional<std::uint64_t> DirectJumpTarget(
+    const Instruction& instruction, std::string_view description,
+    std::string* error) {
+  if (instruction.mnemonic != "jmp" || instruction.operands.size() != 1U ||
+      instruction.operands[0].type != Operand::Type::kImmediate ||
+      instruction.operands[0].value < 0) {
+    *error = std::string(description) + " is not one direct jump";
+    return std::nullopt;
+  }
+  return static_cast<std::uint64_t>(instruction.operands[0].value);
+}
+
+std::optional<SignatureMatch> FindConstructorBoundaryMatch(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    std::uint64_t reference_entry,
+    const std::vector<std::uint64_t>& candidate_entries, std::string* error) {
+  if (reference_entry != spec.reference_rva) {
+    *error = "reference constructor boundary moved outside init-array index 4";
+    return std::nullopt;
+  }
+  const auto reference_wrapper =
+      disassembler.Decode(reference, reference_entry, 1, 16, error);
+  if (!reference_wrapper.has_value()) return std::nullopt;
+  const auto reference_target = DirectJumpTarget(
+      reference_wrapper->front(), "reference constructor boundary", error);
+  if (!reference_target.has_value()) return std::nullopt;
+  const SignatureSpec target_spec{"constructor-4-target", *reference_target,
+                                  spec.instruction_count};
+  const auto target_match = FindSignatureMatch(
+      reference, candidate, disassembler, target_spec, error);
+  if (!target_match.has_value()) return std::nullopt;
+  std::vector<SignatureMatch> matches;
+  for (const auto entry : candidate_entries) {
+    std::string ignored;
+    const auto wrapper = disassembler.Decode(candidate, entry, 1, 16, &ignored);
+    if (!wrapper) continue;
+    const auto target =
+        DirectJumpTarget(wrapper->front(), "constructor boundary", &ignored);
+    if (target && *target == target_match->rva) {
+      matches.push_back({entry, *reference_wrapper, *wrapper});
+    }
+  }
+  if (matches.size() != 1) {
+    *error = "constructor boundary has no unique init-array entry";
+    return std::nullopt;
+  }
+  return std::move(matches.front());
+}
+
+std::vector<std::uint64_t> RipTargets(const Instruction& instruction) {
+  std::vector<std::uint64_t> result;
+  for (const Operand& operand : instruction.operands) {
+    if (operand.type == Operand::Type::kMemory && operand.rip_relative) {
+      result.push_back(instruction.address + instruction.size + operand.value);
+    }
+  }
+  return result;
+}
+
+std::optional<std::uint64_t> SingletonBodyRva(const ElfImage& image,
+                                              const Disassembler& disassembler,
+                                              std::uint64_t entry,
+                                              std::string* error) {
+  const auto prefix = disassembler.Decode(image, entry, 2, 32, error);
+  if (!prefix) return std::nullopt;
+  if ((*prefix)[0].mnemonic != "push") return entry;
+  const auto& push = (*prefix)[0];
+  const auto& move = (*prefix)[1];
+  if (push.operands.size() != 1 || push.operands[0].register_name != "rbp" ||
+      move.mnemonic != "mov" || move.operands.size() != 2 ||
+      move.operands[0].register_name != "rbp" ||
+      move.operands[1].register_name != "rsp") {
+    *error = "JNI singleton has an unsupported prologue";
+    return std::nullopt;
+  }
+  return move.address + move.size;
+}
+
+// from 2.743 the slot follows the node, only the push itself is required
+bool HasSingletonLinks(const std::vector<Instruction>& instructions) {
+  if (instructions.size() != 3 || instructions[0].mnemonic != "lea" ||
+      instructions[1].mnemonic != "xchg" || instructions[2].mnemonic != "mov")
+    return false;
+  const auto head = RipTargets(instructions[0]);
+  const auto slot = RipTargets(instructions[1]);
+  const auto next = RipTargets(instructions[2]);
+  return head.size() == 1 && slot.size() == 1 && next.size() == 1 &&
+         slot[0] % 8 == 0 && head[0] % 8 == 0 && slot[0] != head[0] &&
+         next[0] == head[0];
+}
+
+std::optional<SignatureMatch> FindSingletonSignatureMatch(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    const std::vector<std::uint64_t>& candidate_entries, std::string* error) {
+  const auto body =
+      SingletonBodyRva(reference, disassembler, spec.reference_rva, error);
+  if (!body) return std::nullopt;
+  const auto matches = FindSignatureMatches(
+      reference, candidate, disassembler,
+      {"jni-singleton-links", *body, 3, false, 3}, true, error);
+  if (!matches) return std::nullopt;
+  std::vector<SignatureMatch> valid;
+  for (const auto& match : *matches) {
+    if (!HasSingletonLinks(match.reference) ||
+        !HasSingletonLinks(match.candidate))
+      continue;
+    for (const auto entry : candidate_entries) {
+      if (entry != match.rva && (match.rva < 4 || entry != match.rva - 4))
+        continue;
+      std::string ignored;
+      const auto candidate_body =
+          SingletonBodyRva(candidate, disassembler, entry, &ignored);
+      if (candidate_body && *candidate_body == match.rva) {
+        valid.push_back({entry, match.reference, match.candidate});
+      }
+    }
+  }
+  if (valid.size() != 1) {
+    *error = "JNI singleton links have no unique init-array entry";
+    return std::nullopt;
+  }
+  return std::move(valid.front());
+}
+
+std::optional<std::uint64_t> MappedRipTarget(const SignatureMatch& match,
+                                             std::uint64_t reference_target,
+                                             std::string_view description,
+                                             std::string* error) {
+  std::set<std::uint64_t> candidates;
+  for (std::size_t instruction = 0; instruction < match.reference.size();
+       ++instruction) {
+    const auto reference_targets = RipTargets(match.reference[instruction]);
+    const auto candidate_targets = RipTargets(match.candidate[instruction]);
+    if (reference_targets.size() != candidate_targets.size()) {
+      *error = std::string(description) + " RIP-relative operand count changed";
+      return std::nullopt;
+    }
+    for (std::size_t operand = 0; operand < reference_targets.size();
+         ++operand) {
+      if (reference_targets[operand] == reference_target) {
+        candidates.insert(candidate_targets[operand]);
+      }
+    }
+  }
+  if (candidates.size() != 1) {
+    *error = std::string(description) + " has no unique mapped RIP target";
+    return std::nullopt;
+  }
+  return *candidates.begin();
+}
+
+std::optional<std::uint64_t> UnwindFunctionStart(const ElfImage& image,
+                                                 std::uint64_t rva,
+                                                 std::string* error) {
+  const Section* header = image.FindSection(".eh_frame_hdr");
+  if (header == nullptr) {
+    *error = "ELF has no unwind table";
+    return std::nullopt;
+  }
+  const std::string_view bytes = image.SectionBytes(*header, error);
+  if (!error->empty()) return std::nullopt;
+  if (bytes.size() < 12 || bytes[0] != 1 ||
+      static_cast<unsigned char>(bytes[1]) != 0x1b ||
+      static_cast<unsigned char>(bytes[2]) != 0x03 ||
+      static_cast<unsigned char>(bytes[3]) != 0x3b) {
+    *error = "unwind table header has an unsupported encoding";
+    return std::nullopt;
+  }
+  std::uint32_t count = 0;
+  std::memcpy(&count, bytes.data() + 8, sizeof(count));
+  if (count == 0 || (bytes.size() - 12) / 8 < count) {
+    *error = "unwind table is truncated";
+    return std::nullopt;
+  }
+  const auto start = [&](std::size_t index) {
+    std::int32_t relative = 0;
+    std::memcpy(&relative, bytes.data() + 12 + index * 8, sizeof(relative));
+    return static_cast<std::uint64_t>(
+        static_cast<std::int64_t>(header->address) + relative);
+  };
+  std::size_t low = 0;
+  std::size_t high = count;
+  while (low < high) {
+    const std::size_t middle = low + (high - low) / 2;
+    if (start(middle) <= rva) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  if (low == 0) {
+    *error = "address precedes every unwound function";
+    return std::nullopt;
+  }
+  return start(low - 1);
+}
+
+bool PrologueReaches(const ElfImage& image, const Disassembler& disassembler,
+                     std::uint64_t entry, std::uint64_t body) {
+  constexpr std::size_t kMaximumPrologueInstructions = 12;
+  std::uint64_t address = entry;
+  for (std::size_t index = 0;
+       index < kMaximumPrologueInstructions && address < body; ++index) {
+    std::string ignored;
+    const auto decoded = disassembler.Decode(image, address, 1, 16, &ignored);
+    if (!decoded || decoded->front().control_flow ||
+        decoded->front().returns) {
+      return false;
+    }
+    address += decoded->front().size;
+  }
+  return address == body;
+}
+
+std::vector<std::uint64_t> RipReferences(const ElfImage& image,
+                                         const Disassembler& disassembler,
+                                         std::uint64_t target,
+                                         std::string* error) {
+  std::vector<std::uint64_t> result;
+  const Section* text = image.FindSection(".text");
+  if (text == nullptr) {
+    *error = "ELF has no .text section";
+    return result;
+  }
+  const std::string_view bytes = image.SectionBytes(*text, error);
+  if (!error->empty()) return result;
+  for (std::size_t position = 0; position + 4 <= bytes.size(); ++position) {
+    std::int32_t displacement = 0;
+    std::memcpy(&displacement, bytes.data() + position, sizeof(displacement));
+    const std::uint64_t end = text->address + position + 4;
+    if (static_cast<std::uint64_t>(static_cast<std::int64_t>(end) +
+                                   displacement) != target) {
+      continue;
+    }
+    for (const std::size_t length : {std::size_t{6}, std::size_t{7}}) {
+      if (position + 4 < length) continue;
+      std::string ignored;
+      const auto decoded =
+          disassembler.Decode(image, end - length, 1, 16, &ignored);
+      if (!decoded || decoded->front().size != length) continue;
+      const auto targets = RipTargets(decoded->front());
+      if (targets.size() == 1 && targets.front() == target) {
+        result.push_back(end - length);
+      }
+    }
+  }
+  return result;
+}
+
+bool SameFastPath(const std::vector<Instruction>& reference,
+                  const std::vector<Instruction>& candidate,
+                  const std::map<std::uint64_t, std::uint64_t>& mapped) {
+  if (reference.size() != candidate.size()) return false;
+  for (std::size_t index = 0; index < reference.size(); ++index) {
+    const Instruction& left = reference[index];
+    const Instruction& right = candidate[index];
+    if (left.mnemonic != right.mnemonic ||
+        left.operands.size() != right.operands.size()) {
+      return false;
+    }
+    for (std::size_t operand = 0; operand < left.operands.size(); ++operand) {
+      const Operand& a = left.operands[operand];
+      const Operand& b = right.operands[operand];
+      if (a.type != b.type || a.size != b.size ||
+          a.segment_name != b.segment_name ||
+          a.rip_relative != b.rip_relative) {
+        return false;
+      }
+      if (a.type == Operand::Type::kImmediate && !left.control_flow &&
+          a.value != b.value) {
+        return false;
+      }
+      if (a.type == Operand::Type::kMemory && !a.rip_relative &&
+          (a.scale != b.scale || a.value != b.value)) {
+        return false;
+      }
+    }
+    const auto left_targets = RipTargets(left);
+    const auto right_targets = RipTargets(right);
+    if (left_targets.size() != right_targets.size()) return false;
+    for (std::size_t target = 0; target < left_targets.size(); ++target) {
+      const auto found = mapped.find(left_targets[target]);
+      if (found == mapped.end() || found->second != right_targets[target]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// 2.743 put a heap profiler in mi_malloc/mi_free, the fast paths still match
+std::optional<SignatureMatch> FindHeapFastPathMatch(
+    const ElfImage& reference, const ElfImage& candidate,
+    const Disassembler& disassembler, const SignatureSpec& spec,
+    const SignatureMatch& bridge, std::size_t length, std::string* error) {
+  const auto decoded = disassembler.Decode(
+      reference, spec.reference_rva, spec.instruction_count, 4096, error);
+  if (!decoded.has_value()) return std::nullopt;
+  const auto anchor = std::find_if(
+      decoded->begin(), decoded->end(),
+      [](const Instruction& instruction) {
+        return !RipTargets(instruction).empty();
+      });
+  if (anchor == decoded->end() ||
+      static_cast<std::size_t>(decoded->end() - anchor) < length) {
+    *error = "reference " + spec.name + " has no heap fast path";
+    return std::nullopt;
+  }
+  const std::vector<Instruction> shape(anchor, anchor + length);
+  std::string unwind_error;
+  const auto reference_entry =
+      UnwindFunctionStart(reference, shape.front().address, &unwind_error);
+  if (!reference_entry || *reference_entry != spec.reference_rva ||
+      !PrologueReaches(reference, disassembler, spec.reference_rva,
+                       shape.front().address)) {
+    *error = "reference " + spec.name + " fast path is not its entry's";
+    return std::nullopt;
+  }
+  std::map<std::uint64_t, std::uint64_t> mapped;
+  for (const Instruction& instruction : shape) {
+    for (const std::uint64_t target : RipTargets(instruction)) {
+      if (mapped.count(target) != 0) continue;
+      const auto counterpart = MappedRipTarget(
+          bridge, target, spec.name + " fast-path data", error);
+      if (!counterpart) return std::nullopt;
+      mapped.emplace(target, *counterpart);
+    }
+  }
+  const auto first = RipTargets(shape.front()).front();
+  std::vector<SignatureMatch> found;
+  for (const std::uint64_t body :
+       RipReferences(candidate, disassembler, mapped.at(first), error)) {
+    std::string ignored;
+    const auto instructions =
+        disassembler.Decode(candidate, body, length, 4096, &ignored);
+    if (!instructions || !SameFastPath(shape, *instructions, mapped)) continue;
+    const auto entry = UnwindFunctionStart(candidate, body, &ignored);
+    if (!entry || !PrologueReaches(candidate, disassembler, *entry, body)) {
+      continue;
+    }
+    found.push_back({*entry, shape, *instructions});
+  }
+  if (!error->empty()) return std::nullopt;
+  if (found.size() != 1) {
+    *error = "heap fast path of " + spec.name + " matched " +
+             std::to_string(found.size()) + " candidate functions";
+    return std::nullopt;
+  }
+  return std::move(found.front());
+}
+
+std::optional<std::uint64_t> DeriveRegistrySlot(
+    const ElfImage& image, const Disassembler& disassembler,
+    std::uint64_t initializer, std::string* error) {
+  const auto instructions = disassembler.Decode(
+      image, initializer, 256, kRegistryInitializerMaximumBytes, error);
+  if (!instructions.has_value()) return std::nullopt;
+  std::vector<std::uint64_t> stores;
+  bool found_return = false;
+  for (const Instruction& instruction : *instructions) {
+    if (instruction.mnemonic == "mov" && instruction.operands.size() == 2 &&
+        instruction.operands[0].type == Operand::Type::kMemory &&
+        instruction.operands[0].rip_relative &&
+        instruction.operands[0].size == 8 &&
+        instruction.operands[1].type == Operand::Type::kRegister &&
+        instruction.operands[1].register_name == "rbx") {
+      stores.push_back(instruction.address + instruction.size +
+                       instruction.operands[0].value);
+    }
+    if (instruction.returns) {
+      found_return = true;
+      break;
+    }
+  }
+  if (!found_return || stores.size() != 1 || stores[0] % 8 != 0 ||
+      !image.RequireWritable(stores[0], 8, error)) {
+    if (error->empty()) {
+      *error = "pre-JNI registry initializer does not publish one slot";
+    }
+    return std::nullopt;
+  }
+  return stores[0];
+}
+
+std::optional<std::size_t> PositiveSize(const Json& value,
+                                        std::string_view description,
+                                        std::string* error) {
+  if (!value.is_number_unsigned()) {
+    *error = std::string(description) + " must be a positive integer";
+    return std::nullopt;
+  }
+  const std::uint64_t number = value.get<std::uint64_t>();
+  if (number == 0 || number > SIZE_MAX) {
+    *error = std::string(description) + " is outside native size bounds";
+    return std::nullopt;
+  }
+  return static_cast<std::size_t>(number);
+}
+
+std::optional<Json> AdjustRanges(const Json& ranges,
+                                 std::size_t reference_count,
+                                 std::size_t candidate_count,
+                                 std::string* error) {
+  if (!ranges.is_array() || ranges.empty()) {
+    *error = "constructor ranges are missing";
+    return std::nullopt;
+  }
+  Json result = Json::array();
+  std::size_t previous_end = 0;
+  for (const Json& range : ranges) {
+    if (!range.is_object() || !range.contains("begin") ||
+        !range.contains("end_exclusive") ||
+        !range["begin"].is_number_unsigned() ||
+        !range["end_exclusive"].is_number_unsigned()) {
+      *error = "constructor range is invalid";
+      return std::nullopt;
+    }
+    const std::size_t begin = range["begin"].get<std::size_t>();
+    std::size_t end = range["end_exclusive"].get<std::size_t>();
+    if (end == reference_count) end = candidate_count;
+    if (begin >= end || begin < previous_end || end > candidate_count) {
+      *error = "constructor range cannot fit candidate init-array";
+      return std::nullopt;
+    }
+    result.push_back({{"begin", begin}, {"end_exclusive", end}});
+    previous_end = end;
+  }
+  return result;
+}
+
+std::optional<std::vector<SignatureSpec>> SignatureSpecs(const Json& sidecar,
+                                                         std::string* error) {
+  const Json& profile = sidecar["profile"];
+  const Json& anchors = sidecar["derivation_anchors"];
+  if (!profile.is_object() || !anchors.is_object() ||
+      !profile.contains("bridge_entries") ||
+      !profile["bridge_entries"].is_array() ||
+      !profile.contains("data_seeds") || !profile["data_seeds"].is_object() ||
+      !profile.contains("native_pre_jni_bootstrap") ||
+      !profile["native_pre_jni_bootstrap"].is_object() ||
+      !anchors.contains("constructor_rvas") ||
+      !anchors["constructor_rvas"].is_object()) {
+    *error = "reference HostAbi sidecar shape is incomplete";
+    return std::nullopt;
+  }
+  std::map<std::string, std::uint64_t> bridges;
+  for (const Json& entry : profile["bridge_entries"]) {
+    if (!entry.is_object() || !entry.contains("label") ||
+        !entry["label"].is_string() || !entry.contains("rva")) {
+      *error = "reference HostAbi bridge is incomplete";
+      return std::nullopt;
+    }
+    const std::string label = entry["label"].get<std::string>();
+    const auto rva = ParseRva(entry["rva"], "reference bridge", error);
+    if (!rva.has_value() || !bridges.emplace(label, *rva).second) {
+      if (error->empty()) *error = "reference HostAbi bridge is duplicated";
+      return std::nullopt;
+    }
+  }
+  const auto bridge =
+      [&](std::string_view label) -> std::optional<std::uint64_t> {
+    const auto found = bridges.find(std::string(label));
+    if (found == bridges.end()) {
+      *error = "reference HostAbi bridge is missing: " + std::string(label);
+      return std::nullopt;
+    }
+    return found->second;
+  };
+  const Json& seeds = profile["data_seeds"];
+  const Json& bootstrap = profile["native_pre_jni_bootstrap"];
+  const Json& constructors = anchors["constructor_rvas"];
+  std::vector<SignatureSpec> result;
+  const auto add = [&](std::string name, const Json& encoded, std::size_t count,
+                       bool registry = false, std::size_t minimum = 6) -> bool {
+    const auto rva = ParseRva(encoded, name, error);
+    if (!rva.has_value()) return false;
+    result.push_back({std::move(name), *rva, count, registry, minimum});
+    return true;
+  };
+  for (const auto& [label, count] :
+       std::array<std::pair<std::string_view, std::size_t>, 6>{
+           {{"small-allocate", 24},
+            {"usable-size", 18},
+            {"reallocate", 24},
+            {"allocate", 24},
+            {"aligned-allocate-direct", 24},
+            {"free", 24}}}) {
+    const auto rva = bridge(label);
+    if (!rva.has_value()) return std::nullopt;
+    result.push_back({std::string(label), *rva, count, false, 6});
+  }
+  if (!add("arena-initializer", seeds["arena_initializer"], 24) ||
+      !add("allocator-thread-initializer",
+           seeds["allocator_thread_initializer"], 19) ||
+      !add("registry-initializer", bootstrap["registry_initializer"], 20,
+           true) ||
+      !add("allocator-object-initializer",
+           anchors["allocator_object_initializer_rva"], 19) ||
+      !add("empty-string-initializer", anchors["empty_string_initializer_rva"],
+           23) ||
+      !add("jni-singleton-initializer",
+           anchors["jni_singleton_initializer_rva"], 11) ||
+      !add("constructor-2", constructors["2"], 24) ||
+      !add("constructor-3", constructors["3"], 24) ||
+      !add("constructor-4", constructors["4"], 24, false, 3)) {
+    return std::nullopt;
+  }
+  return result;
+}
+
+bool ValidateReferenceIdentity(const Json& sidecar, const ElfImage& reference,
+                               std::string* error) {
+  if (sidecar.value("schema_version", 0) != 1 ||
+      sidecar.value("elf_build_id", "") != reference.build_id() ||
+      sidecar.value("payload_sha256", "") != reference.sha256() ||
+      !sidecar.contains("profile") || !sidecar["profile"].is_object() ||
+      sidecar["profile"].value("elf_build_id", "") != reference.build_id() ||
+      !sidecar.contains("derivation_anchors") ||
+      !sidecar["derivation_anchors"].is_object() ||
+      sidecar["derivation_anchors"].value("signature_version", 0) != 1) {
+    *error = "reference ELF bytes do not match exact HostAbi sidecar";
+    return false;
+  }
+  const std::string payload_id = sidecar.value("payload_id", "");
+  if (payload_id.empty() ||
+      sidecar.value("payload_path", "") != "payloads/" + payload_id ||
+      payload_id.size() <= 41 ||
+      payload_id.substr(payload_id.size() - 40) != reference.build_id()) {
+    *error = "reference HostAbi sidecar payload identity is inconsistent";
+    return false;
+  }
+  return true;
+}
+
+std::optional<Json> LoadCandidateMetadata(const std::filesystem::path& root,
+                                          const ElfImage& candidate,
+                                          std::string* error) {
+  const auto metadata = ReadJson(root / "roblox_payload.json", error);
+  if (!metadata.has_value()) return std::nullopt;
+  const std::string version_name = metadata->value("version_name", "");
+  const std::uint64_t version_code = metadata->value("version_code", 0ULL);
+  const Json* hashes =
+      metadata->contains("sha256") ? &(*metadata)["sha256"] : nullptr;
+  if (metadata->value("schema_version", 0) != 1 ||
+      metadata->value("package", "") != "com.roblox.client" ||
+      metadata->value("abi", "") != compat::kGuestAbi || version_name.empty() ||
+      version_code == 0 ||
+      metadata->value("elf_build_id", "") != candidate.build_id() ||
+      hashes == nullptr || !hashes->is_object() ||
+      hashes->value("libroblox", "") != candidate.sha256()) {
+    *error = "payload metadata does not match candidate ELF bytes";
+    return std::nullopt;
+  }
+  const std::string payload_id =
+      std::to_string(version_code) + "-" + candidate.build_id();
+  if (root.filename() != payload_id) {
+    *error = "candidate ELF parent is not the canonical payload ID";
+    return std::nullopt;
+  }
+  return metadata;
+}
+
+std::optional<std::uint64_t> ProfileRva(const Json& object,
+                                        std::string_view field,
+                                        std::string* error) {
+  if (!object.contains(field)) {
+    *error = "reference profile is missing " + std::string(field);
+    return std::nullopt;
+  }
+  return ParseRva(object[field], field, error);
+}
+
+std::optional<std::pair<Json, Json>> DeriveDocuments(const ElfImage& reference,
+                                                     const ElfImage& candidate,
+                                                     const Json& sidecar,
+                                                     const Json& metadata,
+                                                     const RuntimeCompatibilityAnchors&
+                                                         runtime_source,
+                                                     std::string* error) {
+  if (!ValidateReferenceIdentity(sidecar, reference, error) ||
+      reference.build_id() == candidate.build_id() ||
+      reference.sha256() == candidate.sha256() ||
+      !reference.ValidateToolchain(error) ||
+      !candidate.ValidateToolchain(error) ||
+      !candidate.HasRequiredExports(error)) {
+    return std::nullopt;
+  }
+  Disassembler disassembler;
+  if (!disassembler.Open(error)) return std::nullopt;
+  const auto specs = SignatureSpecs(sidecar, error);
+  if (!specs.has_value()) return std::nullopt;
+  const Json& reference_profile = sidecar["profile"];
+  const auto reference_init = reference.InitArray(error);
+  const auto candidate_init = candidate.InitArray(error);
+  if (!reference_init.has_value() || !candidate_init.has_value()) {
+    return std::nullopt;
+  }
+  const auto reference_count =
+      PositiveSize(reference_profile["init_array_count"],
+                   "reference init-array count", error);
+  if (!reference_count.has_value() ||
+      reference_init->size() != *reference_count ||
+      candidate_init->size() < 8) {
+    if (error->empty()) *error = "init-array shape is not derivable";
+    return std::nullopt;
+  }
+  std::map<std::string, SignatureMatch> matches;
+  std::vector<SignatureMatch> allocate_matches;
+  struct HeapFastPath {
+    std::string_view label;
+    std::string_view bridge;
+    std::size_t length;
+  };
+  constexpr HeapFastPath kHeapFastPaths[] = {
+      {"small-allocate", "reallocate", 18}, {"free", "usable-size", 12}};
+  const auto heap_fast_path = [&](std::string_view label) {
+    return std::find_if(
+        std::begin(kHeapFastPaths), std::end(kHeapFastPaths),
+        [&](const HeapFastPath& path) { return path.label == label; });
+  };
+  std::vector<SignatureSpec> deferred;
+  for (const SignatureSpec& spec : *specs) {
+    if (heap_fast_path(spec.name) != std::end(kHeapFastPaths)) {
+      deferred.push_back(spec);
+      continue;
+    }
+    if (spec.name == "allocate") {
+      auto candidates = FindSignatureMatches(reference, candidate,
+                                             disassembler, spec, true, error);
+      if (!candidates.has_value()) return std::nullopt;
+      allocate_matches = std::move(*candidates);
+      continue;
+    }
+    auto match = [&]() -> std::optional<SignatureMatch> {
+      if (spec.name == "registry-initializer") {
+        return FindRegistrySignatureMatch(reference, candidate, disassembler,
+                                          spec, error);
+      }
+      if (spec.name == "jni-singleton-initializer") {
+        return FindSingletonSignatureMatch(reference, candidate, disassembler,
+                                           spec, *candidate_init, error);
+      }
+      if (spec.name == "constructor-4") {
+        return FindConstructorBoundaryMatch(reference, candidate, disassembler,
+                                            spec, spec.reference_rva,
+                                            *candidate_init, error);
+      }
+      return FindSignatureMatch(reference, candidate, disassembler, spec,
+                                error);
+    }();
+    if (!match.has_value()) return std::nullopt;
+    matches.emplace(spec.name, std::move(*match));
+  }
+  for (const SignatureSpec& spec : deferred) {
+    std::string signature_error;
+    auto match = FindSignatureMatch(reference, candidate, disassembler, spec,
+                                    &signature_error);
+    if (!match.has_value()) {
+      const HeapFastPath& path = *heap_fast_path(spec.name);
+      std::string fast_path_error;
+      match = FindHeapFastPathMatch(reference, candidate, disassembler, spec,
+                                    matches.at(std::string(path.bridge)),
+                                    path.length, &fast_path_error);
+      if (!match.has_value()) {
+        *error = signature_error + "; " + fast_path_error;
+        return std::nullopt;
+      }
+    }
+    matches.emplace(spec.name, std::move(*match));
+  }
+  const SignatureMatch& registry_match = matches.at("registry-initializer");
+  if (allocate_matches.empty() || registry_match.reference.size() <= 9U ||
+      registry_match.candidate.size() <= 9U) {
+    *error = "allocator signatures are incomplete";
+    return std::nullopt;
+  }
+  const auto reference_allocate = DirectCallTarget(
+      registry_match.reference[9], "reference registry allocator call", error);
+  if (!reference_allocate.has_value() ||
+      *reference_allocate !=
+          allocate_matches.front().reference.front().address) {
+    if (error->empty()) {
+      *error =
+          "reference registry initializer does not call its allocator bridge";
+    }
+    return std::nullopt;
+  }
+  const auto candidate_allocate = DirectCallTarget(
+      registry_match.candidate[9], "candidate registry allocator call", error);
+  if (!candidate_allocate.has_value()) return std::nullopt;
+  auto selected_allocate = std::find_if(
+      allocate_matches.begin(), allocate_matches.end(),
+      [&](const SignatureMatch& match) {
+        return match.rva == *candidate_allocate;
+      });
+  if (selected_allocate == allocate_matches.end() ||
+      std::find_if(std::next(selected_allocate), allocate_matches.end(),
+                   [&](const SignatureMatch& match) {
+                     return match.rva == *candidate_allocate;
+                   }) != allocate_matches.end()) {
+    *error = "signature allocate candidates do not identify exactly one "
+             "registry allocator call";
+    return std::nullopt;
+  }
+  matches.emplace("allocate", std::move(*selected_allocate));
+  const Json& reference_anchors = sidecar["derivation_anchors"];
+  const Json& role_rvas = reference_anchors["constructor_rvas"];
+  const Json* reference_indices =
+      reference_anchors.contains("constructor_indices")
+          ? &reference_anchors["constructor_indices"]
+          : nullptr;
+  Json candidate_indices = Json::object();
+  Json candidate_constructor_rvas = Json::object();
+  for (const std::size_t role : {2U, 3U, 4U, 5U}) {
+    const std::string key = std::to_string(role);
+    std::size_t reference_index = role;
+    if (reference_indices != nullptr) {
+      if (!reference_indices->is_object() ||
+          !reference_indices->contains(key)) {
+        *error = "reference constructor indices are incomplete";
+        return std::nullopt;
+      }
+      const auto parsed =
+          PositiveSize((*reference_indices)[key], "constructor index", error);
+      if (!parsed) return std::nullopt;
+      reference_index = *parsed;
+    }
+    const auto reference_rva = ProfileRva(role_rvas, key, error);
+    const auto& match = matches.at(role == 5 ? "jni-singleton-initializer"
+                                             : "constructor-" + key);
+    const auto expected_rva =
+        role == 5
+            ? ProfileRva(reference_anchors, "jni_singleton_initializer_rva",
+                         error)
+            : std::optional<std::uint64_t>(match.reference.front().address);
+    if (!reference_rva || !expected_rva || *reference_rva != *expected_rva ||
+        reference_index < 2 || reference_index >= reference_init->size() ||
+        (*reference_init)[reference_index] != *reference_rva ||
+        std::count(reference_init->begin(), reference_init->end(),
+                   *reference_rva) != 1 ||
+        std::count(candidate_init->begin(), candidate_init->end(), match.rva) !=
+            1) {
+      *error = "constructor role has no unique verified init-array entry";
+      return std::nullopt;
+    }
+    const auto index = static_cast<std::size_t>(
+        std::find(candidate_init->begin(), candidate_init->end(), match.rva) -
+        candidate_init->begin());
+    if (index < 2) {
+      *error = "constructor role moved into reserved startup entries";
+      return std::nullopt;
+    }
+    if (role == 2 && reference_profile.value(
+                         "native_mimalloc_thread_initializer_after_constructor",
+                         SIZE_MAX) != reference_index) {
+      *error =
+          "reference allocator constructor disagrees with its TLS checkpoint";
+      return std::nullopt;
+    }
+    candidate_indices[key] = index;
+    candidate_constructor_rvas[key] = FormatRva(match.rva);
+  }
+  const SignatureMatch& singleton = matches.at("jni-singleton-initializer");
+
+  Json candidate_bridges = Json::array();
+  std::map<std::string, std::uint64_t> bridge_rvas;
+  for (const Json& entry : reference_profile["bridge_entries"]) {
+    const std::string label = entry.value("label", "");
+    const std::uint64_t rva = matches[label].rva;
+    candidate_bridges.push_back({{"rva", FormatRva(rva)},
+                                 {"kind", entry.value("kind", "")},
+                                 {"label", label}});
+    bridge_rvas[label] = rva;
+  }
+
+  const Json& seeds = reference_profile["data_seeds"];
+  const auto mapped =
+      [&](const std::string& match_name,
+          std::string_view field) -> std::optional<std::uint64_t> {
+    const auto old_target = ProfileRva(seeds, field, error);
+    return old_target.has_value()
+               ? MappedRipTarget(matches[match_name], *old_target, field, error)
+               : std::nullopt;
+  };
+  const auto allocator_slot =
+      mapped("allocator-object-initializer", "allocator_object_slot");
+  const auto empty_slot =
+      mapped("empty-string-initializer", "empty_string_slot");
+  const auto jni_slot =
+      mapped("jni-singleton-initializer", "jni_singleton_slot");
+  const auto arena_guard = mapped("arena-initializer", "arena_guard_slot");
+  const auto arena_table = mapped("usable-size", "arena_table_slot");
+  if (!allocator_slot.has_value() || !empty_slot.has_value() ||
+      !jni_slot.has_value() || !arena_guard.has_value() ||
+      !arena_table.has_value()) {
+    return std::nullopt;
+  }
+  for (const std::uint64_t slot :
+       {*allocator_slot, *empty_slot, *jni_slot, *arena_guard, *arena_table}) {
+    if (!candidate.RequireWritable(slot, 8, error)) return std::nullopt;
+  }
+
+  const Json& old_bootstrap = reference_profile["native_pre_jni_bootstrap"];
+  const auto old_registry_initializer =
+      ProfileRva(old_bootstrap, "registry_initializer", error);
+  const auto old_registry_slot =
+      ProfileRva(old_bootstrap, "registry_slot", error);
+  if (!old_registry_initializer.has_value() || !old_registry_slot.has_value()) {
+    return std::nullopt;
+  }
+  const auto verified_old_slot = DeriveRegistrySlot(
+      reference, disassembler, *old_registry_initializer, error);
+  if (!verified_old_slot.has_value() ||
+      *verified_old_slot != *old_registry_slot) {
+    if (error->empty()) *error = "reference registry slot does not match ELF";
+    return std::nullopt;
+  }
+  const std::uint64_t registry_initializer =
+      matches["registry-initializer"].rva;
+  const auto registry_slot =
+      DeriveRegistrySlot(candidate, disassembler, registry_initializer, error);
+  if (!registry_slot.has_value()) return std::nullopt;
+  const Instruction& registry_call =
+      matches["registry-initializer"].candidate[9];
+  if (registry_call.operands.size() != 1 ||
+      registry_call.operands[0].type != Operand::Type::kImmediate ||
+      static_cast<std::uint64_t>(registry_call.operands[0].value) !=
+          bridge_rvas["allocate"]) {
+    *error = "registry initializer no longer calls native allocator";
+    return std::nullopt;
+  }
+
+  const auto native_ranges =
+      AdjustRanges(reference_profile["native_mimalloc_constructor_run_ranges"],
+                   *reference_count, candidate_init->size(), error);
+  if (!native_ranges.has_value() || native_ranges->size() != 1 ||
+      (*native_ranges)[0].value("begin", SIZE_MAX) != 2 ||
+      (*native_ranges)[0].value("end_exclusive", SIZE_MAX) !=
+          candidate_init->size()) {
+    *error = "native constructor replay must cover all non-reserved entries";
+    return std::nullopt;
+  }
+  const std::size_t thread_boundary = candidate_indices["2"].get<std::size_t>();
+  const auto singleton_bytes =
+      PositiveSize(seeds["jni_singleton_bytes"], "JNI singleton size", error);
+  const auto arena_slots = PositiveSize(seeds["arena_table_slot_count"],
+                                        "arena table slot count", error);
+  if (!singleton_bytes.has_value() || !arena_slots.has_value()) {
+    return std::nullopt;
+  }
+  const Section* init_section = candidate.FindSection(".init_array");
+  if (init_section == nullptr) {
+    *error = "candidate init-array section is unavailable";
+    return std::nullopt;
+  }
+
+  Json profile = {
+      {"elf_build_id", candidate.build_id()},
+      {"bridge_entries", candidate_bridges},
+      {"data_seeds",
+       {{"allocator_object_slot", FormatRva(*allocator_slot)},
+        {"empty_string_slot", FormatRva(*empty_slot)},
+        {"jni_singleton_slot", FormatRva(*jni_slot)},
+        {"jni_singleton_bytes", *singleton_bytes},
+        {"arena_initializer", FormatRva(matches["arena-initializer"].rva)},
+        {"allocator_thread_initializer",
+         FormatRva(matches["allocator-thread-initializer"].rva)},
+        {"arena_guard_slot", FormatRva(*arena_guard)},
+        {"arena_table_slot", FormatRva(*arena_table)},
+        {"arena_table_slot_count", *arena_slots}}},
+      {"native_allocator",
+       {{"allocate", FormatRva(bridge_rvas["allocate"])},
+        {"deallocate", FormatRva(bridge_rvas["free"])}}},
+      {"init_array_offset", FormatRva(init_section->address)},
+      {"init_array_count", candidate_init->size()},
+      {"constructor_run_ranges", *native_ranges},
+      {"native_mimalloc_constructor_run_ranges", *native_ranges},
+      {"native_mimalloc_thread_initializer_after_constructor", thread_boundary},
+      {"native_pre_jni_bootstrap",
+       {{"registry_initializer", FormatRva(registry_initializer)},
+        {"registry_slot", FormatRva(*registry_slot)}}},
+      {"default_allocator_strategy", "native_mimalloc"},
+      {"host_allocator_bridges_supported", false},
+  };
+  Json anchors = {
+      {"signature_version", 1},
+      {"allocator_object_initializer_rva",
+       FormatRva(matches["allocator-object-initializer"].rva)},
+      {"empty_string_initializer_rva",
+       FormatRva(matches["empty-string-initializer"].rva)},
+      {"jni_singleton_initializer_rva", FormatRva(singleton.rva)},
+      {"constructor_rvas", candidate_constructor_rvas},
+      {"constructor_indices", candidate_indices},
+  };
+  const std::uint64_t version_code =
+      metadata["version_code"].get<std::uint64_t>();
+  const std::string payload_id =
+      std::to_string(version_code) + "-" + candidate.build_id();
+  const auto runtime_compatibility = DeriveRuntimeCompatibility(
+      reference, candidate, disassembler, runtime_source, error);
+  if (!runtime_compatibility.has_value()) return std::nullopt;
+  Json derived = {
+      {"schema_version", 1},
+      {"elf_build_id", candidate.build_id()},
+      {"payload_sha256", candidate.sha256()},
+      {"payload_id", payload_id},
+      {"payload_path", "payloads/" + payload_id},
+      {"reference",
+       {{"elf_build_id", reference.build_id()},
+        {"payload_sha256", reference.sha256()}}},
+      {"profile", std::move(profile)},
+      {"derivation_anchors", std::move(anchors)},
+  };
+  Json compatibility_profile = {
+      {"version_name", metadata["version_name"]},
+      {"version_code", version_code},
+      {"elf_build_id", candidate.build_id()},
+      {"status", "experimental"},
+      {"default_allowed", true},
+      {"allow_legacy_binary_patches", false},
+      {"allow_host_abi_bridges", true},
+      {"allow_host_constructor_replay", true},
+      {"reason",
+       "Machine-derived exact-Build-ID profile for isolated probation only; "
+       "normal activation requires two successful no-recovery Tier C "
+       "canaries."},
+  };
+  for (const auto& [field, value] : runtime_compatibility->items()) {
+    compatibility_profile[field] = value;
+  }
+  Json compatibility = {
+      {"schema_version", 1},
+      {"profiles", Json::array({std::move(compatibility_profile)})},
+  };
+  return std::pair<Json, Json>{std::move(derived), std::move(compatibility)};
+}
+
+}  // namespace
+
+HostAbiSidecarIdentity ReadHostAbiSidecarIdentity(
+    const std::filesystem::path& sidecar) {
+  HostAbiSidecarIdentity result;
+  const auto document = ReadJson(sidecar, &result.error);
+  if (!document.has_value()) return result;
+  if (document->value("schema_version", 0) != 1) {
+    result.error =
+        "HostAbi sidecar has an unsupported schema: " + sidecar.string();
+    return result;
+  }
+  std::string build_id = document->value("elf_build_id", "");
+  std::transform(build_id.begin(), build_id.end(), build_id.begin(),
+                 [](unsigned char value) {
+                   return static_cast<char>(std::tolower(value));
+                 });
+  const std::string payload_id = document->value("payload_id", "");
+  if (build_id.size() != 40 || payload_id.size() <= 41 ||
+      payload_id.substr(payload_id.size() - 40) != build_id ||
+      document->value("payload_path", "") != "payloads/" + payload_id) {
+    result.error =
+        "HostAbi sidecar identity is inconsistent: " + sidecar.string();
+    return result;
+  }
+  result.elf_build_id = std::move(build_id);
+  result.payload_id = payload_id;
+  return result;
+}
+
+HostAbiDerivationResult DeriveHostAbiProfile(
+    const HostAbiDerivationOptions& options) {
+  HostAbiDerivationResult result;
+  std::error_code filesystem_error;
+  std::filesystem::create_directories(options.output_directory,
+                                      filesystem_error);
+  if (filesystem_error ||
+      !std::filesystem::is_empty(options.output_directory, filesystem_error)) {
+    result.error = "HostAbi derivation output directory must be empty";
+    return result;
+  }
+  ElfImage reference;
+  ElfImage candidate;
+  if (!reference.Open(options.reference_library, &result.error) ||
+      !candidate.Open(options.candidate_payload_directory / "libroblox.so",
+                      &result.error)) {
+    return result;
+  }
+  const auto sidecar = ReadJson(options.reference_profile, &result.error);
+  const auto metadata = LoadCandidateMetadata(
+      options.candidate_payload_directory, candidate, &result.error);
+  if (!sidecar.has_value() || !metadata.has_value()) return result;
+  const auto runtime_source = LoadRuntimeCompatibilityAnchors(
+      options.reference_compatibility_manifests, reference.build_id(),
+      &result.error);
+  if (!runtime_source.has_value()) return result;
+  const auto documents = DeriveDocuments(reference, candidate, *sidecar,
+                                         *metadata, *runtime_source,
+                                         &result.error);
+  if (!documents.has_value()) return result;
+  result.profile = options.output_directory / "host_abi_profile.json";
+  result.compatibility_manifest =
+      options.output_directory / "compatibility.json";
+  if (!WritePrivate(result.profile, documents->first.dump(2) + "\n",
+                    &result.error) ||
+      !WritePrivate(result.compatibility_manifest,
+                    documents->second.dump(2) + "\n", &result.error)) {
+    return result;
+  }
+  return result;
+}
+
+}  // namespace blox7::update

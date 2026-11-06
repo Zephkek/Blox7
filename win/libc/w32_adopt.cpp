@@ -1,0 +1,90 @@
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "private/bionic_elf_tls.h"
+#include "private/bionic_globals.h"
+#include "private/bionic_tls.h"
+#include "pthread_internal.h"
+#include "w32_kernel.h"
+
+void __init_tcb_stack_guard(bionic_tcb* tcb);
+void __init_bionic_tls_ptrs(bionic_tcb* tcb, bionic_tls* tls);
+ThreadMapping __allocate_thread_mapping(size_t stack_size, size_t stack_guard_size);
+int __init_thread(pthread_internal_t* thread);
+
+extern "C" __attribute__((visibility("default"))) void* __w32_attach_thread() {
+  if (__get_tls() != nullptr) return __get_thread();
+
+  ThreadMapping mapping = __allocate_thread_mapping(0, PTHREAD_GUARD_SIZE);
+  auto* thread = static_cast<pthread_internal_t*>(
+      mmap(nullptr, sizeof(pthread_internal_t), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  if (mapping.mmap_base == nullptr || thread == MAP_FAILED) w32_fatal("out of memory adopting a Windows thread");
+
+  const StaticTlsLayout& layout = __libc_shared_globals()->static_tls_layout;
+  auto tcb = reinterpret_cast<bionic_tcb*>(mapping.static_tls + layout.offset_bionic_tcb());
+  auto tls = reinterpret_cast<bionic_tls*>(mapping.static_tls + layout.offset_bionic_tls());
+  __init_static_tls(mapping.static_tls);
+  __init_tcb(tcb, thread);
+  __init_tcb_dtv(tcb);
+  __init_tcb_stack_guard(tcb);
+  __init_bionic_tls_ptrs(tcb, tls);
+
+  void** teb;
+  __asm__("mov %%gs:0x30, %0" : "=r"(teb));
+  pthread_attr_init(&thread->attr);
+  thread->attr.flags |= PTHREAD_ATTR_FLAG_DETACHED;
+  thread->attr.stack_base = teb[2];
+  thread->attr.stack_size = static_cast<char*>(teb[1]) - static_cast<char*>(teb[2]);
+  thread->attr.guard_size = 0;
+  thread->mmap_base = mapping.mmap_base;
+  thread->mmap_size = mapping.mmap_size;
+  thread->mmap_base_unguarded = mapping.mmap_base_unguarded;
+  thread->mmap_size_unguarded = mapping.mmap_size_unguarded;
+  thread->stack_top = reinterpret_cast<uintptr_t>(teb[1]);
+
+  __set_tls(&tcb->tls_slot(0));
+  thread->tid = gettid();
+  thread->set_cached_pid(getpid());
+  w32_thread_attach_fs();
+  w32_vex_arm_thread();
+  uint16_t cw = 0x37f;  // x87 like linux
+  __asm__ volatile("fldcw %0" : : "m"(cw));
+  __init_thread(thread);
+  __pthread_internal_add(thread);
+  return thread;
+}
+
+extern "C" __attribute__((visibility("default"))) void* __w32_pe_open(const char* utf8_path) {
+  WCHAR wide[W32_PATH_MAX];
+  if (w32_utf8_to_utf16(utf8_path, wide, W32_PATH_MAX) < 0) return nullptr;
+  return w32_boot->LoadLibraryW(reinterpret_cast<const uint16_t*>(wide));
+}
+
+extern "C" __attribute__((visibility("default"))) void* __w32_pe_symbol(void* module, const char* name) {
+  return module ? w32_boot->GetProcAddress(module, name) : nullptr;
+}
+
+extern "C" __attribute__((visibility("default"))) int __w32_win32_path(const char* path, char* out, size_t capacity) {
+  WCHAR wide[W32_PATH_MAX];
+  long r = w32_path(AT_FDCWD, path, wide, W32_PATH_MAX);
+  if (r < 0) return static_cast<int>(-r);
+  const WCHAR* p = wide;
+  size_t n = 0;
+  while (p[n]) n++;
+  if (n < 4 + 260 && p[0] == '\\' && p[1] == '\\' && p[2] == '?' && p[3] == '\\' && p[5] == ':') p += 4;
+  return w32_utf16_to_utf8(p, out, capacity) < 0 ? ENAMETOOLONG : 0;
+}
+
+extern "C" __attribute__((visibility("default"))) const char* __w32_exe_dir() { return w32_boot->exe_dir; }
+
+extern "C" __attribute__((visibility("default"))) int pthread_tryjoin_np(pthread_t t, void** result) {
+  pthread_internal_t* thread = __pthread_internal_find(t, "pthread_tryjoin_np");
+  if (thread == nullptr) return ESRCH;
+  ThreadJoinState state = atomic_load(&thread->join_state);
+  if (state == THREAD_DETACHED || state == THREAD_JOINED) return EINVAL;
+  if (state != THREAD_EXITED_NOT_JOINED) return EBUSY;
+  return pthread_join(t, result);
+}

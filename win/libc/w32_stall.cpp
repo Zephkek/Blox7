@@ -1,0 +1,197 @@
+// stall dumps. keep the threshold in seconds, at 80 ms it froze the game for a minute
+
+#include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "w32_exception.h"
+#include "w32_kernel.h"
+
+extern "C" void* __w32_attach_thread();
+
+namespace {
+
+int64_t g_frames_gap_ns;
+struct FrameWindow {
+  int64_t first_ns, start_ns, last_ns, longest_ns;
+  uint32_t frames, over25, over50, over100;
+};
+FrameWindow g_frames;
+
+void note_frame() {
+  const int64_t now = w32_monotonic_ns();
+  FrameWindow& f = g_frames;
+  if (f.first_ns == 0) {
+    f.first_ns = f.start_ns = f.last_ns = now;
+    return;
+  }
+  const int64_t gap = now - f.last_ns;
+  f.last_ns = now;
+  f.frames++;
+  if (gap > 25000000) f.over25++;
+  if (gap > 50000000) f.over50++;
+  if (gap > 100000000) f.over100++;
+  if (gap > f.longest_ns) f.longest_ns = gap;
+  if (gap > g_frames_gap_ns) {
+    w32_debug("frames: t=%.3f gap %.1f ms", static_cast<double>(now - f.first_ns) / 1e9, static_cast<double>(gap) / 1e6);
+  }
+  if (now - f.start_ns >= 5000000000) {
+    const double seconds = static_cast<double>(now - f.start_ns) / 1e9;
+    w32_debug("frames: t=%.1f %u in %.1f s (%.1f per second), gaps over 25/50/100 ms: %u/%u/%u, longest %.1f ms",
+              static_cast<double>(now - f.first_ns) / 1e9, f.frames, seconds, f.frames / seconds, f.over25, f.over50,
+              f.over100, static_cast<double>(f.longest_ns) / 1e6);
+    f.start_ns = now;
+    f.frames = f.over25 = f.over50 = f.over100 = 0;
+    f.longest_ns = 0;
+  }
+}
+
+bool g_stall_on;
+int64_t g_stall_ns;
+DWORD g_beat_thread;
+int64_t g_beat_ns;
+uint64_t g_beat_count;
+
+constexpr uint32_t kContextControl = 0x00100001;
+constexpr int kMaxLooks = 3;
+
+constexpr size_t kStackWords = 8192;
+uintptr_t g_stack[kStackWords];
+
+struct Range {
+  uintptr_t start, end;
+};
+Range g_elf_code[256];
+int g_elf_count;
+
+void collect(void*, uintptr_t start, uintptr_t, uintptr_t end, uint64_t, const char*) {
+  W32_MEMORY_BASIC_INFORMATION m;
+  if (g_elf_count < 256 && w32.VirtualQuery(reinterpret_cast<void*>(start), &m, sizeof m) && (m.protect & 0xf0)) {
+    g_elf_code[g_elf_count++] = Range{start, end};
+  }
+}
+
+bool is_code(uintptr_t v) {
+  if (v < 0x10000) return false;
+  for (int i = 0; i < g_elf_count; i++) {
+    if (v >= g_elf_code[i].start && v < g_elf_code[i].end) return true;
+  }
+  W32_MEMORY_BASIC_INFORMATION m;
+  return w32.VirtualQuery(reinterpret_cast<void*>(v), &m, sizeof m) && m.type == 0x1000000 /* MEM_IMAGE */ &&
+         (m.protect & 0xf0);
+}
+
+void name_of(uintptr_t addr, char* out, size_t cap) {
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void*>(addr), &info) && info.dli_fname) {
+    const char* base = strrchr(info.dli_fname, '/');
+    snprintf(out, cap, "%s+0x%lx", base ? base + 1 : info.dli_fname,
+             static_cast<unsigned long>(addr - reinterpret_cast<uintptr_t>(info.dli_fbase)));
+    return;
+  }
+  HANDLE module = nullptr;
+  if (w32.GetModuleHandleExW(6 /* FROM_ADDRESS | UNCHANGED_REFCOUNT */, reinterpret_cast<void*>(addr), &module)) {
+    WCHAR wide[260];
+    char name[260] = "?";
+    if (w32.GetModuleFileNameW(module, wide, 260)) w32_utf16_to_utf8(wide, name, sizeof name);
+    const char* base = strrchr(name, '\\');
+    snprintf(out, cap, "%s+0x%lx", base ? base + 1 : name, static_cast<unsigned long>(addr - reinterpret_cast<uintptr_t>(module)));
+    return;
+  }
+  snprintf(out, cap, "%p", reinterpret_cast<void*>(addr));
+}
+
+void look(DWORD tid, int64_t stalled_ns, int round) {
+  HANDLE h = w32.OpenThread(0x0002 | 0x0008 | 0x0040, 0, tid);
+  if (!h) return;
+  alignas(16) static uint8_t buffer[1536];
+  memset(buffer, 0, sizeof buffer);
+  auto* context = reinterpret_cast<WinContext*>(buffer);
+  context->context_flags = kContextControl;
+  size_t words = 0;
+  uintptr_t rip = 0, rsp = 0;
+  if (w32.SuspendThread(h) != static_cast<DWORD>(-1)) {
+    if (w32.GetThreadContext(h, context)) {
+      rip = context->rip;
+      rsp = context->rsp;
+      W32_MEMORY_BASIC_INFORMATION m;
+      if (rsp && w32.VirtualQuery(reinterpret_cast<void*>(rsp), &m, sizeof m)) {
+        const uintptr_t end = reinterpret_cast<uintptr_t>(m.base) + m.region_size;
+        words = (end - rsp) / sizeof(uintptr_t);
+        if (words > kStackWords) words = kStackWords;
+        memcpy(g_stack, reinterpret_cast<const void*>(rsp), words * sizeof(uintptr_t));
+      }
+    }
+    w32.ResumeThread(h);
+  }
+  w32.CloseHandle(h);
+  if (!rip) return;
+  static char line[2048], name[160];
+  int used = snprintf(line, sizeof line, "stall: thread %lu without a frame for %.0f ms (look %d): at ",
+                      static_cast<unsigned long>(tid), static_cast<double>(stalled_ns) / 1e6, round);
+  name_of(rip, name, sizeof name);
+  used += snprintf(line + used, sizeof line - static_cast<size_t>(used), "%s; stack", name);
+  int found = 0;
+  for (size_t i = 0; i < words && found < 40 && used < static_cast<int>(sizeof line) - 80; i++) {
+    if (!is_code(g_stack[i])) continue;
+    name_of(g_stack[i], name, sizeof name);
+    used += snprintf(line + used, sizeof line - static_cast<size_t>(used), " %s", name);
+    found++;
+  }
+  w32_debug("%s", line);
+}
+
+DWORD WINAPI watchdog(void*) {
+  w32.Sleep(2000);
+  __w32_attach_thread();
+  w32.timeBeginPeriod(1);
+  w32_loader_segments(collect, nullptr);
+  uint64_t generation = w32_loader_generation();
+  uint64_t stalled_beat = ~0ull;
+  int round = 0;
+  for (;;) {
+    w32.Sleep(5);
+    const uint64_t beats = __atomic_load_n(&g_beat_count, __ATOMIC_ACQUIRE);
+    if (beats == 0) continue;
+    const int64_t since = w32_monotonic_ns() - __atomic_load_n(&g_beat_ns, __ATOMIC_RELAXED);
+    if (beats != stalled_beat) round = 0;
+    if (round >= kMaxLooks || since < g_stall_ns * (round + 1)) continue;
+    if (w32_loader_generation() != generation) {
+      g_elf_count = 0;
+      w32_loader_segments(collect, nullptr);
+      generation = w32_loader_generation();
+    }
+    stalled_beat = beats;
+    round++;
+    look(__atomic_load_n(&g_beat_thread, __ATOMIC_RELAXED), since, round);
+  }
+}
+
+}  // namespace
+
+DWORD g_present_thread;
+
+DWORD w32_present_thread() { return __atomic_load_n(&g_present_thread, __ATOMIC_RELAXED); }
+
+extern "C" __attribute__((visibility("default"))) void __w32_frame_beat() {
+  __atomic_store_n(&g_present_thread, w32.GetCurrentThreadId(), __ATOMIC_RELAXED);
+  if (g_frames_gap_ns) note_frame();
+  if (!g_stall_on) return;
+  __atomic_store_n(&g_beat_thread, w32.GetCurrentThreadId(), __ATOMIC_RELAXED);
+  __atomic_store_n(&g_beat_ns, w32_monotonic_ns(), __ATOMIC_RELAXED);
+  __atomic_fetch_add(&g_beat_count, 1, __ATOMIC_RELEASE);
+}
+
+void w32_stall_start() {
+  if (const char* frames = getenv("BLOX7_W32_FRAMES")) {
+    const int ms = atoi(frames);
+    g_frames_gap_ns = static_cast<int64_t>(ms > 0 ? ms : 25) * 1000000;
+  }
+  const char* value = getenv("BLOX7_W32_STALL_DUMP");
+  if (!value) return;
+  const int ms = atoi(value);
+  g_stall_ns = static_cast<int64_t>(ms > 0 ? ms : 100) * 1000000;
+  g_stall_on = true;
+  w32.CloseHandle(w32.CreateThread(nullptr, 0, watchdog, nullptr, 0, nullptr));
+}

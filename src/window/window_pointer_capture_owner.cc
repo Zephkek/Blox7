@@ -1,0 +1,286 @@
+#include "window/window_pointer_capture_owner.h"
+
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_video.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+namespace blox7 {
+namespace window {
+
+namespace {
+
+thread_local WindowPointerCaptureOwner* t_pointer_query_owner = nullptr;
+
+// sdl only puts the pointer back when it thinks it has focus, so we check
+void RestoreAnchor(SDL_Window* window, float anchor_x, float anchor_y) {
+  int width = 0;
+  int height = 0;
+  int window_x = 0;
+  int window_y = 0;
+  if (!SDL_GetWindowSize(window, &width, &height) || width <= 0 ||
+      height <= 0 || !SDL_GetWindowPosition(window, &window_x, &window_y)) {
+    return;
+  }
+  const float target_x =
+      static_cast<float>(window_x) +
+      std::clamp(anchor_x, 0.0f, static_cast<float>(width - 1));
+  const float target_y =
+      static_cast<float>(window_y) +
+      std::clamp(anchor_y, 0.0f, static_cast<float>(height - 1));
+  float pointer_x = 0.0f;
+  float pointer_y = 0.0f;
+  SDL_GetGlobalMouseState(&pointer_x, &pointer_y);
+  if (std::fabs(pointer_x - target_x) <= 2.0f &&
+      std::fabs(pointer_y - target_y) <= 2.0f) {
+    return;
+  }
+  SDL_WarpMouseGlobal(target_x, target_y);
+  std::fprintf(stderr,
+               "  [input] pointer was left at %.0f,%.0f after capture "
+               "(keyboard focus %s); moved back to %.0f,%.0f\n",
+               pointer_x, pointer_y,
+               SDL_GetKeyboardFocus() == window ? "ours" : "elsewhere",
+               target_x, target_y);
+}
+
+}  // namespace
+
+WindowPointerCaptureOwner::WindowPointerCaptureOwner(
+    PointerCaptureBackend* backend)
+    : backend_(backend) {}
+
+WindowPointerCaptureOwner::~WindowPointerCaptureOwner() { Shutdown(); }
+
+bool WindowPointerCaptureOwner::RegisterQuery(MouseLockQueryCallback callback,
+                                              void* context) {
+  if (callback == nullptr || context == nullptr) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (clearing_ || callback_ != nullptr) {
+    return false;
+  }
+  callback_ = callback;
+  context_ = context;
+  return true;
+}
+
+void WindowPointerCaptureOwner::ClearQuery() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  condition_.wait(lock, [this] { return !clearing_; });
+  clearing_ = true;
+  callback_ = nullptr;
+  context_ = nullptr;
+  condition_.wait(lock, [this] {
+    return in_flight_ == 0 || t_pointer_query_owner == this;
+  });
+  clearing_ = false;
+  lock.unlock();
+  condition_.notify_all();
+}
+
+bool WindowPointerCaptureOwner::Pump(bool text_input_active) {
+  if (!focused_) {
+    return Apply(false, true, false);
+  }
+  MouseLockQueryCallback callback = nullptr;
+  void* context = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!clearing_ && callback_ != nullptr) {
+      callback = callback_;
+      context = context_;
+      ++in_flight_;
+    }
+  }
+
+  bool locked_center = false;
+  const bool query_ok =
+      callback != nullptr &&
+      [&] {
+        WindowPointerCaptureOwner* previous_query_owner =
+            t_pointer_query_owner;
+        t_pointer_query_owner = this;
+        struct ResetCallbackMarker {
+          WindowPointerCaptureOwner* previous_query_owner;
+          ~ResetCallbackMarker() {
+            t_pointer_query_owner = previous_query_owner;
+          }
+        } reset_callback_marker{previous_query_owner};
+        return callback(context, &locked_center);
+      }();
+  if (callback != nullptr) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      --in_flight_;
+    }
+    condition_.notify_all();
+  }
+  const bool native_lock_active = query_ok && locked_center;
+  native_lock_observed_ = native_lock_active;
+  if (wait_for_native_unlock_after_right_drag_ && !native_lock_active) {
+    wait_for_native_unlock_after_right_drag_ = false;
+  }
+  const bool client_active = query_ok;
+  const bool native_capture_active = client_active && native_lock_active;
+  const bool right_drag_active = right_button_held_;
+  const bool capture_requested =
+      native_capture_active || (right_drag_active && !text_input_active);
+  const bool cursor_visible = !client_active && !capture_requested;
+  return Apply(capture_requested, cursor_visible);
+}
+
+bool WindowPointerCaptureOwner::OnRightButton(
+    bool pressed, bool text_input_active,
+    std::optional<PointerPosition> position) {
+  if (pressed) {
+    focused_ = true;
+    if (!right_button_held_ && !captured_) right_drag_anchor_ = position;
+  }
+  right_button_held_ = pressed;
+  const bool applied = Pump(text_input_active);
+  if (!pressed) right_drag_anchor_.reset();
+  return applied;
+}
+
+bool WindowPointerCaptureOwner::OnShiftKeyPressed(bool text_input_active) {
+  focused_ = true;
+  return Pump(text_input_active);
+}
+
+bool WindowPointerCaptureOwner::NeedsRightButtonReleaseRecovery(
+    bool) const {
+  return false;
+}
+
+bool WindowPointerCaptureOwner::ShouldDispatchMouseMotion() {
+  return true;
+}
+
+bool WindowPointerCaptureOwner::OnFocusGained(bool text_input_active) {
+  focused_ = true;
+  return Pump(text_input_active);
+}
+
+bool WindowPointerCaptureOwner::OnFocusLost() {
+  focused_ = false;
+  right_button_held_ = false;
+  right_drag_anchor_.reset();
+  native_lock_observed_ = false;
+  native_lock_was_active_before_right_drag_ = false;
+  shift_key_pressed_during_right_drag_ = false;
+  wait_for_native_unlock_after_right_drag_ = false;
+  discard_next_motion_after_right_drag_ = false;
+  return Apply(false, true, false);
+}
+
+bool WindowPointerCaptureOwner::Shutdown() {
+  ClearQuery();
+  focused_ = false;
+  right_button_held_ = false;
+  right_drag_anchor_.reset();
+  native_lock_observed_ = false;
+  native_lock_was_active_before_right_drag_ = false;
+  shift_key_pressed_during_right_drag_ = false;
+  wait_for_native_unlock_after_right_drag_ = false;
+  discard_next_motion_after_right_drag_ = false;
+  return Apply(false, true, false);
+}
+
+bool WindowPointerCaptureOwner::Apply(bool capture, bool cursor_visible,
+                                      bool restore_position) {
+  if (state_valid_ && capture == captured_ && cursor_visible == cursor_visible_) {
+    return true;
+  }
+  if (backend_ == nullptr) {
+    captured_ = false;
+    cursor_visible_ = true;
+    return !capture && cursor_visible;
+  }
+  if (backend_->Apply(
+          {capture, cursor_visible, right_drag_anchor_, restore_position})) {
+    state_valid_ = true;
+    const bool capture_changed = capture != captured_;
+    const bool cursor_changed = cursor_visible != cursor_visible_;
+    captured_ = capture;
+    cursor_visible_ = cursor_visible;
+    if (capture_changed && capture) {
+      std::fprintf(stderr, "  [input] SDL relative pointer capture enabled\n");
+    } else if (capture_changed) {
+      std::fprintf(stderr, "  [input] SDL relative pointer capture released\n");
+    }
+    if (cursor_changed) {
+      std::fprintf(stderr, "  [input] SDL system cursor %s\n",
+                   cursor_visible ? "shown" : "hidden");
+    }
+    return true;
+  }
+  state_valid_ = backend_->Apply({false, true, std::nullopt, false});
+  captured_ = false;
+  cursor_visible_ = true;
+  return false;
+}
+
+bool SdlPointerCaptureBackend::Apply(const PointerCaptureRequest& request) {
+  auto* window = static_cast<SDL_Window*>(window_);
+  if (window == nullptr) {
+    return false;
+  }
+
+  if (request.relative_mode && !relative_mode_) {
+    if (request.anchor) {
+      capture_anchor_x_ = request.anchor->x;
+      capture_anchor_y_ = request.anchor->y;
+    } else {
+      SDL_GetMouseState(&capture_anchor_x_, &capture_anchor_y_);
+    }
+    capture_anchor_valid_ =
+        std::isfinite(capture_anchor_x_) && std::isfinite(capture_anchor_y_);
+    if (!SDL_SetWindowMouseGrab(window, true)) {
+      capture_anchor_valid_ = false;
+      return false;
+    }
+  }
+  if (!request.relative_mode && relative_mode_ && request.restore_position &&
+      capture_anchor_valid_ && SDL_GetKeyboardFocus() == window) {
+    int width = 0;
+    int height = 0;
+    if (SDL_GetWindowSize(window, &width, &height) && width > 0 && height > 0) {
+      SDL_WarpMouseInWindow(
+          window, std::clamp(capture_anchor_x_, 0.0f, static_cast<float>(width - 1)),
+          std::clamp(capture_anchor_y_, 0.0f, static_cast<float>(height - 1)));
+    }
+  }
+  const bool restoring = !request.relative_mode && relative_mode_ &&
+                         request.restore_position && capture_anchor_valid_;
+  if (request.relative_mode != relative_mode_ &&
+      !SDL_SetWindowRelativeMouseMode(window, request.relative_mode)) {
+    if (request.relative_mode) {
+      capture_anchor_valid_ = false;
+      SDL_SetWindowMouseGrab(window, false);
+    }
+    return false;
+  }
+  if (request.relative_mode && !relative_mode_ &&
+      SDL_GetKeyboardFocus() != window) {
+    std::fprintf(stderr,
+                 "  [input] pointer capture asked for while SDL keyboard focus "
+                 "is elsewhere; the pointer is not confined\n");
+  }
+  if (restoring) {
+    RestoreAnchor(window, capture_anchor_x_, capture_anchor_y_);
+  }
+  relative_mode_ = request.relative_mode;
+  if (!relative_mode_) {
+    capture_anchor_valid_ = false;
+  }
+  if (!request.relative_mode && !SDL_SetWindowMouseGrab(window, false)) return false;
+  return request.cursor_visible ? SDL_ShowCursor() : SDL_HideCursor();
+}
+
+}  // namespace window
+}  // namespace blox7

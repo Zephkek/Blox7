@@ -1,0 +1,24 @@
+#ifndef BLOX7_RUNTIME_JNIVM_PLATFORM_WEB_CALLBACKS_H_
+#define BLOX7_RUNTIME_JNIVM_PLATFORM_WEB_CALLBACKS_H_
+
+#include <jni.h>
+
+#include <memory>
+
+namespace blox7 {
+namespace runtime {
+
+bool SetJnivmPlatformWebCallbacks(
+    void* context, std::shared_ptr<void> callback_context,
+    void (*on_data_model_notification)(void*, JNIEnv*, jstring, jstring),
+    void (*on_app_bridge_notification)(void*, JNIEnv*, jstring, jstring),
+    void (*on_native_overlay)(void*, JNIEnv*, jstring, jstring),
+    void (*on_open_web_activity)(void*, JNIEnv*, jstring, jstring),
+    void (*on_sync_cookies)(void*, JNIEnv*, jstring),
+    void (*on_set_cookie)(void*, JNIEnv*, jstring, jstring));
+void ClearJnivmPlatformWebCallbacks(void* context);
+
+}  // namespace runtime
+}  // namespace blox7
+
+#endif  // BLOX7_RUNTIME_JNIVM_PLATFORM_WEB_CALLBACKS_H_

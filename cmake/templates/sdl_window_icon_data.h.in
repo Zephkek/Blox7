@@ -1,0 +1,20 @@
+#ifndef BLOX7_PLATFORM_SDL_WINDOW_ICON_DATA_H_
+#define BLOX7_PLATFORM_SDL_WINDOW_ICON_DATA_H_
+
+#include <cstddef>
+
+namespace blox7 {
+namespace platform {
+namespace internal {
+
+inline constexpr unsigned char kBlox7WindowIconPng[] = {
+    @BLOX7_WINDOW_ICON_BYTES@
+};
+inline constexpr std::size_t kBlox7WindowIconPngSize =
+    sizeof(kBlox7WindowIconPng);
+
+}  // namespace internal
+}  // namespace platform
+}  // namespace blox7
+
+#endif  // BLOX7_PLATFORM_SDL_WINDOW_ICON_DATA_H_
