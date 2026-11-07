@@ -1290,8 +1290,7 @@ def has_fmod_string_constructor_contract(image: ElfImage, rva: int) -> bool:
 
 
 def has_fmod_device_lists_select_contract(image: ElfImage, rva: int) -> bool:
-    # Keep in sync with compat/fmod_output_device_contract.h. The fixed bytes
-    # bind the int-index ABI, count slot, clamp, and FMOD system-object offset.
+    # keep in sync with fmod_output_device_contract.h: int index, count slot, clamp, system offset
     expected = bytes.fromhex(
         "55 48 89 e5 41 57 41 56 41 54 53 48 83 ec 50 41 "
         "89 f7 49 89 fe 4c 8b 25 00 00 00 00 49 8b 04 24 "
@@ -1450,7 +1449,7 @@ def derive_fmod_output_device_bridge(
             ),
         ).rva
     except AnalyzerError:
-        # The device-list layout has a separately checked selector contract.
+        # the device-list layout has its own selector check
         select_method = None
     count_candidates = {
         match.rva
@@ -1866,9 +1865,8 @@ def mapped_rip_target(
 
 
 def derive_registry_slot(candidate: ElfImage, initializer_rva: int) -> int:
-    # The initializer publishes its newly allocated registry immediately
-    # before its first return. Do not infer that slot from adjacent functions:
-    # future link layouts may place unrelated registry users after this body.
+    # the init publishes its fresh registry right before its first return. don't guess the slot from
+    # neighbours, later builds can put other registry users after it
     candidate.require_code_rva(initializer_rva)
     offset = candidate.rva_to_offset(initializer_rva)
     decoder = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
@@ -1943,10 +1941,8 @@ def create_signature_specs(
             24,
         ),
         SignatureSpec(
-            # This bridge is an 18-instruction leaf.  Keeping the signature
-            # bounded to the leaf avoids coupling it to padding or the next
-            # function, which changed from executable code to INT3 padding in
-            # Roblox versionCode 2904.
+            # 18-instruction leaf, so the signature stops there. the next function turned into INT3
+            # padding in versionCode 2904
             "usable-size",
             parse_rva(bridges["usable-size"]["rva"], "usable size"),
             18,
@@ -1973,8 +1969,7 @@ def create_signature_specs(
             parse_rva(
                 data_seeds["allocator_thread_initializer"], "thread initializer"
             ),
-            # The wrapper ends at instruction 19. Later instructions belong
-            # to an unrelated adjacent initializer.
+            # the wrapper ends at instruction 19, after that it's some other initializer
             19,
         ),
         SignatureSpec(
@@ -2086,9 +2081,8 @@ def derive_profile(
         else:
             matches[spec.name] = find_signature_match(reference, candidate, spec)
 
-    # The allocate signature alone is intentionally ambiguous in 2904. Resolve
-    # it through an independent invariant: the registry initializer directly
-    # calls the allocator wrapper that Blox7 must publish in the profile.
+    # 2904's allocate signature alone matches twice, so go through the registry init: it calls
+    # the allocator wrapper we publish directly
     registry_match = matches["registry-initializer"]
     reference_allocate = parse_rva(
         bridge_map(reference_profile)["allocate"]["rva"],
