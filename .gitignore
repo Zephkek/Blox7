@@ -47,8 +47,6 @@ CMakeUserPresets.json
 Makefile.cmake
 
 /_deps/
-/cmake-build-debug/
-/cmake-build-release/
 
 # Roblox payload
 /rbx_bin/
