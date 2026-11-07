@@ -187,7 +187,7 @@ def compile_all(jobs):
             return f'--- {src}\n{p.stderr[-6000:]}'
         open(stamp, 'w').write(key)
         if p.stderr.strip() and '-w' not in flags:
-            return f'(warnings) {src}\n{p.stderr[-3000:]}'
+            return f'(warnings) {src}\n{p.stderr}'
         return None
     errors = []
     with ThreadPoolExecutor(os.cpu_count() or 8) as ex:
