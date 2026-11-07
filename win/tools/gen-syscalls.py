@@ -26,6 +26,7 @@ for raw in open(syscalls_txt):
     stubs.append((names, sysname, argc))
 
 ARGS = ['a0', 'a1', 'a2', 'a3', 'a4', 'a5']
+SIX = ', '.join(f'long {a}' for a in ARGS)
 used = sorted({s for _, s, _ in stubs} | set(numbers))
 
 with open(out_h, 'w', newline='\n') as h:
@@ -43,7 +44,7 @@ with open(out_cpp, 'w', newline='\n') as c:
     c.write('long __set_errno_internal(int);\nlong __w32_enosys(const char* name);\n')
     c.write('#define W32_RESULT(r) ((unsigned long)(r) > -4096UL ? __set_errno_internal((int)-(r)) : (r))\n\n')
     for name in used:
-        c.write(f'__attribute__((weak)) long sys_{name}(long, long, long, long, long, long) {{ return __w32_enosys("{name}"); }}\n')
+        c.write(f'__attribute__((weak)) long sys_{name}({SIX}) {{ return __w32_enosys("{name}"); }}\n')
     c.write('\n')
     for names, sysname, argc in stubs:
         params = ', '.join(f'long {a}' for a in ARGS[:argc]) or 'void'

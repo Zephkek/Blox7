@@ -6,381 +6,381 @@ long __set_errno_internal(int);
 long __w32_enosys(const char* name);
 #define W32_RESULT(r) ((unsigned long)(r) > -4096UL ? __set_errno_internal((int)-(r)) : (r))
 
-__attribute__((weak)) long sys__sysctl(long, long, long, long, long, long) { return __w32_enosys("_sysctl"); }
-__attribute__((weak)) long sys_accept(long, long, long, long, long, long) { return __w32_enosys("accept"); }
-__attribute__((weak)) long sys_accept4(long, long, long, long, long, long) { return __w32_enosys("accept4"); }
-__attribute__((weak)) long sys_access(long, long, long, long, long, long) { return __w32_enosys("access"); }
-__attribute__((weak)) long sys_acct(long, long, long, long, long, long) { return __w32_enosys("acct"); }
-__attribute__((weak)) long sys_add_key(long, long, long, long, long, long) { return __w32_enosys("add_key"); }
-__attribute__((weak)) long sys_adjtimex(long, long, long, long, long, long) { return __w32_enosys("adjtimex"); }
-__attribute__((weak)) long sys_afs_syscall(long, long, long, long, long, long) { return __w32_enosys("afs_syscall"); }
-__attribute__((weak)) long sys_alarm(long, long, long, long, long, long) { return __w32_enosys("alarm"); }
-__attribute__((weak)) long sys_arch_prctl(long, long, long, long, long, long) { return __w32_enosys("arch_prctl"); }
-__attribute__((weak)) long sys_bind(long, long, long, long, long, long) { return __w32_enosys("bind"); }
-__attribute__((weak)) long sys_bpf(long, long, long, long, long, long) { return __w32_enosys("bpf"); }
-__attribute__((weak)) long sys_brk(long, long, long, long, long, long) { return __w32_enosys("brk"); }
-__attribute__((weak)) long sys_cachestat(long, long, long, long, long, long) { return __w32_enosys("cachestat"); }
-__attribute__((weak)) long sys_capget(long, long, long, long, long, long) { return __w32_enosys("capget"); }
-__attribute__((weak)) long sys_capset(long, long, long, long, long, long) { return __w32_enosys("capset"); }
-__attribute__((weak)) long sys_chdir(long, long, long, long, long, long) { return __w32_enosys("chdir"); }
-__attribute__((weak)) long sys_chmod(long, long, long, long, long, long) { return __w32_enosys("chmod"); }
-__attribute__((weak)) long sys_chown(long, long, long, long, long, long) { return __w32_enosys("chown"); }
-__attribute__((weak)) long sys_chroot(long, long, long, long, long, long) { return __w32_enosys("chroot"); }
-__attribute__((weak)) long sys_clock_adjtime(long, long, long, long, long, long) { return __w32_enosys("clock_adjtime"); }
-__attribute__((weak)) long sys_clock_getres(long, long, long, long, long, long) { return __w32_enosys("clock_getres"); }
-__attribute__((weak)) long sys_clock_gettime(long, long, long, long, long, long) { return __w32_enosys("clock_gettime"); }
-__attribute__((weak)) long sys_clock_nanosleep(long, long, long, long, long, long) { return __w32_enosys("clock_nanosleep"); }
-__attribute__((weak)) long sys_clock_settime(long, long, long, long, long, long) { return __w32_enosys("clock_settime"); }
-__attribute__((weak)) long sys_clone(long, long, long, long, long, long) { return __w32_enosys("clone"); }
-__attribute__((weak)) long sys_clone3(long, long, long, long, long, long) { return __w32_enosys("clone3"); }
-__attribute__((weak)) long sys_close(long, long, long, long, long, long) { return __w32_enosys("close"); }
-__attribute__((weak)) long sys_close_range(long, long, long, long, long, long) { return __w32_enosys("close_range"); }
-__attribute__((weak)) long sys_connect(long, long, long, long, long, long) { return __w32_enosys("connect"); }
-__attribute__((weak)) long sys_copy_file_range(long, long, long, long, long, long) { return __w32_enosys("copy_file_range"); }
-__attribute__((weak)) long sys_creat(long, long, long, long, long, long) { return __w32_enosys("creat"); }
-__attribute__((weak)) long sys_create_module(long, long, long, long, long, long) { return __w32_enosys("create_module"); }
-__attribute__((weak)) long sys_delete_module(long, long, long, long, long, long) { return __w32_enosys("delete_module"); }
-__attribute__((weak)) long sys_dup(long, long, long, long, long, long) { return __w32_enosys("dup"); }
-__attribute__((weak)) long sys_dup2(long, long, long, long, long, long) { return __w32_enosys("dup2"); }
-__attribute__((weak)) long sys_dup3(long, long, long, long, long, long) { return __w32_enosys("dup3"); }
-__attribute__((weak)) long sys_epoll_create(long, long, long, long, long, long) { return __w32_enosys("epoll_create"); }
-__attribute__((weak)) long sys_epoll_create1(long, long, long, long, long, long) { return __w32_enosys("epoll_create1"); }
-__attribute__((weak)) long sys_epoll_ctl(long, long, long, long, long, long) { return __w32_enosys("epoll_ctl"); }
-__attribute__((weak)) long sys_epoll_ctl_old(long, long, long, long, long, long) { return __w32_enosys("epoll_ctl_old"); }
-__attribute__((weak)) long sys_epoll_pwait(long, long, long, long, long, long) { return __w32_enosys("epoll_pwait"); }
-__attribute__((weak)) long sys_epoll_pwait2(long, long, long, long, long, long) { return __w32_enosys("epoll_pwait2"); }
-__attribute__((weak)) long sys_epoll_wait(long, long, long, long, long, long) { return __w32_enosys("epoll_wait"); }
-__attribute__((weak)) long sys_epoll_wait_old(long, long, long, long, long, long) { return __w32_enosys("epoll_wait_old"); }
-__attribute__((weak)) long sys_eventfd(long, long, long, long, long, long) { return __w32_enosys("eventfd"); }
-__attribute__((weak)) long sys_eventfd2(long, long, long, long, long, long) { return __w32_enosys("eventfd2"); }
-__attribute__((weak)) long sys_execve(long, long, long, long, long, long) { return __w32_enosys("execve"); }
-__attribute__((weak)) long sys_execveat(long, long, long, long, long, long) { return __w32_enosys("execveat"); }
-__attribute__((weak)) long sys_exit(long, long, long, long, long, long) { return __w32_enosys("exit"); }
-__attribute__((weak)) long sys_exit_group(long, long, long, long, long, long) { return __w32_enosys("exit_group"); }
-__attribute__((weak)) long sys_faccessat(long, long, long, long, long, long) { return __w32_enosys("faccessat"); }
-__attribute__((weak)) long sys_faccessat2(long, long, long, long, long, long) { return __w32_enosys("faccessat2"); }
-__attribute__((weak)) long sys_fadvise64(long, long, long, long, long, long) { return __w32_enosys("fadvise64"); }
-__attribute__((weak)) long sys_fallocate(long, long, long, long, long, long) { return __w32_enosys("fallocate"); }
-__attribute__((weak)) long sys_fanotify_init(long, long, long, long, long, long) { return __w32_enosys("fanotify_init"); }
-__attribute__((weak)) long sys_fanotify_mark(long, long, long, long, long, long) { return __w32_enosys("fanotify_mark"); }
-__attribute__((weak)) long sys_fchdir(long, long, long, long, long, long) { return __w32_enosys("fchdir"); }
-__attribute__((weak)) long sys_fchmod(long, long, long, long, long, long) { return __w32_enosys("fchmod"); }
-__attribute__((weak)) long sys_fchmodat(long, long, long, long, long, long) { return __w32_enosys("fchmodat"); }
-__attribute__((weak)) long sys_fchmodat2(long, long, long, long, long, long) { return __w32_enosys("fchmodat2"); }
-__attribute__((weak)) long sys_fchown(long, long, long, long, long, long) { return __w32_enosys("fchown"); }
-__attribute__((weak)) long sys_fchownat(long, long, long, long, long, long) { return __w32_enosys("fchownat"); }
-__attribute__((weak)) long sys_fcntl(long, long, long, long, long, long) { return __w32_enosys("fcntl"); }
-__attribute__((weak)) long sys_fdatasync(long, long, long, long, long, long) { return __w32_enosys("fdatasync"); }
-__attribute__((weak)) long sys_fgetxattr(long, long, long, long, long, long) { return __w32_enosys("fgetxattr"); }
-__attribute__((weak)) long sys_finit_module(long, long, long, long, long, long) { return __w32_enosys("finit_module"); }
-__attribute__((weak)) long sys_flistxattr(long, long, long, long, long, long) { return __w32_enosys("flistxattr"); }
-__attribute__((weak)) long sys_flock(long, long, long, long, long, long) { return __w32_enosys("flock"); }
-__attribute__((weak)) long sys_fork(long, long, long, long, long, long) { return __w32_enosys("fork"); }
-__attribute__((weak)) long sys_fremovexattr(long, long, long, long, long, long) { return __w32_enosys("fremovexattr"); }
-__attribute__((weak)) long sys_fsconfig(long, long, long, long, long, long) { return __w32_enosys("fsconfig"); }
-__attribute__((weak)) long sys_fsetxattr(long, long, long, long, long, long) { return __w32_enosys("fsetxattr"); }
-__attribute__((weak)) long sys_fsmount(long, long, long, long, long, long) { return __w32_enosys("fsmount"); }
-__attribute__((weak)) long sys_fsopen(long, long, long, long, long, long) { return __w32_enosys("fsopen"); }
-__attribute__((weak)) long sys_fspick(long, long, long, long, long, long) { return __w32_enosys("fspick"); }
-__attribute__((weak)) long sys_fstat(long, long, long, long, long, long) { return __w32_enosys("fstat"); }
-__attribute__((weak)) long sys_fstatfs(long, long, long, long, long, long) { return __w32_enosys("fstatfs"); }
-__attribute__((weak)) long sys_fsync(long, long, long, long, long, long) { return __w32_enosys("fsync"); }
-__attribute__((weak)) long sys_ftruncate(long, long, long, long, long, long) { return __w32_enosys("ftruncate"); }
-__attribute__((weak)) long sys_futex(long, long, long, long, long, long) { return __w32_enosys("futex"); }
-__attribute__((weak)) long sys_futex_requeue(long, long, long, long, long, long) { return __w32_enosys("futex_requeue"); }
-__attribute__((weak)) long sys_futex_wait(long, long, long, long, long, long) { return __w32_enosys("futex_wait"); }
-__attribute__((weak)) long sys_futex_waitv(long, long, long, long, long, long) { return __w32_enosys("futex_waitv"); }
-__attribute__((weak)) long sys_futex_wake(long, long, long, long, long, long) { return __w32_enosys("futex_wake"); }
-__attribute__((weak)) long sys_futimesat(long, long, long, long, long, long) { return __w32_enosys("futimesat"); }
-__attribute__((weak)) long sys_get_kernel_syms(long, long, long, long, long, long) { return __w32_enosys("get_kernel_syms"); }
-__attribute__((weak)) long sys_get_mempolicy(long, long, long, long, long, long) { return __w32_enosys("get_mempolicy"); }
-__attribute__((weak)) long sys_get_robust_list(long, long, long, long, long, long) { return __w32_enosys("get_robust_list"); }
-__attribute__((weak)) long sys_get_thread_area(long, long, long, long, long, long) { return __w32_enosys("get_thread_area"); }
-__attribute__((weak)) long sys_getcpu(long, long, long, long, long, long) { return __w32_enosys("getcpu"); }
-__attribute__((weak)) long sys_getcwd(long, long, long, long, long, long) { return __w32_enosys("getcwd"); }
-__attribute__((weak)) long sys_getdents(long, long, long, long, long, long) { return __w32_enosys("getdents"); }
-__attribute__((weak)) long sys_getdents64(long, long, long, long, long, long) { return __w32_enosys("getdents64"); }
-__attribute__((weak)) long sys_getegid(long, long, long, long, long, long) { return __w32_enosys("getegid"); }
-__attribute__((weak)) long sys_geteuid(long, long, long, long, long, long) { return __w32_enosys("geteuid"); }
-__attribute__((weak)) long sys_getgid(long, long, long, long, long, long) { return __w32_enosys("getgid"); }
-__attribute__((weak)) long sys_getgroups(long, long, long, long, long, long) { return __w32_enosys("getgroups"); }
-__attribute__((weak)) long sys_getitimer(long, long, long, long, long, long) { return __w32_enosys("getitimer"); }
-__attribute__((weak)) long sys_getpeername(long, long, long, long, long, long) { return __w32_enosys("getpeername"); }
-__attribute__((weak)) long sys_getpgid(long, long, long, long, long, long) { return __w32_enosys("getpgid"); }
-__attribute__((weak)) long sys_getpgrp(long, long, long, long, long, long) { return __w32_enosys("getpgrp"); }
-__attribute__((weak)) long sys_getpid(long, long, long, long, long, long) { return __w32_enosys("getpid"); }
-__attribute__((weak)) long sys_getpmsg(long, long, long, long, long, long) { return __w32_enosys("getpmsg"); }
-__attribute__((weak)) long sys_getppid(long, long, long, long, long, long) { return __w32_enosys("getppid"); }
-__attribute__((weak)) long sys_getpriority(long, long, long, long, long, long) { return __w32_enosys("getpriority"); }
-__attribute__((weak)) long sys_getrandom(long, long, long, long, long, long) { return __w32_enosys("getrandom"); }
-__attribute__((weak)) long sys_getresgid(long, long, long, long, long, long) { return __w32_enosys("getresgid"); }
-__attribute__((weak)) long sys_getresuid(long, long, long, long, long, long) { return __w32_enosys("getresuid"); }
-__attribute__((weak)) long sys_getrlimit(long, long, long, long, long, long) { return __w32_enosys("getrlimit"); }
-__attribute__((weak)) long sys_getrusage(long, long, long, long, long, long) { return __w32_enosys("getrusage"); }
-__attribute__((weak)) long sys_getsid(long, long, long, long, long, long) { return __w32_enosys("getsid"); }
-__attribute__((weak)) long sys_getsockname(long, long, long, long, long, long) { return __w32_enosys("getsockname"); }
-__attribute__((weak)) long sys_getsockopt(long, long, long, long, long, long) { return __w32_enosys("getsockopt"); }
-__attribute__((weak)) long sys_gettid(long, long, long, long, long, long) { return __w32_enosys("gettid"); }
-__attribute__((weak)) long sys_gettimeofday(long, long, long, long, long, long) { return __w32_enosys("gettimeofday"); }
-__attribute__((weak)) long sys_getuid(long, long, long, long, long, long) { return __w32_enosys("getuid"); }
-__attribute__((weak)) long sys_getxattr(long, long, long, long, long, long) { return __w32_enosys("getxattr"); }
-__attribute__((weak)) long sys_init_module(long, long, long, long, long, long) { return __w32_enosys("init_module"); }
-__attribute__((weak)) long sys_inotify_add_watch(long, long, long, long, long, long) { return __w32_enosys("inotify_add_watch"); }
-__attribute__((weak)) long sys_inotify_init(long, long, long, long, long, long) { return __w32_enosys("inotify_init"); }
-__attribute__((weak)) long sys_inotify_init1(long, long, long, long, long, long) { return __w32_enosys("inotify_init1"); }
-__attribute__((weak)) long sys_inotify_rm_watch(long, long, long, long, long, long) { return __w32_enosys("inotify_rm_watch"); }
-__attribute__((weak)) long sys_io_cancel(long, long, long, long, long, long) { return __w32_enosys("io_cancel"); }
-__attribute__((weak)) long sys_io_destroy(long, long, long, long, long, long) { return __w32_enosys("io_destroy"); }
-__attribute__((weak)) long sys_io_getevents(long, long, long, long, long, long) { return __w32_enosys("io_getevents"); }
-__attribute__((weak)) long sys_io_pgetevents(long, long, long, long, long, long) { return __w32_enosys("io_pgetevents"); }
-__attribute__((weak)) long sys_io_setup(long, long, long, long, long, long) { return __w32_enosys("io_setup"); }
-__attribute__((weak)) long sys_io_submit(long, long, long, long, long, long) { return __w32_enosys("io_submit"); }
-__attribute__((weak)) long sys_io_uring_enter(long, long, long, long, long, long) { return __w32_enosys("io_uring_enter"); }
-__attribute__((weak)) long sys_io_uring_register(long, long, long, long, long, long) { return __w32_enosys("io_uring_register"); }
-__attribute__((weak)) long sys_io_uring_setup(long, long, long, long, long, long) { return __w32_enosys("io_uring_setup"); }
-__attribute__((weak)) long sys_ioctl(long, long, long, long, long, long) { return __w32_enosys("ioctl"); }
-__attribute__((weak)) long sys_ioperm(long, long, long, long, long, long) { return __w32_enosys("ioperm"); }
-__attribute__((weak)) long sys_iopl(long, long, long, long, long, long) { return __w32_enosys("iopl"); }
-__attribute__((weak)) long sys_ioprio_get(long, long, long, long, long, long) { return __w32_enosys("ioprio_get"); }
-__attribute__((weak)) long sys_ioprio_set(long, long, long, long, long, long) { return __w32_enosys("ioprio_set"); }
-__attribute__((weak)) long sys_kcmp(long, long, long, long, long, long) { return __w32_enosys("kcmp"); }
-__attribute__((weak)) long sys_kexec_file_load(long, long, long, long, long, long) { return __w32_enosys("kexec_file_load"); }
-__attribute__((weak)) long sys_kexec_load(long, long, long, long, long, long) { return __w32_enosys("kexec_load"); }
-__attribute__((weak)) long sys_keyctl(long, long, long, long, long, long) { return __w32_enosys("keyctl"); }
-__attribute__((weak)) long sys_kill(long, long, long, long, long, long) { return __w32_enosys("kill"); }
-__attribute__((weak)) long sys_landlock_add_rule(long, long, long, long, long, long) { return __w32_enosys("landlock_add_rule"); }
-__attribute__((weak)) long sys_landlock_create_ruleset(long, long, long, long, long, long) { return __w32_enosys("landlock_create_ruleset"); }
-__attribute__((weak)) long sys_landlock_restrict_self(long, long, long, long, long, long) { return __w32_enosys("landlock_restrict_self"); }
-__attribute__((weak)) long sys_lchown(long, long, long, long, long, long) { return __w32_enosys("lchown"); }
-__attribute__((weak)) long sys_lgetxattr(long, long, long, long, long, long) { return __w32_enosys("lgetxattr"); }
-__attribute__((weak)) long sys_link(long, long, long, long, long, long) { return __w32_enosys("link"); }
-__attribute__((weak)) long sys_linkat(long, long, long, long, long, long) { return __w32_enosys("linkat"); }
-__attribute__((weak)) long sys_listen(long, long, long, long, long, long) { return __w32_enosys("listen"); }
-__attribute__((weak)) long sys_listmount(long, long, long, long, long, long) { return __w32_enosys("listmount"); }
-__attribute__((weak)) long sys_listxattr(long, long, long, long, long, long) { return __w32_enosys("listxattr"); }
-__attribute__((weak)) long sys_llistxattr(long, long, long, long, long, long) { return __w32_enosys("llistxattr"); }
-__attribute__((weak)) long sys_lookup_dcookie(long, long, long, long, long, long) { return __w32_enosys("lookup_dcookie"); }
-__attribute__((weak)) long sys_lremovexattr(long, long, long, long, long, long) { return __w32_enosys("lremovexattr"); }
-__attribute__((weak)) long sys_lseek(long, long, long, long, long, long) { return __w32_enosys("lseek"); }
-__attribute__((weak)) long sys_lsetxattr(long, long, long, long, long, long) { return __w32_enosys("lsetxattr"); }
-__attribute__((weak)) long sys_lsm_get_self_attr(long, long, long, long, long, long) { return __w32_enosys("lsm_get_self_attr"); }
-__attribute__((weak)) long sys_lsm_list_modules(long, long, long, long, long, long) { return __w32_enosys("lsm_list_modules"); }
-__attribute__((weak)) long sys_lsm_set_self_attr(long, long, long, long, long, long) { return __w32_enosys("lsm_set_self_attr"); }
-__attribute__((weak)) long sys_lstat(long, long, long, long, long, long) { return __w32_enosys("lstat"); }
-__attribute__((weak)) long sys_madvise(long, long, long, long, long, long) { return __w32_enosys("madvise"); }
-__attribute__((weak)) long sys_map_shadow_stack(long, long, long, long, long, long) { return __w32_enosys("map_shadow_stack"); }
-__attribute__((weak)) long sys_mbind(long, long, long, long, long, long) { return __w32_enosys("mbind"); }
-__attribute__((weak)) long sys_membarrier(long, long, long, long, long, long) { return __w32_enosys("membarrier"); }
-__attribute__((weak)) long sys_memfd_create(long, long, long, long, long, long) { return __w32_enosys("memfd_create"); }
-__attribute__((weak)) long sys_memfd_secret(long, long, long, long, long, long) { return __w32_enosys("memfd_secret"); }
-__attribute__((weak)) long sys_migrate_pages(long, long, long, long, long, long) { return __w32_enosys("migrate_pages"); }
-__attribute__((weak)) long sys_mincore(long, long, long, long, long, long) { return __w32_enosys("mincore"); }
-__attribute__((weak)) long sys_mkdir(long, long, long, long, long, long) { return __w32_enosys("mkdir"); }
-__attribute__((weak)) long sys_mkdirat(long, long, long, long, long, long) { return __w32_enosys("mkdirat"); }
-__attribute__((weak)) long sys_mknod(long, long, long, long, long, long) { return __w32_enosys("mknod"); }
-__attribute__((weak)) long sys_mknodat(long, long, long, long, long, long) { return __w32_enosys("mknodat"); }
-__attribute__((weak)) long sys_mlock(long, long, long, long, long, long) { return __w32_enosys("mlock"); }
-__attribute__((weak)) long sys_mlock2(long, long, long, long, long, long) { return __w32_enosys("mlock2"); }
-__attribute__((weak)) long sys_mlockall(long, long, long, long, long, long) { return __w32_enosys("mlockall"); }
-__attribute__((weak)) long sys_mmap(long, long, long, long, long, long) { return __w32_enosys("mmap"); }
-__attribute__((weak)) long sys_modify_ldt(long, long, long, long, long, long) { return __w32_enosys("modify_ldt"); }
-__attribute__((weak)) long sys_mount(long, long, long, long, long, long) { return __w32_enosys("mount"); }
-__attribute__((weak)) long sys_mount_setattr(long, long, long, long, long, long) { return __w32_enosys("mount_setattr"); }
-__attribute__((weak)) long sys_move_mount(long, long, long, long, long, long) { return __w32_enosys("move_mount"); }
-__attribute__((weak)) long sys_move_pages(long, long, long, long, long, long) { return __w32_enosys("move_pages"); }
-__attribute__((weak)) long sys_mprotect(long, long, long, long, long, long) { return __w32_enosys("mprotect"); }
-__attribute__((weak)) long sys_mq_getsetattr(long, long, long, long, long, long) { return __w32_enosys("mq_getsetattr"); }
-__attribute__((weak)) long sys_mq_notify(long, long, long, long, long, long) { return __w32_enosys("mq_notify"); }
-__attribute__((weak)) long sys_mq_open(long, long, long, long, long, long) { return __w32_enosys("mq_open"); }
-__attribute__((weak)) long sys_mq_timedreceive(long, long, long, long, long, long) { return __w32_enosys("mq_timedreceive"); }
-__attribute__((weak)) long sys_mq_timedsend(long, long, long, long, long, long) { return __w32_enosys("mq_timedsend"); }
-__attribute__((weak)) long sys_mq_unlink(long, long, long, long, long, long) { return __w32_enosys("mq_unlink"); }
-__attribute__((weak)) long sys_mremap(long, long, long, long, long, long) { return __w32_enosys("mremap"); }
-__attribute__((weak)) long sys_mseal(long, long, long, long, long, long) { return __w32_enosys("mseal"); }
-__attribute__((weak)) long sys_msgctl(long, long, long, long, long, long) { return __w32_enosys("msgctl"); }
-__attribute__((weak)) long sys_msgget(long, long, long, long, long, long) { return __w32_enosys("msgget"); }
-__attribute__((weak)) long sys_msgrcv(long, long, long, long, long, long) { return __w32_enosys("msgrcv"); }
-__attribute__((weak)) long sys_msgsnd(long, long, long, long, long, long) { return __w32_enosys("msgsnd"); }
-__attribute__((weak)) long sys_msync(long, long, long, long, long, long) { return __w32_enosys("msync"); }
-__attribute__((weak)) long sys_munlock(long, long, long, long, long, long) { return __w32_enosys("munlock"); }
-__attribute__((weak)) long sys_munlockall(long, long, long, long, long, long) { return __w32_enosys("munlockall"); }
-__attribute__((weak)) long sys_munmap(long, long, long, long, long, long) { return __w32_enosys("munmap"); }
-__attribute__((weak)) long sys_name_to_handle_at(long, long, long, long, long, long) { return __w32_enosys("name_to_handle_at"); }
-__attribute__((weak)) long sys_nanosleep(long, long, long, long, long, long) { return __w32_enosys("nanosleep"); }
-__attribute__((weak)) long sys_newfstatat(long, long, long, long, long, long) { return __w32_enosys("newfstatat"); }
-__attribute__((weak)) long sys_nfsservctl(long, long, long, long, long, long) { return __w32_enosys("nfsservctl"); }
-__attribute__((weak)) long sys_open(long, long, long, long, long, long) { return __w32_enosys("open"); }
-__attribute__((weak)) long sys_open_by_handle_at(long, long, long, long, long, long) { return __w32_enosys("open_by_handle_at"); }
-__attribute__((weak)) long sys_open_tree(long, long, long, long, long, long) { return __w32_enosys("open_tree"); }
-__attribute__((weak)) long sys_openat(long, long, long, long, long, long) { return __w32_enosys("openat"); }
-__attribute__((weak)) long sys_openat2(long, long, long, long, long, long) { return __w32_enosys("openat2"); }
-__attribute__((weak)) long sys_pause(long, long, long, long, long, long) { return __w32_enosys("pause"); }
-__attribute__((weak)) long sys_perf_event_open(long, long, long, long, long, long) { return __w32_enosys("perf_event_open"); }
-__attribute__((weak)) long sys_personality(long, long, long, long, long, long) { return __w32_enosys("personality"); }
-__attribute__((weak)) long sys_pidfd_getfd(long, long, long, long, long, long) { return __w32_enosys("pidfd_getfd"); }
-__attribute__((weak)) long sys_pidfd_open(long, long, long, long, long, long) { return __w32_enosys("pidfd_open"); }
-__attribute__((weak)) long sys_pidfd_send_signal(long, long, long, long, long, long) { return __w32_enosys("pidfd_send_signal"); }
-__attribute__((weak)) long sys_pipe(long, long, long, long, long, long) { return __w32_enosys("pipe"); }
-__attribute__((weak)) long sys_pipe2(long, long, long, long, long, long) { return __w32_enosys("pipe2"); }
-__attribute__((weak)) long sys_pivot_root(long, long, long, long, long, long) { return __w32_enosys("pivot_root"); }
-__attribute__((weak)) long sys_pkey_alloc(long, long, long, long, long, long) { return __w32_enosys("pkey_alloc"); }
-__attribute__((weak)) long sys_pkey_free(long, long, long, long, long, long) { return __w32_enosys("pkey_free"); }
-__attribute__((weak)) long sys_pkey_mprotect(long, long, long, long, long, long) { return __w32_enosys("pkey_mprotect"); }
-__attribute__((weak)) long sys_poll(long, long, long, long, long, long) { return __w32_enosys("poll"); }
-__attribute__((weak)) long sys_ppoll(long, long, long, long, long, long) { return __w32_enosys("ppoll"); }
-__attribute__((weak)) long sys_prctl(long, long, long, long, long, long) { return __w32_enosys("prctl"); }
-__attribute__((weak)) long sys_pread64(long, long, long, long, long, long) { return __w32_enosys("pread64"); }
-__attribute__((weak)) long sys_preadv(long, long, long, long, long, long) { return __w32_enosys("preadv"); }
-__attribute__((weak)) long sys_preadv2(long, long, long, long, long, long) { return __w32_enosys("preadv2"); }
-__attribute__((weak)) long sys_prlimit64(long, long, long, long, long, long) { return __w32_enosys("prlimit64"); }
-__attribute__((weak)) long sys_process_madvise(long, long, long, long, long, long) { return __w32_enosys("process_madvise"); }
-__attribute__((weak)) long sys_process_mrelease(long, long, long, long, long, long) { return __w32_enosys("process_mrelease"); }
-__attribute__((weak)) long sys_process_vm_readv(long, long, long, long, long, long) { return __w32_enosys("process_vm_readv"); }
-__attribute__((weak)) long sys_process_vm_writev(long, long, long, long, long, long) { return __w32_enosys("process_vm_writev"); }
-__attribute__((weak)) long sys_pselect6(long, long, long, long, long, long) { return __w32_enosys("pselect6"); }
-__attribute__((weak)) long sys_ptrace(long, long, long, long, long, long) { return __w32_enosys("ptrace"); }
-__attribute__((weak)) long sys_putpmsg(long, long, long, long, long, long) { return __w32_enosys("putpmsg"); }
-__attribute__((weak)) long sys_pwrite64(long, long, long, long, long, long) { return __w32_enosys("pwrite64"); }
-__attribute__((weak)) long sys_pwritev(long, long, long, long, long, long) { return __w32_enosys("pwritev"); }
-__attribute__((weak)) long sys_pwritev2(long, long, long, long, long, long) { return __w32_enosys("pwritev2"); }
-__attribute__((weak)) long sys_query_module(long, long, long, long, long, long) { return __w32_enosys("query_module"); }
-__attribute__((weak)) long sys_quotactl(long, long, long, long, long, long) { return __w32_enosys("quotactl"); }
-__attribute__((weak)) long sys_quotactl_fd(long, long, long, long, long, long) { return __w32_enosys("quotactl_fd"); }
-__attribute__((weak)) long sys_read(long, long, long, long, long, long) { return __w32_enosys("read"); }
-__attribute__((weak)) long sys_readahead(long, long, long, long, long, long) { return __w32_enosys("readahead"); }
-__attribute__((weak)) long sys_readlink(long, long, long, long, long, long) { return __w32_enosys("readlink"); }
-__attribute__((weak)) long sys_readlinkat(long, long, long, long, long, long) { return __w32_enosys("readlinkat"); }
-__attribute__((weak)) long sys_readv(long, long, long, long, long, long) { return __w32_enosys("readv"); }
-__attribute__((weak)) long sys_reboot(long, long, long, long, long, long) { return __w32_enosys("reboot"); }
-__attribute__((weak)) long sys_recvfrom(long, long, long, long, long, long) { return __w32_enosys("recvfrom"); }
-__attribute__((weak)) long sys_recvmmsg(long, long, long, long, long, long) { return __w32_enosys("recvmmsg"); }
-__attribute__((weak)) long sys_recvmsg(long, long, long, long, long, long) { return __w32_enosys("recvmsg"); }
-__attribute__((weak)) long sys_remap_file_pages(long, long, long, long, long, long) { return __w32_enosys("remap_file_pages"); }
-__attribute__((weak)) long sys_removexattr(long, long, long, long, long, long) { return __w32_enosys("removexattr"); }
-__attribute__((weak)) long sys_rename(long, long, long, long, long, long) { return __w32_enosys("rename"); }
-__attribute__((weak)) long sys_renameat(long, long, long, long, long, long) { return __w32_enosys("renameat"); }
-__attribute__((weak)) long sys_renameat2(long, long, long, long, long, long) { return __w32_enosys("renameat2"); }
-__attribute__((weak)) long sys_request_key(long, long, long, long, long, long) { return __w32_enosys("request_key"); }
-__attribute__((weak)) long sys_restart_syscall(long, long, long, long, long, long) { return __w32_enosys("restart_syscall"); }
-__attribute__((weak)) long sys_rmdir(long, long, long, long, long, long) { return __w32_enosys("rmdir"); }
-__attribute__((weak)) long sys_rseq(long, long, long, long, long, long) { return __w32_enosys("rseq"); }
-__attribute__((weak)) long sys_rt_sigaction(long, long, long, long, long, long) { return __w32_enosys("rt_sigaction"); }
-__attribute__((weak)) long sys_rt_sigpending(long, long, long, long, long, long) { return __w32_enosys("rt_sigpending"); }
-__attribute__((weak)) long sys_rt_sigprocmask(long, long, long, long, long, long) { return __w32_enosys("rt_sigprocmask"); }
-__attribute__((weak)) long sys_rt_sigqueueinfo(long, long, long, long, long, long) { return __w32_enosys("rt_sigqueueinfo"); }
-__attribute__((weak)) long sys_rt_sigreturn(long, long, long, long, long, long) { return __w32_enosys("rt_sigreturn"); }
-__attribute__((weak)) long sys_rt_sigsuspend(long, long, long, long, long, long) { return __w32_enosys("rt_sigsuspend"); }
-__attribute__((weak)) long sys_rt_sigtimedwait(long, long, long, long, long, long) { return __w32_enosys("rt_sigtimedwait"); }
-__attribute__((weak)) long sys_rt_tgsigqueueinfo(long, long, long, long, long, long) { return __w32_enosys("rt_tgsigqueueinfo"); }
-__attribute__((weak)) long sys_sched_get_priority_max(long, long, long, long, long, long) { return __w32_enosys("sched_get_priority_max"); }
-__attribute__((weak)) long sys_sched_get_priority_min(long, long, long, long, long, long) { return __w32_enosys("sched_get_priority_min"); }
-__attribute__((weak)) long sys_sched_getaffinity(long, long, long, long, long, long) { return __w32_enosys("sched_getaffinity"); }
-__attribute__((weak)) long sys_sched_getattr(long, long, long, long, long, long) { return __w32_enosys("sched_getattr"); }
-__attribute__((weak)) long sys_sched_getparam(long, long, long, long, long, long) { return __w32_enosys("sched_getparam"); }
-__attribute__((weak)) long sys_sched_getscheduler(long, long, long, long, long, long) { return __w32_enosys("sched_getscheduler"); }
-__attribute__((weak)) long sys_sched_rr_get_interval(long, long, long, long, long, long) { return __w32_enosys("sched_rr_get_interval"); }
-__attribute__((weak)) long sys_sched_setaffinity(long, long, long, long, long, long) { return __w32_enosys("sched_setaffinity"); }
-__attribute__((weak)) long sys_sched_setattr(long, long, long, long, long, long) { return __w32_enosys("sched_setattr"); }
-__attribute__((weak)) long sys_sched_setparam(long, long, long, long, long, long) { return __w32_enosys("sched_setparam"); }
-__attribute__((weak)) long sys_sched_setscheduler(long, long, long, long, long, long) { return __w32_enosys("sched_setscheduler"); }
-__attribute__((weak)) long sys_sched_yield(long, long, long, long, long, long) { return __w32_enosys("sched_yield"); }
-__attribute__((weak)) long sys_seccomp(long, long, long, long, long, long) { return __w32_enosys("seccomp"); }
-__attribute__((weak)) long sys_security(long, long, long, long, long, long) { return __w32_enosys("security"); }
-__attribute__((weak)) long sys_select(long, long, long, long, long, long) { return __w32_enosys("select"); }
-__attribute__((weak)) long sys_semctl(long, long, long, long, long, long) { return __w32_enosys("semctl"); }
-__attribute__((weak)) long sys_semget(long, long, long, long, long, long) { return __w32_enosys("semget"); }
-__attribute__((weak)) long sys_semop(long, long, long, long, long, long) { return __w32_enosys("semop"); }
-__attribute__((weak)) long sys_semtimedop(long, long, long, long, long, long) { return __w32_enosys("semtimedop"); }
-__attribute__((weak)) long sys_sendfile(long, long, long, long, long, long) { return __w32_enosys("sendfile"); }
-__attribute__((weak)) long sys_sendmmsg(long, long, long, long, long, long) { return __w32_enosys("sendmmsg"); }
-__attribute__((weak)) long sys_sendmsg(long, long, long, long, long, long) { return __w32_enosys("sendmsg"); }
-__attribute__((weak)) long sys_sendto(long, long, long, long, long, long) { return __w32_enosys("sendto"); }
-__attribute__((weak)) long sys_set_mempolicy(long, long, long, long, long, long) { return __w32_enosys("set_mempolicy"); }
-__attribute__((weak)) long sys_set_mempolicy_home_node(long, long, long, long, long, long) { return __w32_enosys("set_mempolicy_home_node"); }
-__attribute__((weak)) long sys_set_robust_list(long, long, long, long, long, long) { return __w32_enosys("set_robust_list"); }
-__attribute__((weak)) long sys_set_thread_area(long, long, long, long, long, long) { return __w32_enosys("set_thread_area"); }
-__attribute__((weak)) long sys_set_tid_address(long, long, long, long, long, long) { return __w32_enosys("set_tid_address"); }
-__attribute__((weak)) long sys_setdomainname(long, long, long, long, long, long) { return __w32_enosys("setdomainname"); }
-__attribute__((weak)) long sys_setfsgid(long, long, long, long, long, long) { return __w32_enosys("setfsgid"); }
-__attribute__((weak)) long sys_setfsuid(long, long, long, long, long, long) { return __w32_enosys("setfsuid"); }
-__attribute__((weak)) long sys_setgid(long, long, long, long, long, long) { return __w32_enosys("setgid"); }
-__attribute__((weak)) long sys_setgroups(long, long, long, long, long, long) { return __w32_enosys("setgroups"); }
-__attribute__((weak)) long sys_sethostname(long, long, long, long, long, long) { return __w32_enosys("sethostname"); }
-__attribute__((weak)) long sys_setitimer(long, long, long, long, long, long) { return __w32_enosys("setitimer"); }
-__attribute__((weak)) long sys_setns(long, long, long, long, long, long) { return __w32_enosys("setns"); }
-__attribute__((weak)) long sys_setpgid(long, long, long, long, long, long) { return __w32_enosys("setpgid"); }
-__attribute__((weak)) long sys_setpriority(long, long, long, long, long, long) { return __w32_enosys("setpriority"); }
-__attribute__((weak)) long sys_setregid(long, long, long, long, long, long) { return __w32_enosys("setregid"); }
-__attribute__((weak)) long sys_setresgid(long, long, long, long, long, long) { return __w32_enosys("setresgid"); }
-__attribute__((weak)) long sys_setresuid(long, long, long, long, long, long) { return __w32_enosys("setresuid"); }
-__attribute__((weak)) long sys_setreuid(long, long, long, long, long, long) { return __w32_enosys("setreuid"); }
-__attribute__((weak)) long sys_setrlimit(long, long, long, long, long, long) { return __w32_enosys("setrlimit"); }
-__attribute__((weak)) long sys_setsid(long, long, long, long, long, long) { return __w32_enosys("setsid"); }
-__attribute__((weak)) long sys_setsockopt(long, long, long, long, long, long) { return __w32_enosys("setsockopt"); }
-__attribute__((weak)) long sys_settimeofday(long, long, long, long, long, long) { return __w32_enosys("settimeofday"); }
-__attribute__((weak)) long sys_setuid(long, long, long, long, long, long) { return __w32_enosys("setuid"); }
-__attribute__((weak)) long sys_setxattr(long, long, long, long, long, long) { return __w32_enosys("setxattr"); }
-__attribute__((weak)) long sys_shmat(long, long, long, long, long, long) { return __w32_enosys("shmat"); }
-__attribute__((weak)) long sys_shmctl(long, long, long, long, long, long) { return __w32_enosys("shmctl"); }
-__attribute__((weak)) long sys_shmdt(long, long, long, long, long, long) { return __w32_enosys("shmdt"); }
-__attribute__((weak)) long sys_shmget(long, long, long, long, long, long) { return __w32_enosys("shmget"); }
-__attribute__((weak)) long sys_shutdown(long, long, long, long, long, long) { return __w32_enosys("shutdown"); }
-__attribute__((weak)) long sys_sigaltstack(long, long, long, long, long, long) { return __w32_enosys("sigaltstack"); }
-__attribute__((weak)) long sys_signalfd(long, long, long, long, long, long) { return __w32_enosys("signalfd"); }
-__attribute__((weak)) long sys_signalfd4(long, long, long, long, long, long) { return __w32_enosys("signalfd4"); }
-__attribute__((weak)) long sys_socket(long, long, long, long, long, long) { return __w32_enosys("socket"); }
-__attribute__((weak)) long sys_socketpair(long, long, long, long, long, long) { return __w32_enosys("socketpair"); }
-__attribute__((weak)) long sys_splice(long, long, long, long, long, long) { return __w32_enosys("splice"); }
-__attribute__((weak)) long sys_stat(long, long, long, long, long, long) { return __w32_enosys("stat"); }
-__attribute__((weak)) long sys_statfs(long, long, long, long, long, long) { return __w32_enosys("statfs"); }
-__attribute__((weak)) long sys_statmount(long, long, long, long, long, long) { return __w32_enosys("statmount"); }
-__attribute__((weak)) long sys_statx(long, long, long, long, long, long) { return __w32_enosys("statx"); }
-__attribute__((weak)) long sys_swapoff(long, long, long, long, long, long) { return __w32_enosys("swapoff"); }
-__attribute__((weak)) long sys_swapon(long, long, long, long, long, long) { return __w32_enosys("swapon"); }
-__attribute__((weak)) long sys_symlink(long, long, long, long, long, long) { return __w32_enosys("symlink"); }
-__attribute__((weak)) long sys_symlinkat(long, long, long, long, long, long) { return __w32_enosys("symlinkat"); }
-__attribute__((weak)) long sys_sync(long, long, long, long, long, long) { return __w32_enosys("sync"); }
-__attribute__((weak)) long sys_sync_file_range(long, long, long, long, long, long) { return __w32_enosys("sync_file_range"); }
-__attribute__((weak)) long sys_syncfs(long, long, long, long, long, long) { return __w32_enosys("syncfs"); }
-__attribute__((weak)) long sys_sysfs(long, long, long, long, long, long) { return __w32_enosys("sysfs"); }
-__attribute__((weak)) long sys_sysinfo(long, long, long, long, long, long) { return __w32_enosys("sysinfo"); }
-__attribute__((weak)) long sys_syslog(long, long, long, long, long, long) { return __w32_enosys("syslog"); }
-__attribute__((weak)) long sys_tee(long, long, long, long, long, long) { return __w32_enosys("tee"); }
-__attribute__((weak)) long sys_tgkill(long, long, long, long, long, long) { return __w32_enosys("tgkill"); }
-__attribute__((weak)) long sys_time(long, long, long, long, long, long) { return __w32_enosys("time"); }
-__attribute__((weak)) long sys_timer_create(long, long, long, long, long, long) { return __w32_enosys("timer_create"); }
-__attribute__((weak)) long sys_timer_delete(long, long, long, long, long, long) { return __w32_enosys("timer_delete"); }
-__attribute__((weak)) long sys_timer_getoverrun(long, long, long, long, long, long) { return __w32_enosys("timer_getoverrun"); }
-__attribute__((weak)) long sys_timer_gettime(long, long, long, long, long, long) { return __w32_enosys("timer_gettime"); }
-__attribute__((weak)) long sys_timer_settime(long, long, long, long, long, long) { return __w32_enosys("timer_settime"); }
-__attribute__((weak)) long sys_timerfd_create(long, long, long, long, long, long) { return __w32_enosys("timerfd_create"); }
-__attribute__((weak)) long sys_timerfd_gettime(long, long, long, long, long, long) { return __w32_enosys("timerfd_gettime"); }
-__attribute__((weak)) long sys_timerfd_settime(long, long, long, long, long, long) { return __w32_enosys("timerfd_settime"); }
-__attribute__((weak)) long sys_times(long, long, long, long, long, long) { return __w32_enosys("times"); }
-__attribute__((weak)) long sys_tkill(long, long, long, long, long, long) { return __w32_enosys("tkill"); }
-__attribute__((weak)) long sys_truncate(long, long, long, long, long, long) { return __w32_enosys("truncate"); }
-__attribute__((weak)) long sys_tuxcall(long, long, long, long, long, long) { return __w32_enosys("tuxcall"); }
-__attribute__((weak)) long sys_umask(long, long, long, long, long, long) { return __w32_enosys("umask"); }
-__attribute__((weak)) long sys_umount2(long, long, long, long, long, long) { return __w32_enosys("umount2"); }
-__attribute__((weak)) long sys_uname(long, long, long, long, long, long) { return __w32_enosys("uname"); }
-__attribute__((weak)) long sys_unlink(long, long, long, long, long, long) { return __w32_enosys("unlink"); }
-__attribute__((weak)) long sys_unlinkat(long, long, long, long, long, long) { return __w32_enosys("unlinkat"); }
-__attribute__((weak)) long sys_unshare(long, long, long, long, long, long) { return __w32_enosys("unshare"); }
-__attribute__((weak)) long sys_uretprobe(long, long, long, long, long, long) { return __w32_enosys("uretprobe"); }
-__attribute__((weak)) long sys_uselib(long, long, long, long, long, long) { return __w32_enosys("uselib"); }
-__attribute__((weak)) long sys_userfaultfd(long, long, long, long, long, long) { return __w32_enosys("userfaultfd"); }
-__attribute__((weak)) long sys_ustat(long, long, long, long, long, long) { return __w32_enosys("ustat"); }
-__attribute__((weak)) long sys_utime(long, long, long, long, long, long) { return __w32_enosys("utime"); }
-__attribute__((weak)) long sys_utimensat(long, long, long, long, long, long) { return __w32_enosys("utimensat"); }
-__attribute__((weak)) long sys_utimes(long, long, long, long, long, long) { return __w32_enosys("utimes"); }
-__attribute__((weak)) long sys_vfork(long, long, long, long, long, long) { return __w32_enosys("vfork"); }
-__attribute__((weak)) long sys_vhangup(long, long, long, long, long, long) { return __w32_enosys("vhangup"); }
-__attribute__((weak)) long sys_vmsplice(long, long, long, long, long, long) { return __w32_enosys("vmsplice"); }
-__attribute__((weak)) long sys_vserver(long, long, long, long, long, long) { return __w32_enosys("vserver"); }
-__attribute__((weak)) long sys_wait4(long, long, long, long, long, long) { return __w32_enosys("wait4"); }
-__attribute__((weak)) long sys_waitid(long, long, long, long, long, long) { return __w32_enosys("waitid"); }
-__attribute__((weak)) long sys_write(long, long, long, long, long, long) { return __w32_enosys("write"); }
-__attribute__((weak)) long sys_writev(long, long, long, long, long, long) { return __w32_enosys("writev"); }
+__attribute__((weak)) long sys__sysctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("_sysctl"); }
+__attribute__((weak)) long sys_accept(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("accept"); }
+__attribute__((weak)) long sys_accept4(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("accept4"); }
+__attribute__((weak)) long sys_access(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("access"); }
+__attribute__((weak)) long sys_acct(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("acct"); }
+__attribute__((weak)) long sys_add_key(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("add_key"); }
+__attribute__((weak)) long sys_adjtimex(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("adjtimex"); }
+__attribute__((weak)) long sys_afs_syscall(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("afs_syscall"); }
+__attribute__((weak)) long sys_alarm(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("alarm"); }
+__attribute__((weak)) long sys_arch_prctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("arch_prctl"); }
+__attribute__((weak)) long sys_bind(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("bind"); }
+__attribute__((weak)) long sys_bpf(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("bpf"); }
+__attribute__((weak)) long sys_brk(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("brk"); }
+__attribute__((weak)) long sys_cachestat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("cachestat"); }
+__attribute__((weak)) long sys_capget(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("capget"); }
+__attribute__((weak)) long sys_capset(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("capset"); }
+__attribute__((weak)) long sys_chdir(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("chdir"); }
+__attribute__((weak)) long sys_chmod(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("chmod"); }
+__attribute__((weak)) long sys_chown(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("chown"); }
+__attribute__((weak)) long sys_chroot(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("chroot"); }
+__attribute__((weak)) long sys_clock_adjtime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clock_adjtime"); }
+__attribute__((weak)) long sys_clock_getres(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clock_getres"); }
+__attribute__((weak)) long sys_clock_gettime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clock_gettime"); }
+__attribute__((weak)) long sys_clock_nanosleep(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clock_nanosleep"); }
+__attribute__((weak)) long sys_clock_settime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clock_settime"); }
+__attribute__((weak)) long sys_clone(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clone"); }
+__attribute__((weak)) long sys_clone3(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("clone3"); }
+__attribute__((weak)) long sys_close(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("close"); }
+__attribute__((weak)) long sys_close_range(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("close_range"); }
+__attribute__((weak)) long sys_connect(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("connect"); }
+__attribute__((weak)) long sys_copy_file_range(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("copy_file_range"); }
+__attribute__((weak)) long sys_creat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("creat"); }
+__attribute__((weak)) long sys_create_module(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("create_module"); }
+__attribute__((weak)) long sys_delete_module(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("delete_module"); }
+__attribute__((weak)) long sys_dup(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("dup"); }
+__attribute__((weak)) long sys_dup2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("dup2"); }
+__attribute__((weak)) long sys_dup3(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("dup3"); }
+__attribute__((weak)) long sys_epoll_create(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_create"); }
+__attribute__((weak)) long sys_epoll_create1(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_create1"); }
+__attribute__((weak)) long sys_epoll_ctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_ctl"); }
+__attribute__((weak)) long sys_epoll_ctl_old(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_ctl_old"); }
+__attribute__((weak)) long sys_epoll_pwait(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_pwait"); }
+__attribute__((weak)) long sys_epoll_pwait2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_pwait2"); }
+__attribute__((weak)) long sys_epoll_wait(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_wait"); }
+__attribute__((weak)) long sys_epoll_wait_old(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("epoll_wait_old"); }
+__attribute__((weak)) long sys_eventfd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("eventfd"); }
+__attribute__((weak)) long sys_eventfd2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("eventfd2"); }
+__attribute__((weak)) long sys_execve(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("execve"); }
+__attribute__((weak)) long sys_execveat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("execveat"); }
+__attribute__((weak)) long sys_exit(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("exit"); }
+__attribute__((weak)) long sys_exit_group(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("exit_group"); }
+__attribute__((weak)) long sys_faccessat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("faccessat"); }
+__attribute__((weak)) long sys_faccessat2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("faccessat2"); }
+__attribute__((weak)) long sys_fadvise64(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fadvise64"); }
+__attribute__((weak)) long sys_fallocate(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fallocate"); }
+__attribute__((weak)) long sys_fanotify_init(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fanotify_init"); }
+__attribute__((weak)) long sys_fanotify_mark(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fanotify_mark"); }
+__attribute__((weak)) long sys_fchdir(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fchdir"); }
+__attribute__((weak)) long sys_fchmod(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fchmod"); }
+__attribute__((weak)) long sys_fchmodat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fchmodat"); }
+__attribute__((weak)) long sys_fchmodat2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fchmodat2"); }
+__attribute__((weak)) long sys_fchown(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fchown"); }
+__attribute__((weak)) long sys_fchownat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fchownat"); }
+__attribute__((weak)) long sys_fcntl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fcntl"); }
+__attribute__((weak)) long sys_fdatasync(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fdatasync"); }
+__attribute__((weak)) long sys_fgetxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fgetxattr"); }
+__attribute__((weak)) long sys_finit_module(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("finit_module"); }
+__attribute__((weak)) long sys_flistxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("flistxattr"); }
+__attribute__((weak)) long sys_flock(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("flock"); }
+__attribute__((weak)) long sys_fork(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fork"); }
+__attribute__((weak)) long sys_fremovexattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fremovexattr"); }
+__attribute__((weak)) long sys_fsconfig(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fsconfig"); }
+__attribute__((weak)) long sys_fsetxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fsetxattr"); }
+__attribute__((weak)) long sys_fsmount(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fsmount"); }
+__attribute__((weak)) long sys_fsopen(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fsopen"); }
+__attribute__((weak)) long sys_fspick(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fspick"); }
+__attribute__((weak)) long sys_fstat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fstat"); }
+__attribute__((weak)) long sys_fstatfs(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fstatfs"); }
+__attribute__((weak)) long sys_fsync(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("fsync"); }
+__attribute__((weak)) long sys_ftruncate(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ftruncate"); }
+__attribute__((weak)) long sys_futex(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("futex"); }
+__attribute__((weak)) long sys_futex_requeue(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("futex_requeue"); }
+__attribute__((weak)) long sys_futex_wait(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("futex_wait"); }
+__attribute__((weak)) long sys_futex_waitv(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("futex_waitv"); }
+__attribute__((weak)) long sys_futex_wake(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("futex_wake"); }
+__attribute__((weak)) long sys_futimesat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("futimesat"); }
+__attribute__((weak)) long sys_get_kernel_syms(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("get_kernel_syms"); }
+__attribute__((weak)) long sys_get_mempolicy(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("get_mempolicy"); }
+__attribute__((weak)) long sys_get_robust_list(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("get_robust_list"); }
+__attribute__((weak)) long sys_get_thread_area(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("get_thread_area"); }
+__attribute__((weak)) long sys_getcpu(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getcpu"); }
+__attribute__((weak)) long sys_getcwd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getcwd"); }
+__attribute__((weak)) long sys_getdents(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getdents"); }
+__attribute__((weak)) long sys_getdents64(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getdents64"); }
+__attribute__((weak)) long sys_getegid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getegid"); }
+__attribute__((weak)) long sys_geteuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("geteuid"); }
+__attribute__((weak)) long sys_getgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getgid"); }
+__attribute__((weak)) long sys_getgroups(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getgroups"); }
+__attribute__((weak)) long sys_getitimer(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getitimer"); }
+__attribute__((weak)) long sys_getpeername(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getpeername"); }
+__attribute__((weak)) long sys_getpgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getpgid"); }
+__attribute__((weak)) long sys_getpgrp(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getpgrp"); }
+__attribute__((weak)) long sys_getpid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getpid"); }
+__attribute__((weak)) long sys_getpmsg(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getpmsg"); }
+__attribute__((weak)) long sys_getppid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getppid"); }
+__attribute__((weak)) long sys_getpriority(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getpriority"); }
+__attribute__((weak)) long sys_getrandom(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getrandom"); }
+__attribute__((weak)) long sys_getresgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getresgid"); }
+__attribute__((weak)) long sys_getresuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getresuid"); }
+__attribute__((weak)) long sys_getrlimit(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getrlimit"); }
+__attribute__((weak)) long sys_getrusage(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getrusage"); }
+__attribute__((weak)) long sys_getsid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getsid"); }
+__attribute__((weak)) long sys_getsockname(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getsockname"); }
+__attribute__((weak)) long sys_getsockopt(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getsockopt"); }
+__attribute__((weak)) long sys_gettid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("gettid"); }
+__attribute__((weak)) long sys_gettimeofday(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("gettimeofday"); }
+__attribute__((weak)) long sys_getuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getuid"); }
+__attribute__((weak)) long sys_getxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("getxattr"); }
+__attribute__((weak)) long sys_init_module(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("init_module"); }
+__attribute__((weak)) long sys_inotify_add_watch(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("inotify_add_watch"); }
+__attribute__((weak)) long sys_inotify_init(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("inotify_init"); }
+__attribute__((weak)) long sys_inotify_init1(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("inotify_init1"); }
+__attribute__((weak)) long sys_inotify_rm_watch(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("inotify_rm_watch"); }
+__attribute__((weak)) long sys_io_cancel(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_cancel"); }
+__attribute__((weak)) long sys_io_destroy(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_destroy"); }
+__attribute__((weak)) long sys_io_getevents(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_getevents"); }
+__attribute__((weak)) long sys_io_pgetevents(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_pgetevents"); }
+__attribute__((weak)) long sys_io_setup(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_setup"); }
+__attribute__((weak)) long sys_io_submit(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_submit"); }
+__attribute__((weak)) long sys_io_uring_enter(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_uring_enter"); }
+__attribute__((weak)) long sys_io_uring_register(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_uring_register"); }
+__attribute__((weak)) long sys_io_uring_setup(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("io_uring_setup"); }
+__attribute__((weak)) long sys_ioctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ioctl"); }
+__attribute__((weak)) long sys_ioperm(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ioperm"); }
+__attribute__((weak)) long sys_iopl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("iopl"); }
+__attribute__((weak)) long sys_ioprio_get(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ioprio_get"); }
+__attribute__((weak)) long sys_ioprio_set(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ioprio_set"); }
+__attribute__((weak)) long sys_kcmp(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("kcmp"); }
+__attribute__((weak)) long sys_kexec_file_load(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("kexec_file_load"); }
+__attribute__((weak)) long sys_kexec_load(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("kexec_load"); }
+__attribute__((weak)) long sys_keyctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("keyctl"); }
+__attribute__((weak)) long sys_kill(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("kill"); }
+__attribute__((weak)) long sys_landlock_add_rule(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("landlock_add_rule"); }
+__attribute__((weak)) long sys_landlock_create_ruleset(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("landlock_create_ruleset"); }
+__attribute__((weak)) long sys_landlock_restrict_self(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("landlock_restrict_self"); }
+__attribute__((weak)) long sys_lchown(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lchown"); }
+__attribute__((weak)) long sys_lgetxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lgetxattr"); }
+__attribute__((weak)) long sys_link(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("link"); }
+__attribute__((weak)) long sys_linkat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("linkat"); }
+__attribute__((weak)) long sys_listen(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("listen"); }
+__attribute__((weak)) long sys_listmount(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("listmount"); }
+__attribute__((weak)) long sys_listxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("listxattr"); }
+__attribute__((weak)) long sys_llistxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("llistxattr"); }
+__attribute__((weak)) long sys_lookup_dcookie(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lookup_dcookie"); }
+__attribute__((weak)) long sys_lremovexattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lremovexattr"); }
+__attribute__((weak)) long sys_lseek(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lseek"); }
+__attribute__((weak)) long sys_lsetxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lsetxattr"); }
+__attribute__((weak)) long sys_lsm_get_self_attr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lsm_get_self_attr"); }
+__attribute__((weak)) long sys_lsm_list_modules(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lsm_list_modules"); }
+__attribute__((weak)) long sys_lsm_set_self_attr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lsm_set_self_attr"); }
+__attribute__((weak)) long sys_lstat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("lstat"); }
+__attribute__((weak)) long sys_madvise(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("madvise"); }
+__attribute__((weak)) long sys_map_shadow_stack(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("map_shadow_stack"); }
+__attribute__((weak)) long sys_mbind(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mbind"); }
+__attribute__((weak)) long sys_membarrier(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("membarrier"); }
+__attribute__((weak)) long sys_memfd_create(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("memfd_create"); }
+__attribute__((weak)) long sys_memfd_secret(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("memfd_secret"); }
+__attribute__((weak)) long sys_migrate_pages(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("migrate_pages"); }
+__attribute__((weak)) long sys_mincore(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mincore"); }
+__attribute__((weak)) long sys_mkdir(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mkdir"); }
+__attribute__((weak)) long sys_mkdirat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mkdirat"); }
+__attribute__((weak)) long sys_mknod(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mknod"); }
+__attribute__((weak)) long sys_mknodat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mknodat"); }
+__attribute__((weak)) long sys_mlock(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mlock"); }
+__attribute__((weak)) long sys_mlock2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mlock2"); }
+__attribute__((weak)) long sys_mlockall(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mlockall"); }
+__attribute__((weak)) long sys_mmap(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mmap"); }
+__attribute__((weak)) long sys_modify_ldt(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("modify_ldt"); }
+__attribute__((weak)) long sys_mount(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mount"); }
+__attribute__((weak)) long sys_mount_setattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mount_setattr"); }
+__attribute__((weak)) long sys_move_mount(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("move_mount"); }
+__attribute__((weak)) long sys_move_pages(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("move_pages"); }
+__attribute__((weak)) long sys_mprotect(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mprotect"); }
+__attribute__((weak)) long sys_mq_getsetattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mq_getsetattr"); }
+__attribute__((weak)) long sys_mq_notify(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mq_notify"); }
+__attribute__((weak)) long sys_mq_open(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mq_open"); }
+__attribute__((weak)) long sys_mq_timedreceive(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mq_timedreceive"); }
+__attribute__((weak)) long sys_mq_timedsend(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mq_timedsend"); }
+__attribute__((weak)) long sys_mq_unlink(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mq_unlink"); }
+__attribute__((weak)) long sys_mremap(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mremap"); }
+__attribute__((weak)) long sys_mseal(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("mseal"); }
+__attribute__((weak)) long sys_msgctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("msgctl"); }
+__attribute__((weak)) long sys_msgget(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("msgget"); }
+__attribute__((weak)) long sys_msgrcv(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("msgrcv"); }
+__attribute__((weak)) long sys_msgsnd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("msgsnd"); }
+__attribute__((weak)) long sys_msync(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("msync"); }
+__attribute__((weak)) long sys_munlock(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("munlock"); }
+__attribute__((weak)) long sys_munlockall(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("munlockall"); }
+__attribute__((weak)) long sys_munmap(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("munmap"); }
+__attribute__((weak)) long sys_name_to_handle_at(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("name_to_handle_at"); }
+__attribute__((weak)) long sys_nanosleep(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("nanosleep"); }
+__attribute__((weak)) long sys_newfstatat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("newfstatat"); }
+__attribute__((weak)) long sys_nfsservctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("nfsservctl"); }
+__attribute__((weak)) long sys_open(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("open"); }
+__attribute__((weak)) long sys_open_by_handle_at(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("open_by_handle_at"); }
+__attribute__((weak)) long sys_open_tree(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("open_tree"); }
+__attribute__((weak)) long sys_openat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("openat"); }
+__attribute__((weak)) long sys_openat2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("openat2"); }
+__attribute__((weak)) long sys_pause(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pause"); }
+__attribute__((weak)) long sys_perf_event_open(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("perf_event_open"); }
+__attribute__((weak)) long sys_personality(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("personality"); }
+__attribute__((weak)) long sys_pidfd_getfd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pidfd_getfd"); }
+__attribute__((weak)) long sys_pidfd_open(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pidfd_open"); }
+__attribute__((weak)) long sys_pidfd_send_signal(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pidfd_send_signal"); }
+__attribute__((weak)) long sys_pipe(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pipe"); }
+__attribute__((weak)) long sys_pipe2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pipe2"); }
+__attribute__((weak)) long sys_pivot_root(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pivot_root"); }
+__attribute__((weak)) long sys_pkey_alloc(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pkey_alloc"); }
+__attribute__((weak)) long sys_pkey_free(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pkey_free"); }
+__attribute__((weak)) long sys_pkey_mprotect(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pkey_mprotect"); }
+__attribute__((weak)) long sys_poll(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("poll"); }
+__attribute__((weak)) long sys_ppoll(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ppoll"); }
+__attribute__((weak)) long sys_prctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("prctl"); }
+__attribute__((weak)) long sys_pread64(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pread64"); }
+__attribute__((weak)) long sys_preadv(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("preadv"); }
+__attribute__((weak)) long sys_preadv2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("preadv2"); }
+__attribute__((weak)) long sys_prlimit64(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("prlimit64"); }
+__attribute__((weak)) long sys_process_madvise(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("process_madvise"); }
+__attribute__((weak)) long sys_process_mrelease(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("process_mrelease"); }
+__attribute__((weak)) long sys_process_vm_readv(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("process_vm_readv"); }
+__attribute__((weak)) long sys_process_vm_writev(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("process_vm_writev"); }
+__attribute__((weak)) long sys_pselect6(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pselect6"); }
+__attribute__((weak)) long sys_ptrace(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ptrace"); }
+__attribute__((weak)) long sys_putpmsg(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("putpmsg"); }
+__attribute__((weak)) long sys_pwrite64(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pwrite64"); }
+__attribute__((weak)) long sys_pwritev(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pwritev"); }
+__attribute__((weak)) long sys_pwritev2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("pwritev2"); }
+__attribute__((weak)) long sys_query_module(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("query_module"); }
+__attribute__((weak)) long sys_quotactl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("quotactl"); }
+__attribute__((weak)) long sys_quotactl_fd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("quotactl_fd"); }
+__attribute__((weak)) long sys_read(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("read"); }
+__attribute__((weak)) long sys_readahead(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("readahead"); }
+__attribute__((weak)) long sys_readlink(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("readlink"); }
+__attribute__((weak)) long sys_readlinkat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("readlinkat"); }
+__attribute__((weak)) long sys_readv(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("readv"); }
+__attribute__((weak)) long sys_reboot(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("reboot"); }
+__attribute__((weak)) long sys_recvfrom(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("recvfrom"); }
+__attribute__((weak)) long sys_recvmmsg(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("recvmmsg"); }
+__attribute__((weak)) long sys_recvmsg(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("recvmsg"); }
+__attribute__((weak)) long sys_remap_file_pages(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("remap_file_pages"); }
+__attribute__((weak)) long sys_removexattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("removexattr"); }
+__attribute__((weak)) long sys_rename(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rename"); }
+__attribute__((weak)) long sys_renameat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("renameat"); }
+__attribute__((weak)) long sys_renameat2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("renameat2"); }
+__attribute__((weak)) long sys_request_key(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("request_key"); }
+__attribute__((weak)) long sys_restart_syscall(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("restart_syscall"); }
+__attribute__((weak)) long sys_rmdir(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rmdir"); }
+__attribute__((weak)) long sys_rseq(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rseq"); }
+__attribute__((weak)) long sys_rt_sigaction(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigaction"); }
+__attribute__((weak)) long sys_rt_sigpending(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigpending"); }
+__attribute__((weak)) long sys_rt_sigprocmask(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigprocmask"); }
+__attribute__((weak)) long sys_rt_sigqueueinfo(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigqueueinfo"); }
+__attribute__((weak)) long sys_rt_sigreturn(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigreturn"); }
+__attribute__((weak)) long sys_rt_sigsuspend(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigsuspend"); }
+__attribute__((weak)) long sys_rt_sigtimedwait(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_sigtimedwait"); }
+__attribute__((weak)) long sys_rt_tgsigqueueinfo(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("rt_tgsigqueueinfo"); }
+__attribute__((weak)) long sys_sched_get_priority_max(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_get_priority_max"); }
+__attribute__((weak)) long sys_sched_get_priority_min(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_get_priority_min"); }
+__attribute__((weak)) long sys_sched_getaffinity(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_getaffinity"); }
+__attribute__((weak)) long sys_sched_getattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_getattr"); }
+__attribute__((weak)) long sys_sched_getparam(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_getparam"); }
+__attribute__((weak)) long sys_sched_getscheduler(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_getscheduler"); }
+__attribute__((weak)) long sys_sched_rr_get_interval(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_rr_get_interval"); }
+__attribute__((weak)) long sys_sched_setaffinity(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_setaffinity"); }
+__attribute__((weak)) long sys_sched_setattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_setattr"); }
+__attribute__((weak)) long sys_sched_setparam(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_setparam"); }
+__attribute__((weak)) long sys_sched_setscheduler(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_setscheduler"); }
+__attribute__((weak)) long sys_sched_yield(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sched_yield"); }
+__attribute__((weak)) long sys_seccomp(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("seccomp"); }
+__attribute__((weak)) long sys_security(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("security"); }
+__attribute__((weak)) long sys_select(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("select"); }
+__attribute__((weak)) long sys_semctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("semctl"); }
+__attribute__((weak)) long sys_semget(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("semget"); }
+__attribute__((weak)) long sys_semop(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("semop"); }
+__attribute__((weak)) long sys_semtimedop(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("semtimedop"); }
+__attribute__((weak)) long sys_sendfile(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sendfile"); }
+__attribute__((weak)) long sys_sendmmsg(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sendmmsg"); }
+__attribute__((weak)) long sys_sendmsg(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sendmsg"); }
+__attribute__((weak)) long sys_sendto(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sendto"); }
+__attribute__((weak)) long sys_set_mempolicy(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("set_mempolicy"); }
+__attribute__((weak)) long sys_set_mempolicy_home_node(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("set_mempolicy_home_node"); }
+__attribute__((weak)) long sys_set_robust_list(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("set_robust_list"); }
+__attribute__((weak)) long sys_set_thread_area(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("set_thread_area"); }
+__attribute__((weak)) long sys_set_tid_address(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("set_tid_address"); }
+__attribute__((weak)) long sys_setdomainname(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setdomainname"); }
+__attribute__((weak)) long sys_setfsgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setfsgid"); }
+__attribute__((weak)) long sys_setfsuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setfsuid"); }
+__attribute__((weak)) long sys_setgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setgid"); }
+__attribute__((weak)) long sys_setgroups(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setgroups"); }
+__attribute__((weak)) long sys_sethostname(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sethostname"); }
+__attribute__((weak)) long sys_setitimer(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setitimer"); }
+__attribute__((weak)) long sys_setns(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setns"); }
+__attribute__((weak)) long sys_setpgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setpgid"); }
+__attribute__((weak)) long sys_setpriority(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setpriority"); }
+__attribute__((weak)) long sys_setregid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setregid"); }
+__attribute__((weak)) long sys_setresgid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setresgid"); }
+__attribute__((weak)) long sys_setresuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setresuid"); }
+__attribute__((weak)) long sys_setreuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setreuid"); }
+__attribute__((weak)) long sys_setrlimit(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setrlimit"); }
+__attribute__((weak)) long sys_setsid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setsid"); }
+__attribute__((weak)) long sys_setsockopt(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setsockopt"); }
+__attribute__((weak)) long sys_settimeofday(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("settimeofday"); }
+__attribute__((weak)) long sys_setuid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setuid"); }
+__attribute__((weak)) long sys_setxattr(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("setxattr"); }
+__attribute__((weak)) long sys_shmat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("shmat"); }
+__attribute__((weak)) long sys_shmctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("shmctl"); }
+__attribute__((weak)) long sys_shmdt(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("shmdt"); }
+__attribute__((weak)) long sys_shmget(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("shmget"); }
+__attribute__((weak)) long sys_shutdown(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("shutdown"); }
+__attribute__((weak)) long sys_sigaltstack(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sigaltstack"); }
+__attribute__((weak)) long sys_signalfd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("signalfd"); }
+__attribute__((weak)) long sys_signalfd4(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("signalfd4"); }
+__attribute__((weak)) long sys_socket(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("socket"); }
+__attribute__((weak)) long sys_socketpair(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("socketpair"); }
+__attribute__((weak)) long sys_splice(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("splice"); }
+__attribute__((weak)) long sys_stat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("stat"); }
+__attribute__((weak)) long sys_statfs(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("statfs"); }
+__attribute__((weak)) long sys_statmount(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("statmount"); }
+__attribute__((weak)) long sys_statx(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("statx"); }
+__attribute__((weak)) long sys_swapoff(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("swapoff"); }
+__attribute__((weak)) long sys_swapon(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("swapon"); }
+__attribute__((weak)) long sys_symlink(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("symlink"); }
+__attribute__((weak)) long sys_symlinkat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("symlinkat"); }
+__attribute__((weak)) long sys_sync(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sync"); }
+__attribute__((weak)) long sys_sync_file_range(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sync_file_range"); }
+__attribute__((weak)) long sys_syncfs(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("syncfs"); }
+__attribute__((weak)) long sys_sysfs(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sysfs"); }
+__attribute__((weak)) long sys_sysinfo(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("sysinfo"); }
+__attribute__((weak)) long sys_syslog(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("syslog"); }
+__attribute__((weak)) long sys_tee(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("tee"); }
+__attribute__((weak)) long sys_tgkill(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("tgkill"); }
+__attribute__((weak)) long sys_time(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("time"); }
+__attribute__((weak)) long sys_timer_create(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timer_create"); }
+__attribute__((weak)) long sys_timer_delete(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timer_delete"); }
+__attribute__((weak)) long sys_timer_getoverrun(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timer_getoverrun"); }
+__attribute__((weak)) long sys_timer_gettime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timer_gettime"); }
+__attribute__((weak)) long sys_timer_settime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timer_settime"); }
+__attribute__((weak)) long sys_timerfd_create(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timerfd_create"); }
+__attribute__((weak)) long sys_timerfd_gettime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timerfd_gettime"); }
+__attribute__((weak)) long sys_timerfd_settime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("timerfd_settime"); }
+__attribute__((weak)) long sys_times(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("times"); }
+__attribute__((weak)) long sys_tkill(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("tkill"); }
+__attribute__((weak)) long sys_truncate(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("truncate"); }
+__attribute__((weak)) long sys_tuxcall(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("tuxcall"); }
+__attribute__((weak)) long sys_umask(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("umask"); }
+__attribute__((weak)) long sys_umount2(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("umount2"); }
+__attribute__((weak)) long sys_uname(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("uname"); }
+__attribute__((weak)) long sys_unlink(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("unlink"); }
+__attribute__((weak)) long sys_unlinkat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("unlinkat"); }
+__attribute__((weak)) long sys_unshare(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("unshare"); }
+__attribute__((weak)) long sys_uretprobe(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("uretprobe"); }
+__attribute__((weak)) long sys_uselib(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("uselib"); }
+__attribute__((weak)) long sys_userfaultfd(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("userfaultfd"); }
+__attribute__((weak)) long sys_ustat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("ustat"); }
+__attribute__((weak)) long sys_utime(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("utime"); }
+__attribute__((weak)) long sys_utimensat(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("utimensat"); }
+__attribute__((weak)) long sys_utimes(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("utimes"); }
+__attribute__((weak)) long sys_vfork(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("vfork"); }
+__attribute__((weak)) long sys_vhangup(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("vhangup"); }
+__attribute__((weak)) long sys_vmsplice(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("vmsplice"); }
+__attribute__((weak)) long sys_vserver(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("vserver"); }
+__attribute__((weak)) long sys_wait4(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("wait4"); }
+__attribute__((weak)) long sys_waitid(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("waitid"); }
+__attribute__((weak)) long sys_write(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("write"); }
+__attribute__((weak)) long sys_writev(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("writev"); }
 
 long getuid(void) {
   long r = sys_getuid(0, 0, 0, 0, 0, 0);
