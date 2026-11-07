@@ -268,11 +268,11 @@ void meminfo(Text& t) {
   const unsigned long long total = m.total_phys / 1024, avail = m.avail_phys / 1024;
   const unsigned long long swap_total = (m.total_page > m.total_phys ? m.total_page - m.total_phys : 0) / 1024;
   const unsigned long long swap_free = (m.avail_page > m.avail_phys ? m.avail_page - m.avail_phys : 0) / 1024;
+  const unsigned long long commit_limit = m.total_page / 1024, committed = (m.total_page - m.avail_page) / 1024;
   t.add("MemTotal:       %8llu kB\nMemFree:        %8llu kB\nMemAvailable:   %8llu kB\nBuffers:        %8u kB\n"
         "Cached:         %8u kB\nSwapCached:     %8u kB\nSwapTotal:      %8llu kB\nSwapFree:       %8llu kB\n"
         "CommitLimit:    %8llu kB\nCommitted_AS:   %8llu kB\n",
-        total, avail, avail, 0u, 0u, 0u, swap_total, swap_free, m.total_page / 1024,
-        (m.total_page - m.avail_page) / 1024);
+        total, avail, avail, 0u, 0u, 0u, swap_total, swap_free, commit_limit, committed);
 }
 
 void cmdline(Text& t) {
