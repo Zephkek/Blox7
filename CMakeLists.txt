@@ -644,8 +644,7 @@ if(BLOX7_WIN32)
   target_link_options(blox7 PRIVATE
     -Wl,--exclude-libs,libblox7_bionic_stdio_runtime.a
   )
-  # Roblox's own app icon, from the active payload, for the windows
-  # the focused TextBox on a layer of its own over the game window
+  # the focused TextBox gets its own layer over the game window
   target_sources(blox7 PRIVATE win/runtime/text_layer_win.cc)
   target_link_libraries(blox7 PRIVATE Blox7::Update SDL3::SDL3)
 endif()
