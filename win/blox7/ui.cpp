@@ -1685,7 +1685,8 @@ void start_unpack() {
     });
     const bool installed = error.empty();
     if (installed) prepare_data(g.paths);
-    PostMessageW(g.main.hwnd, kUnpackDone, 0, reinterpret_cast<LPARAM>(new std::wstring(std::move(error))));
+    auto* result = new std::wstring(std::move(error));
+    if (!PostMessageW(g.main.hwnd, kUnpackDone, 0, reinterpret_cast<LPARAM>(result))) delete result;
     if (installed) remove_old_runtimes(g.paths);
   }).detach();
 }
