@@ -1,3 +1,2 @@
-# Preserve exact upstream whitespace in the provenance-locked Android core
-# snapshot. Local Blox7 sources remain subject to git diff --check.
+# upstream's android core snapshot keeps its whitespace as is
 third_party/mcpelauncher-linker/core/** -whitespace
