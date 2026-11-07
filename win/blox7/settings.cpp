@@ -743,7 +743,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["shader"] = narrow(s.shader);
   const bool vulkan = s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan";
   set_windows_gpu_preference(paths, !vulkan && !s.gpu.empty() ? windows_gpu_preference(s.gpu) : 0, ini);
-  const std::wstring links = set_join_links(paths, s.join_links, ini);
+  std::wstring links = set_join_links(paths, s.join_links, ini);
   if (!write_ini(ini_path(paths), ini)) return L"cannot write launcher.ini";
   return links;
 }
