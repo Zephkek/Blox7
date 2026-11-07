@@ -651,7 +651,7 @@ void ClearCookieString(std::string* value) {
   if (value == nullptr) {
     return;
   }
-  volatile char* byte = value->empty() ? nullptr : value->data();
+  volatile char* byte = value->data();
   for (std::size_t index = 0; index < value->size(); ++index) {
     byte[index] = '\0';
   }
@@ -2343,7 +2343,7 @@ void ClearSensitiveString(std::string* value) {
   if (value == nullptr) {
     return;
   }
-  volatile char* bytes = value->empty() ? nullptr : value->data();
+  volatile char* bytes = value->data();
   for (std::size_t index = 0; index < value->size(); ++index) {
     bytes[index] = '\0';
   }

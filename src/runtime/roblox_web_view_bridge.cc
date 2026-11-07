@@ -15,7 +15,7 @@ namespace runtime {
 namespace {
 
 void ClearSensitiveString(std::string* value) {
-  volatile char* bytes = value->empty() ? nullptr : value->data();
+  volatile char* bytes = value->data();
   for (std::size_t index = 0; index < value->size(); ++index) {
     bytes[index] = '\0';
   }

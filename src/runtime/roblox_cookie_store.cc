@@ -40,7 +40,7 @@ std::atomic<void (*)(std::string_view)> warning_handler{nullptr};
 std::atomic<bool> warning_shown{false};
 
 void ClearString(std::string* value) {
-  volatile char* bytes = value->empty() ? nullptr : value->data();
+  volatile char* bytes = value->data();
   for (size_t i = 0; i < value->size(); ++i) bytes[i] = '\0';
   value->clear();
 }

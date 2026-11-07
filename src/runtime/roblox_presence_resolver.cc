@@ -60,7 +60,7 @@ std::string ReadStoredRoblosecurityCookie(
     if (end == remaining.npos) break;
     remaining.remove_prefix(end + 1);
   }
-  volatile char* bytes = cookie.value.empty() ? nullptr : cookie.value.data();
+  volatile char* bytes = cookie.value.data();
   for (size_t i = 0; i < cookie.value.size(); ++i) bytes[i] = '\0';
   for (unsigned char ch : value) {
     if (ch <= 0x20 || ch >= 0x7f || ch == ';') return {};

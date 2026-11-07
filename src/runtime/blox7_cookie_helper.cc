@@ -11,7 +11,7 @@ namespace {
 constexpr size_t kMaximumCookieBytes = 1024 * 1024;
 
 void Clear(std::string& value) {
-  volatile char* bytes = value.empty() ? nullptr : value.data();
+  volatile char* bytes = value.data();
   for (size_t i = 0; i < value.size(); ++i) bytes[i] = '\0';
 }
 }  // namespace

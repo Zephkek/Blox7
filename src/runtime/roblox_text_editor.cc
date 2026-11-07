@@ -237,7 +237,7 @@ void SecureClear(std::string* text) {
   if (text == nullptr) {
     return;
   }
-  volatile char* bytes = text->empty() ? nullptr : &(*text)[0];
+  volatile char* bytes = text->data();
   for (std::size_t index = 0; index < text->size(); ++index) {
     bytes[index] = 0;
   }

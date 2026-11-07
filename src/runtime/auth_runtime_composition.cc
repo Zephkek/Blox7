@@ -806,7 +806,7 @@ void ClearSensitiveString(std::string* value) {
   if (value == nullptr) {
     return;
   }
-  volatile char* byte = value->empty() ? nullptr : value->data();
+  volatile char* byte = value->data();
   for (size_t index = 0; index < value->size(); ++index) {
     byte[index] = '\0';
   }
