@@ -4,7 +4,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(Blox7PlatformGraphicsFoundation LANGUAGES CXX)
 
-# Standalone compile smoke for the additive foundation targets. The main
-# project can include the same module after its dependency declarations.
+# compile smoke for the graphics foundation module on its own
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/Blox7PlatformGraphics.cmake)

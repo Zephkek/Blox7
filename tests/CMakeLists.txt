@@ -883,8 +883,7 @@ target_link_libraries(bionic_stdio_runtime_test PRIVATE
 )
 blox7_apply_compile_options(bionic_stdio_runtime_test)
 
-# A tiny ELF with a valid, unknown GNU Build ID. Its constructor
-# aborts, proving the compatibility gate exits before any native loading.
+# unknown build id + a ctor that aborts: the gate has to bail before loading it
 add_library(unknown_roblox_fixture SHARED
   fixtures/unknown_roblox_fixture.cc
 )
