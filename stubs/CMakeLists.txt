@@ -103,7 +103,7 @@ add_library(stub_glesv2 SHARED libgles_stub.cc)
 configure_stub(stub_glesv2 "libGLESv2.so")
 target_link_libraries(stub_glesv2 PRIVATE dl)
 
-# The host Vulkan loader owns device commands; this target adapts Android WSI.
+# android wsi on top of the host vulkan loader
 if(BLOX7_WIN32)
   # windows: vulkan comes through libSDL3.so's bridge and the text box is its own layer, so no libplacebo
   set(BLOX7_VULKAN_TEXT_OVERLAY ${CMAKE_SOURCE_DIR}/win/runtime/vulkan_text_overlay_compositor_win.cc)
@@ -118,8 +118,7 @@ add_library(stub_vulkan SHARED
   ${CMAKE_SOURCE_DIR}/src/graphics/texture_override.cc
 )
 configure_stub(stub_vulkan "libvulkan.so")
-# Keep proc-address lookups bound to our wrappers even if the host Vulkan
-# loader was loaded first. Host calls use explicitly resolved function pointers.
+# GetProcAddr lookups stay on our wrappers even if the real loader got in first
 target_link_options(stub_vulkan PRIVATE "LINKER:-Bsymbolic-functions")
 target_include_directories(stub_vulkan PRIVATE ${CMAKE_SOURCE_DIR}/include)
 pkg_check_modules(LIBPLACEBO REQUIRED IMPORTED_TARGET libplacebo)

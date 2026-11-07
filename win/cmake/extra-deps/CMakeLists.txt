@@ -1,5 +1,4 @@
-# Small libraries the Windows port builds itself: minizip (from zlib's contrib) and the port's
-# read-only libelf (win/minilibelf). Built for Android by win/tools/deps.py.
+# minizip (zlib contrib) and our read-only libelf, deps.py builds these for android
 cmake_minimum_required(VERSION 3.20)
 project(Blox7WinExtraDeps C)
 
