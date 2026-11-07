@@ -70,10 +70,6 @@ bool all_free(uintptr_t start, uintptr_t end) {
   return for_regions(start, end, [](uintptr_t, uintptr_t, const W32_MEMORY_BASIC_INFORMATION& m) { return m.state == MEM_FREE; });
 }
 
-bool none_free(uintptr_t start, uintptr_t end) {
-  return for_regions(start, end, [](uintptr_t, uintptr_t, const W32_MEMORY_BASIC_INFORMATION& m) { return m.state != MEM_FREE; });
-}
-
 bool none_free_in(uintptr_t start, uintptr_t end, uintptr_t* allocation) {
   uintptr_t base = 0;
   bool one = true;
