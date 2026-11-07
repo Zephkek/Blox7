@@ -214,7 +214,6 @@ def port_headers():
     os.makedirs(inc, exist_ok=True)
     for h in ('log.h',):
         shutil.copyfile(f'{LLVM}/sysroot/usr/include/android/{h}', os.path.join(inc, h))
-    import re
     ids = []
     for line in open(f'{AOSP}/core/libcutils/include/private/android_filesystem_config.h'):
         m = re.match(r'#define AID_(\w+)\s+(\d+)', line)
