@@ -48,6 +48,7 @@ const char* GuestAbiPropertyValue() {
 #endif
 }
 
+#ifndef BLOX7_WIN32
 int CallHostVsnprintf(char* dst, size_t count, const char* format,
                       va_list args) {
   using HostVsnprintf = int (*)(char*, size_t, const char*, va_list);
@@ -86,6 +87,7 @@ ssize_t CallHostSendto(int socket_fd, const void* buf, size_t len, int flags,
   HostSendto volatile host_sendto = &::sendto;
   return host_sendto(socket_fd, buf, len, flags, dest, dest_len);
 }
+#endif
 
 }  // namespace
 
