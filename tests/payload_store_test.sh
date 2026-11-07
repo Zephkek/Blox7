@@ -122,8 +122,7 @@ rm -- "${STORE_ROOT}/current.json"
 [[ "$(jq -r .payload_id "${STORE_ROOT}/current.json")" == "${FIRST_ID}" ]]
 [[ ! -e "${STORE_ROOT}/previous_good.json" ]]
 
-# Mutable provenance fields do not turn an identical immutable payload into an
-# ID collision when an updater validates the same APK bundle again.
+# changed provenance fields on the same immutable payload are not an id collision
 jq '.imported_at = "later"' "${TEST_ROOT}/first/roblox_payload.json" \
   > "${TEST_ROOT}/first/metadata.tmp"
 mv "${TEST_ROOT}/first/metadata.tmp" "${TEST_ROOT}/first/roblox_payload.json"
@@ -157,15 +156,13 @@ fi
 mv -- "${TEST_ROOT}/previous.valid.json" \
   "${STORE_ROOT}/previous_good.json"
 
-# Keep two distinct valid manifests around the atomic rename boundary so a
-# failed current.json replacement must restore the older previous-good bytes.
+# two valid manifests around the rename, so a failed current.json swap has to bring back previous-good
 RunStore --expected-current "${FIRST_ID}" promote "${SECOND_ID}"
 [[ "$(jq -r .payload_id "${STORE_ROOT}/current.json")" == "${SECOND_ID}" ]]
 [[ "$(jq -r .payload_id "${STORE_ROOT}/previous_good.json")" == "${FIRST_ID}" ]]
 [[ "$(RunStore stage "${TEST_ROOT}/third")" == "${THIRD_ID}" ]]
 
-# Promotion must bind the directory name, CLI ID, metadata identity, and the
-# exact bytes fingerprinted before canary.
+# promotion binds the dir name, cli id, metadata identity and the bytes fingerprinted before canary
 FORGED_ID="999-ffffffffffffffffffffffffffffffffffffffff"
 cp -a -- "${STORE_ROOT}/payloads/${THIRD_ID}" \
   "${STORE_ROOT}/payloads/${FORGED_ID}"
@@ -183,9 +180,7 @@ if RunStore --expected-current "${SECOND_ID}" \
   exit 1
 fi
 
-# Manifest replacement is performed in two atomic renames. Inject a failure at
-# either rename boundary and prove readers still see complete, valid manifests
-# for the last working payload rather than a partial promotion.
+# manifests swap in two renames. break either one and readers still get a whole, valid manifest
 mkdir -p "${TEST_ROOT}/fail-bin"
 REAL_MV="$(command -v mv)"
 export REAL_MV
@@ -229,8 +224,7 @@ for failed_destination in previous_good.json current.json; do
   [[ "$(jq -r .payload_id "${STORE_ROOT}/previous_good.json")" == "${FIRST_ID}" ]]
 done
 
-# Rollback uses the same atomic current manifest replacement and can be retried
-# safely after an injected rename failure.
+# rollback uses the same swap and can just be retried after a failed rename
 set +e
 PATH="${TEST_ROOT}/fail-bin:${PATH}" \
   BLOX7_TEST_FAIL_MV_DEST=current.json \
@@ -250,9 +244,7 @@ RunStore --expected-current "${SECOND_ID}" \
 [[ "$(jq -r .payload_id "${STORE_ROOT}/current.json")" == "${FIRST_ID}" ]]
 [[ "$(jq -r .payload_id "${STORE_ROOT}/previous_good.json")" == "${FIRST_ID}" ]]
 
-# Promotion revalidates immutable bytes under the store lock, after the
-# external canary has returned. A candidate modified in that interval is
-# quarantined on restage and never becomes current.
+# bytes get checked again under the store lock after the canary. touched in between = quarantined
 chmod u+w "${STORE_ROOT}/payloads/${SECOND_ID}" \
   "${STORE_ROOT}/payloads/${SECOND_ID}/libroblox.so"
 printf 'post-canary corruption\n' \
@@ -309,7 +301,7 @@ if RunStore promote "${UNKNOWN_ID}" >/dev/null 2>&1; then
   exit 1
 fi
 
-# verify-current validates supported payload bytes, not only current.json.
+# verify-current checks the payload bytes too, not just current.json
 [[ "$(RunStore verify-current)" == "${FIRST_ID}" ]]
 chmod u+w -- "${STORE_ROOT}/payloads/${FIRST_ID}/libroblox.so"
 printf 'tampered\n' >> "${STORE_ROOT}/payloads/${FIRST_ID}/libroblox.so"
@@ -322,9 +314,8 @@ cp -- "${TEST_ROOT}/first/libroblox.so" \
 chmod a-w -- "${STORE_ROOT}/payloads/${FIRST_ID}/libroblox.so"
 [[ "$(RunStore verify-current)" == "${FIRST_ID}" ]]
 
-# A non-shipped Build ID crosses the activation boundary only with an exact
-# derived profile, an isolated candidate manifest, and two distinct Tier C
-# attestations bound to the same payload/profile/runtime bytes.
+# an unshipped build id goes live only with its derived profile, an isolated candidate manifest
+# and two Tier C attestations on the same payload/profile/runtime
 unknown_fingerprint="$(RunStore fingerprint "${UNKNOWN_ID}")"
 unknown_payload_sha256="$(sha256sum \
   "${STORE_ROOT}/payloads/${UNKNOWN_ID}/libroblox.so" | awk '{print $1}')"
@@ -420,8 +411,7 @@ first_generation="${first_generation%.json}"
 [[ -f "${STORE_ROOT}/approvals/${UNKNOWN_ID}-${first_generation}.canary-2.json" ]]
 [[ "$(RunStore verify-current)" == "${UNKNOWN_ID}" ]]
 
-# Renaming an internally self-consistent evidence set and editing only the
-# receipt generation cannot forge the generation digest.
+# renaming a consistent evidence set and editing the receipt generation can't fake the digest
 forged_generation=abababababababababababababababababababab
 cp -- "${STORE_ROOT}/host_abi_profiles/${UNKNOWN_ID}-${first_generation}.json" \
   "${STORE_ROOT}/host_abi_profiles/${UNKNOWN_ID}-${forged_generation}.json"
@@ -449,7 +439,7 @@ if RunStore verify-current >/dev/null 2>&1; then
 fi
 mv -- "${TEST_ROOT}/current.before-forgery.json" "${STORE_ROOT}/current.json"
 
-# Cross-generation refs and receipt corruption must fail closed.
+# cross-generation refs and broken receipts fail closed
 cp -- "${STORE_ROOT}/current.json" "${TEST_ROOT}/current.valid.json"
 jq --arg path "host_abi_profiles/${UNKNOWN_ID}-$(printf '9%.0s' {1..40}).json" \
   '.host_abi_profile_path = $path' "${STORE_ROOT}/current.json" \
@@ -473,8 +463,7 @@ fi
 cp -- "${TEST_ROOT}/receipt.valid.json" "${STORE_ROOT}/${first_approval_ref}"
 chmod 0444 -- "${STORE_ROOT}/${first_approval_ref}"
 
-# Reapproval for a new runtime creates a new immutable evidence generation,
-# atomically switches only current.json, and leaves previous_good unchanged.
+# reapproval for a new runtime makes a new evidence generation and only swaps current.json
 cp -- "${STORE_ROOT}/previous_good.json" "${TEST_ROOT}/previous.before-reapproval"
 runtime_sha256=9999999999999999999999999999999999999999999999999999999999999999
 runtime_build_id=7777777777777777777777777777777777777777
@@ -501,7 +490,7 @@ second_approval_ref="$(jq -r .approval_path "${STORE_ROOT}/current.json")"
 cmp --silent "${TEST_ROOT}/previous.before-reapproval" \
   "${STORE_ROOT}/previous_good.json"
 
-# A later rollback to dynamic previous_good preserves its exact generation.
+# rolling back to a dynamic previous_good keeps its generation
 RunStore --expected-current "${UNKNOWN_ID}" promote "${SECOND_ID}"
 [[ "$(jq -r .approval_path "${STORE_ROOT}/previous_good.json")" == \
   "${second_approval_ref}" ]]
@@ -512,8 +501,7 @@ RunStore --expected-current "${SECOND_ID}" \
 [[ "$(RunStore verify-current)" == "${UNKNOWN_ID}" ]]
 RunStore --expected-current "${UNKNOWN_ID}" promote "${FIRST_ID}"
 
-# Once the same exact Build ID ships as a built-in supported profile, a newly
-# written manifest must stop carrying stale dynamic approval references.
+# once that build id ships built in, new manifests drop the old dynamic approval refs
 jq '(.profiles[] | select(.version_code == 300)) |=
       (.status = "supported" | .default_allowed = true)' \
   "${COMPATIBILITY_PATH}" > "${TEST_ROOT}/compatibility.promoted.json"

@@ -66,8 +66,7 @@ printf '%s\n' \
   'ignoredPrivatePath = /home/private-user/secret' \
   >"${fake_vulkaninfo_output}"
 
-# An executable override from a failed process must never run beside the
-# collector work directory. Vulkan parser tests use a bounded read-only file.
+# no exe override from a failed process runs next to the collector dir, vulkan parsing reads a capped file
 readonly hostile_vulkaninfo="${temp_dir}/hostile-vulkaninfo"
 readonly hostile_marker="${temp_dir}/hostile-vulkaninfo-ran"
 printf '%s\n' '#!/usr/bin/env bash' "touch '${hostile_marker}'" \
@@ -145,8 +144,7 @@ if gzip -dc "${archive}" | strings | grep -Fq "$(id -un)"; then
   exit 1
 fi
 
-# A candidate-aware updater bundle must identify the canary payload instead
-# of the still-active baseline.
+# a candidate-aware bundle names the canary payload, not the active one
 readonly candidate_id=1686400865ae0e408cd7bd67de7a439625c6fd13
 readonly candidate_metadata="${temp_dir}/candidate.json"
 jq -n --arg build_id "${candidate_id}" \
@@ -165,8 +163,7 @@ grep -Fxq 'status=candidate' "${bundle}/payload.txt"
 grep -Fxq 'version_code=2628' "${bundle}/payload.txt"
 grep -Fxq "elf_build_id=${candidate_id}" "${bundle}/payload.txt"
 
-# Free-form environment labels are not diagnostics enums and must collapse to
-# unknown instead of becoming an accidental user-name channel.
+# free-form env labels collapse to unknown so they can't carry a user name
 label_archive="$(
   HOME="${fake_home}" BLOX7_DATA_ROOT="${data_root}" \
   BLOX7_CACHE_ROOT="${cache_root}" BLOX7_STATE_ROOT="${state_root}" \
@@ -186,8 +183,7 @@ if grep -R -E 'Alice|Bob|Carol|Savva' "${bundle}"; then
   exit 1
 fi
 
-# A blocked SDL teardown is an audio failure even without an audio-tagged
-# queue line.
+# blocked sdl teardown counts as an audio failure even with no audio queue line
 readonly blocked_audio_log="${temp_dir}/blocked-audio.log"
 printf '%s\n' '[main] audio shutdown blocked SDL teardown' \
   >"${blocked_audio_log}"
@@ -202,7 +198,7 @@ mkdir -p -- "${extracted}"
 tar -C "${extracted}" -xzf "${blocked_archive}"
 grep -Fxq 'audio_status=failed' "${bundle}/markers.txt"
 
-# Tool-control variables must not alter the archive or execute tar hooks.
+# tool-control vars can't change the archive or run tar hooks
 readonly hook_marker="${temp_dir}/tar-hook-ran"
 TAR_OPTIONS="--checkpoint=1 --checkpoint-action=exec=touch\\ ${hook_marker}" \
   HOME="${fake_home}" BLOX7_DATA_ROOT="${data_root}" \
@@ -227,8 +223,7 @@ if HOME="${fake_home}" BLOX7_DATA_ROOT="${data_root}" \
   exit 1
 fi
 
-# The readiness harness owns the raw log and must create exactly one bundle
-# after a binary failure without replacing that failure status.
+# the harness owns the raw log: one bundle after a binary failure, failure status kept
 readonly fake_binary="${temp_dir}/blox7"
 printf '%s\n' '#!/usr/bin/env bash' 'echo "[FATAL] fake runtime failure" >&2' \
   'exit 42' >"${fake_binary}"
