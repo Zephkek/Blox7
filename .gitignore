@@ -1,9 +1,6 @@
 # Build
 /build/
 /build_*/
-/build-flatpak/
-/build-anylinux*/
-/.flatpak-builder/
 /cmake-build-*/
 /out/
 /dist/
@@ -20,9 +17,6 @@ DartConfiguration.tcl
 Testing/
 CMakeUserPresets.json
 *.cmake.user
-
-# local direnv development shell cache
-.direnv/
 
 # clangd cache
 .cache
