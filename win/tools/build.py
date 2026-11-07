@@ -149,7 +149,7 @@ def win_flags(src, libc):
     flags = libc_flags('libc_bionic', f'{BIONIC}/libc/bionic/x.cpp' if src.endswith('.cpp') else src, bionic_unit[2])
     # path buffers on the stack, same frame budget bionic gives its netbsd code
     flags = [f for f in flags if f != '-w'] + ['-Wall', '-Wextra', '-Wno-unused-parameter', '-Wno-missing-field-initializers',
-                                               '-Wframe-larger-than=66000',
+                                               '-Wframe-larger-than=66000', '-Wno-non-c-typedef-for-linkage',
                                                '-I', f'{BIONIC}/libc/bionic', '-I', os.path.join(WIN, 'libc'),
                                                '-I', os.path.join(WIN, 'libc', 'gen')]
     return flags
