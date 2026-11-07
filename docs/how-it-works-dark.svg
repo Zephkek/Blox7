@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 412" width="920" height="412">
+<defs><marker id="head" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 8 4 0 8z" fill="#9198a1"/></marker></defs>
+<text x="230" y="30" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#f0f6fc" text-anchor="middle">Android phone</text>
+<text x="690" y="30" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#f0f6fc" text-anchor="middle">Blox7 on Windows</text>
+<rect x="60" y="50" width="340" height="40" fill="#0d1117" stroke="#9198a1" stroke-width="1.25"/>
+<text x="230" y="75.0" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace" font-size="13.5" font-weight="400" fill="#f0f6fc" text-anchor="middle">libroblox.so</text>
+<rect x="60" y="90" width="340" height="40" fill="#0d1117" stroke="#9198a1" stroke-width="1.25"/>
+<text x="230" y="115.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Android runtime (ART)</text>
+<rect x="60" y="130" width="340" height="40" fill="#0d1117" stroke="#9198a1" stroke-width="1.25"/>
+<text x="230" y="155.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Bionic libc</text>
+<rect x="520" y="50" width="340" height="40" fill="#0d1117" stroke="#9198a1" stroke-width="1.25"/>
+<text x="690" y="75.0" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace" font-size="13.5" font-weight="400" fill="#f0f6fc" text-anchor="middle">libroblox.so</text>
+<rect x="520" y="90" width="340" height="40" fill="#132b4d" stroke="#9198a1" stroke-width="1.25"/>
+<text x="690" y="115.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Blox7 runtime: JNI, Android APIs</text>
+<rect x="520" y="130" width="340" height="40" fill="#0d1117" stroke="#9198a1" stroke-width="1.25"/>
+<text x="690" y="155.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Bionic libc</text>
+<text x="460" y="74" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#9198a1" text-anchor="middle">same file</text>
+<line x1="60" y1="192" x2="860" y2="192" stroke="#656c76" stroke-width="1.25" stroke-dasharray="6 5"/>
+<text x="460" y="185" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#9198a1" text-anchor="middle">Linux system calls</text>
+<rect x="60" y="212" width="340" height="160" fill="#161b22" stroke="#9198a1" stroke-width="1.25"/>
+<text x="230" y="297.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Linux kernel</text>
+<rect x="520" y="212" width="340" height="54" fill="#132b4d" stroke="#9198a1" stroke-width="1.25"/>
+<text x="690" y="235.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="600" fill="#f0f6fc" text-anchor="middle">Blox7 syscall layer</text>
+<text x="690" y="254.0" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace" font-size="12.5" font-weight="400" fill="#9198a1" text-anchor="middle">sys_openat sys_mmap sys_futex ...</text>
+<rect x="520" y="266" width="340" height="40" fill="#0d1117" stroke="#9198a1" stroke-width="1.25"/>
+<text x="690" y="291.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Win32: kernel32, ntdll, Winsock</text>
+<line x1="520" y1="322" x2="860" y2="322" stroke="#656c76" stroke-width="1.25" stroke-dasharray="6 5"/>
+<text x="510" y="326" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#9198a1" text-anchor="end">NT system calls</text>
+<rect x="520" y="338" width="340" height="34" fill="#161b22" stroke="#9198a1" stroke-width="1.25"/>
+<text x="690" y="360.0" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="14" font-weight="400" fill="#f0f6fc" text-anchor="middle">Windows NT kernel</text>
+<polyline points="60,70 38,70 38,292 59,292" fill="none" stroke="#9198a1" stroke-width="1.25" marker-end="url(#head)"/>
+<text x="28" y="181" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#9198a1" text-anchor="middle" transform="rotate(-90 28 181)">raw syscalls</text>
+<polyline points="860,70 882,70 882,239 861,239" fill="none" stroke="#9198a1" stroke-width="1.25" marker-end="url(#head)"/>
+<text x="892" y="155" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#9198a1" text-anchor="middle" transform="rotate(90 892 155)">raw syscalls</text>
+<rect x="60" y="390" width="14" height="14" fill="#132b4d" stroke="#9198a1" stroke-width="1.25"/>
+<text x="82" y="402" font-family="'Segoe UI', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" fill="#9198a1" text-anchor="start">provided by Blox7</text>
+</svg>
