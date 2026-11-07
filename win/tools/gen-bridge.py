@@ -129,6 +129,11 @@ for fn in functions:
     if not ok or fn_pointer_sig(ret) or (ret in typedefs and fn_pointer_sig(typedefs[ret])):
         skipped.append((name, 'callback shape'))
         continue
+    # one userdata, several callbacks: only one context fits, so these get written by hand
+    shared = [p[2] for p in plan if p[0] == 'callback']
+    if len(shared) != len(set(shared)):
+        skipped.append((name, 'shared userdata'))
+        continue
     userdata_of = {p[2]: i for i, p in enumerate(plan) if p[0] == 'callback'}
     pnames = [f'a{i}' for i in range(len(fn['params']))]
     proto_params = ', '.join(declare(t, n) for (pn, t, d), n in zip(fn['params'], pnames)) or 'void'

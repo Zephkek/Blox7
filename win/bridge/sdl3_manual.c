@@ -175,6 +175,42 @@ BRIDGE_EXPORT SDL_FunctionPointer SDL_EGL_GetProcAddress(const char* name) {
   return NULL;
 }
 
+// three callbacks, one userdata: sdl keeps a single set, so we do too
+static struct {
+  SDL_EGLAttribArrayCallback platform;
+  SDL_EGLIntArrayCallback surface, context;
+  void* userdata;
+} g_egl;
+
+static BRIDGE_MS SDL_EGLAttrib* egl_platform(void* unused) {
+  (void)unused;
+  bridge_attach();
+  return g_egl.platform(g_egl.userdata);
+}
+
+static BRIDGE_MS SDL_EGLint* egl_surface(void* unused, SDL_EGLDisplay display, SDL_EGLConfig config) {
+  (void)unused;
+  bridge_attach();
+  return g_egl.surface(g_egl.userdata, display, config);
+}
+
+static BRIDGE_MS SDL_EGLint* egl_context(void* unused, SDL_EGLDisplay display, SDL_EGLConfig config) {
+  (void)unused;
+  bridge_attach();
+  return g_egl.context(g_egl.userdata, display, config);
+}
+
+BRIDGE_EXPORT void SDL_EGL_SetAttributeCallbacks(SDL_EGLAttribArrayCallback platform, SDL_EGLIntArrayCallback surface,
+                                                 SDL_EGLIntArrayCallback context, void* userdata) {
+  static void (BRIDGE_MS *set)(void*, void*, void*, void*);
+  if (!set) set = (void (BRIDGE_MS*)(void*, void*, void*, void*))real("SDL_EGL_SetAttributeCallbacks");
+  g_egl.platform = platform;
+  g_egl.surface = surface;
+  g_egl.context = context;
+  g_egl.userdata = userdata;
+  set(platform ? (void*)egl_platform : NULL, surface ? (void*)egl_surface : NULL, context ? (void*)egl_context : NULL, NULL);
+}
+
 BRIDGE_EXPORT bool SDL_Vulkan_LoadLibrary(const char* path) {
   static bool (BRIDGE_MS *load_library)(const char*);
   if (!load_library) load_library = (bool (BRIDGE_MS*)(const char*))real("SDL_Vulkan_LoadLibrary");

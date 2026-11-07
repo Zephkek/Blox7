@@ -32,26 +32,6 @@ static BRIDGE_MS void tramp_SDL_AudioPostmixCallback(void *ctx, const SDL_AudioS
   struct bridge_context *c = (struct bridge_context *)ctx;
   ((void (*)(void *, const SDL_AudioSpec *, float *, int))c->fn)(c->userdata, b0, b1, b2);
 }
-static BRIDGE_MS const void * tramp_SDL_ClipboardDataCallback(void *ctx, const char * b0, size_t * b1) {
-  bridge_attach();
-  struct bridge_context *c = (struct bridge_context *)ctx;
-  return ((const void * (*)(void *, const char *, size_t *))c->fn)(c->userdata, b0, b1);
-}
-static BRIDGE_MS void tramp_SDL_ClipboardCleanupCallback(void *ctx) {
-  bridge_attach();
-  struct bridge_context *c = (struct bridge_context *)ctx;
-  ((void (*)(void *))c->fn)(c->userdata);
-}
-static BRIDGE_MS SDL_EGLAttrib * tramp_SDL_EGLAttribArrayCallback(void *ctx) {
-  bridge_attach();
-  struct bridge_context *c = (struct bridge_context *)ctx;
-  return ((SDL_EGLAttrib * (*)(void *))c->fn)(c->userdata);
-}
-static BRIDGE_MS SDL_EGLint * tramp_SDL_EGLIntArrayCallback(void *ctx, SDL_EGLDisplay b0, SDL_EGLConfig b1) {
-  bridge_attach();
-  struct bridge_context *c = (struct bridge_context *)ctx;
-  return ((SDL_EGLint * (*)(void *, SDL_EGLDisplay, SDL_EGLConfig))c->fn)(c->userdata, b0, b1);
-}
 static BRIDGE_MS void tramp_SDL_DialogFileCallback(void *ctx, const char *const * b0, int b1) {
   bridge_attach();
   struct bridge_context *c = (struct bridge_context *)ctx;
@@ -1955,14 +1935,6 @@ static bool (BRIDGE_MS *p_SDL_HasPrimarySelectionText)(void);
 BRIDGE_EXPORT bool SDL_HasPrimarySelectionText(void) {
   return p_SDL_HasPrimarySelectionText();
 }
-static bool (BRIDGE_MS *p_SDL_SetClipboardData)(SDL_ClipboardDataCallback, SDL_ClipboardCleanupCallback, void *, const char *const *, size_t);
-BRIDGE_EXPORT bool SDL_SetClipboardData(SDL_ClipboardDataCallback a0, SDL_ClipboardCleanupCallback a1, void * a2, const char *const * a3, size_t a4) {
-  void *t0 = a0 ? (void *)tramp_SDL_ClipboardDataCallback : 0;
-  void *c0 = a0 ? bridge_context((void *)a0, a2) : a2;
-  void *t1 = a1 ? (void *)tramp_SDL_ClipboardCleanupCallback : 0;
-  void *c1 = a1 ? bridge_context((void *)a1, a2) : a2;
-  return p_SDL_SetClipboardData((SDL_ClipboardDataCallback)t0, (SDL_ClipboardCleanupCallback)t1, c1, a3, a4);
-}
 static bool (BRIDGE_MS *p_SDL_ClearClipboardData)(void);
 BRIDGE_EXPORT bool SDL_ClearClipboardData(void) {
   return p_SDL_ClearClipboardData();
@@ -2470,16 +2442,6 @@ BRIDGE_EXPORT SDL_EGLConfig SDL_EGL_GetCurrentConfig(void) {
 static SDL_EGLSurface (BRIDGE_MS *p_SDL_EGL_GetWindowSurface)(SDL_Window *);
 BRIDGE_EXPORT SDL_EGLSurface SDL_EGL_GetWindowSurface(SDL_Window * a0) {
   return p_SDL_EGL_GetWindowSurface(a0);
-}
-static void (BRIDGE_MS *p_SDL_EGL_SetAttributeCallbacks)(SDL_EGLAttribArrayCallback, SDL_EGLIntArrayCallback, SDL_EGLIntArrayCallback, void *);
-BRIDGE_EXPORT void SDL_EGL_SetAttributeCallbacks(SDL_EGLAttribArrayCallback a0, SDL_EGLIntArrayCallback a1, SDL_EGLIntArrayCallback a2, void * a3) {
-  void *t0 = a0 ? (void *)tramp_SDL_EGLAttribArrayCallback : 0;
-  void *c0 = a0 ? bridge_context((void *)a0, a3) : a3;
-  void *t1 = a1 ? (void *)tramp_SDL_EGLIntArrayCallback : 0;
-  void *c1 = a1 ? bridge_context((void *)a1, a3) : a3;
-  void *t2 = a2 ? (void *)tramp_SDL_EGLIntArrayCallback : 0;
-  void *c2 = a2 ? bridge_context((void *)a2, a3) : a3;
-  p_SDL_EGL_SetAttributeCallbacks((SDL_EGLAttribArrayCallback)t0, (SDL_EGLIntArrayCallback)t1, (SDL_EGLIntArrayCallback)t2, c2);
 }
 static bool (BRIDGE_MS *p_SDL_GL_SetSwapInterval)(int);
 BRIDGE_EXPORT bool SDL_GL_SetSwapInterval(int a0) {
@@ -5459,7 +5421,6 @@ static const struct bridge_entry kEntries[] = {
     {"SDL_SetPrimarySelectionText", (void **)&p_SDL_SetPrimarySelectionText},
     {"SDL_GetPrimarySelectionText", (void **)&p_SDL_GetPrimarySelectionText},
     {"SDL_HasPrimarySelectionText", (void **)&p_SDL_HasPrimarySelectionText},
-    {"SDL_SetClipboardData", (void **)&p_SDL_SetClipboardData},
     {"SDL_ClearClipboardData", (void **)&p_SDL_ClearClipboardData},
     {"SDL_GetClipboardData", (void **)&p_SDL_GetClipboardData},
     {"SDL_HasClipboardData", (void **)&p_SDL_HasClipboardData},
@@ -5587,7 +5548,6 @@ static const struct bridge_entry kEntries[] = {
     {"SDL_EGL_GetCurrentDisplay", (void **)&p_SDL_EGL_GetCurrentDisplay},
     {"SDL_EGL_GetCurrentConfig", (void **)&p_SDL_EGL_GetCurrentConfig},
     {"SDL_EGL_GetWindowSurface", (void **)&p_SDL_EGL_GetWindowSurface},
-    {"SDL_EGL_SetAttributeCallbacks", (void **)&p_SDL_EGL_SetAttributeCallbacks},
     {"SDL_GL_SetSwapInterval", (void **)&p_SDL_GL_SetSwapInterval},
     {"SDL_GL_GetSwapInterval", (void **)&p_SDL_GL_GetSwapInterval},
     {"SDL_GL_DestroyContext", (void **)&p_SDL_GL_DestroyContext},
