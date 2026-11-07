@@ -151,6 +151,16 @@ updates:
   # accepted values resolve the provider chain, which currently starts with
   # APKPure. Supported values: auto, apk-pure.
   source: apk-pure
+  # Absolute path (optional): directory of Roblox's own APKs, offered alongside
+  # APKPure; the newest version either one has is installed. A base APK with
+  # its split_config.x86_64.apk (as Google Play installs them) or one APK that
+  # carries the x86_64 library. Verified like any download.
+  # apk_directory: /home/user/roblox-apks
+  # String (default: SPDMTiahh/roblox-updates): GitHub repository whose
+  # releases carry Roblox's Google Play APKs (base + x86_64 split), checked
+  # after apk_directory and before APKPure. Verified like any download. An
+  # empty string turns it off.
+  # github_repository: SPDMTiahh/roblox-updates
   # Reserved for desktop update integrations. `blox7_updater` itself never
   # launches another process after changing the active payload.
   launch_after_update: false
