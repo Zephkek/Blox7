@@ -800,7 +800,7 @@ void TraceDevToolsEvent(ICoreWebView2* web_view, const wchar_t* event,
   receiver->add_DevToolsProtocolEventReceived(
       MakeHandler<ICoreWebView2DevToolsProtocolEventReceivedEventHandler, ICoreWebView2*,
                   ICoreWebView2DevToolsProtocolEventReceivedEventArgs*>(
-          [name, extra](ICoreWebView2* view, ICoreWebView2DevToolsProtocolEventReceivedEventArgs* args) -> HRESULT {
+          [name, extra = std::move(extra)](ICoreWebView2* view, ICoreWebView2DevToolsProtocolEventReceivedEventArgs* args) -> HRESULT {
             std::string session;
             ICoreWebView2DevToolsProtocolEventReceivedEventArgs2* args2 = nullptr;
             if (SUCCEEDED(args->QueryInterface(IID_ICoreWebView2DevToolsProtocolEventReceivedEventArgs2,
@@ -2339,7 +2339,7 @@ void AttachWebView(Surface* surface, std::function<void(Surface*)> ready) {
   HWND window = surface->window;
   g_app.environment->CreateCoreWebView2Controller(
       window, MakeHandler<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, HRESULT, ICoreWebView2Controller*>(
-                  [window, ready](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                  [window, ready = std::move(ready)](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
                     auto* surface = reinterpret_cast<Surface*>(GetWindowLongPtrW(window, GWLP_USERDATA));
                     if (surface == nullptr || FAILED(result) || controller == nullptr) {
                       Log("cannot create a WebView2 surface: 0x%08lx", static_cast<unsigned long>(result));
