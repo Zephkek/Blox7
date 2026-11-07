@@ -157,7 +157,7 @@ def win_flags(src, libc):
 
 
 def compile_all(jobs):
-    """jobs: (src, obj, flags). Returns the object list; stops on the first errors."""
+    """jobs are (src, obj, flags), gives back the objects or stops on the first errors"""
     def up_to_date(src, obj, deps):
         if not os.path.exists(obj) or not os.path.exists(deps):
             return False

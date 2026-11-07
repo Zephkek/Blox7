@@ -134,7 +134,7 @@ def load(paths):
 
 
 def flatten(m, modules, static):
-    """The module's properties with defaults applied and arch/target/linkage sections folded in."""
+    """props with defaults and the arch/target/linkage sections folded in"""
     props = {}
     for d in m.get('defaults', []):
         if d in modules:
@@ -152,8 +152,7 @@ def flatten(m, modules, static):
 
 
 def collect(name, modules, static=False, seen=None):
-    """Sources of a module and its whole_static_libs. 'units' pairs each source with the flags of the
-    module that compiles it; the flat lists merge all modules."""
+    """sources of a module + its whole_static_libs. units keep each source's own module flags"""
     seen = seen if seen is not None else set()
     if name.startswith('//'):
         name = name.split(':')[-1]

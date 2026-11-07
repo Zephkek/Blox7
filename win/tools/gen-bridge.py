@@ -69,7 +69,7 @@ FN_PTR = re.compile(r'^(.*?)\(\*\)\((.*)\)$')
 
 
 def fn_pointer_sig(t):
-    """For a function-pointer type: (return type, [param types]); else None."""
+    """(ret, [params]) for a function pointer type, else None"""
     t = t.strip()
     m = FN_PTR.match(t)
     if not m:
@@ -80,7 +80,7 @@ def fn_pointer_sig(t):
 
 
 def declare(t, name):
-    """A declaration of `name` with C type string `t` (handles arrays and function pointers)."""
+    """declares `name` as C type `t`, arrays and function pointers too"""
     m = re.match(r'^(.*?)\(\*\)(.*)$', t)
     if m:
         return f'{m.group(1)}(*{name}){m.group(2)}'
@@ -91,7 +91,7 @@ def declare(t, name):
 
 
 def resolved(t):
-    """The type with typedef names (callback typedefs) expanded one level."""
+    """callback typedefs expanded one level"""
     base = t.replace('const ', '').strip()
     return typedefs.get(base, t)
 
