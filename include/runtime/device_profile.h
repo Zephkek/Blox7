@@ -40,7 +40,7 @@ struct DeviceProfile {
   int width_dp = 0;
   int height_dp = 0;
   unsigned long long total_memory_mb = 0;
-  std::string release;
+  std::string release{};
 };
 
 inline constexpr std::string_view kDefaultDeviceProfileName = "mobile-s22-ultra";
