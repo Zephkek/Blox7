@@ -16,9 +16,6 @@
 #include "pthread_internal.h"
 #include "w32_kernel.h"
 
-extern "C" void __libc_init_main_thread_early(const KernelArgumentBlock& args, bionic_tcb* temp_tcb);
-extern "C" void __libc_init_main_thread_late();
-extern "C" void __libc_init_main_thread_final();
 extern "C" int __cxa_atexit(void (*)(void*), void*, void*);
 
 void w32_init_time();
