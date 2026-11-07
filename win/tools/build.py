@@ -115,12 +115,15 @@ def libc_flags(module, src, mflags):
 
 
 def scudo_units():
-    d = json.load(open(os.path.join(OUT, 'scudo.json'))) if os.path.exists(os.path.join(OUT, 'scudo.json')) else None
-    if d is None:
-        mods = bp.load([f'{AOSP}/scudo/Android.bp'])
-        d = bp.collect('libscudo', mods, static=True)
+    cache = os.path.join(OUT, 'scudo.json')
+    if os.path.exists(cache):
+        with open(cache, encoding='utf-8') as f:
+            d = json.load(f)
+    else:
+        d = bp.collect('libscudo', bp.load([f'{AOSP}/scudo/Android.bp']), static=True)
         os.makedirs(OUT, exist_ok=True)
-        json.dump(d, open(os.path.join(OUT, 'scudo.json'), 'w'))
+        with open(cache, 'w', encoding='utf-8') as f:
+            json.dump(d, f)
     return [norm(s) for s in d['srcs']], d
 
 
