@@ -471,9 +471,7 @@ jq -n \
      allow_legacy_binary_patches:false}
   ]}' > "${BLOX7_UPDATE_COMPATIBILITY_PATH}"
 
-# BLOX7_CONFIG_ROOT is the runtime override used before path exports.
-# The updater must read the same file instead of silently falling back to the
-# default XDG path.
+# BLOX7_CONFIG_ROOT wins over the path exports, the updater has to read that same file
 saved_config_file="${BLOX7_CONFIG_FILE}"
 unset BLOX7_CONFIG_FILE
 export BLOX7_CONFIG_ROOT="${TEMP_DIR}/typed-config-root"
@@ -492,9 +490,7 @@ EOF
 unset BLOX7_CONFIG_ROOT FAKE_CHECK_CALLS
 export BLOX7_CONFIG_FILE="${saved_config_file}"
 
-# A fresh installation downloads and stages provider latest before considering
-# a supported fallback. This fixture makes that latest download resolve to an
-# exact-supported payload, so no fallback mirror request is necessary.
+# fresh install: latest resolves to a supported payload, so no fallback mirror
 export BLOX7_DATA_ROOT="${TEMP_DIR}/bootstrap-data"
 export FAKE_LIVE_DATA_ROOT="${BLOX7_DATA_ROOT}"
 export FAKE_VERSION_CODE=2628
@@ -523,8 +519,7 @@ if find "${BLOX7_CACHE_ROOT}/downloads/apk-staging" -mindepth 1 \
   exit 1
 fi
 
-# Once a runnable local payload exists, interactive startup does not contact
-# the provider or repeat candidate canaries. The user timer owns remote work.
+# with a runnable payload, startup leaves the provider and canaries alone. the timer does remote work
 startup_fetch_calls="$(wc -l < "${FAKE_FETCH_CALLS}")"
 export FAKE_CHECK_CALLS="${TEMP_DIR}/startup-check-calls"
 export FAKE_REMOTE_VERSION=9999
@@ -536,10 +531,8 @@ rm -f -- "${FAKE_CHECK_CALLS}" "${FAKE_CALLS}"
   "2628-${FAKE_BUILD_ID}" ]]
 unset FAKE_CHECK_CALLS
 
-# A second installation can share the same managed payload root while the
-# first one is still updating it. Interactive startup waits for that updater
-# and then validates its result instead of reporting a false crash and
-# collecting a useless lock-contention support bundle.
+# a second install sharing the payload root waits for the running updater,
+# no fake crash and no lock-contention bundle
 lock_ready="${TEMP_DIR}/startup-lock-ready"
 lock_release="${TEMP_DIR}/startup-lock-release"
 [[ ! -e "${BLOX7_STATE_ROOT}/support" ]]
@@ -585,9 +578,7 @@ grep -Fq \
   "${waiting_stderr}"
 [[ ! -e "${BLOX7_STATE_ROOT}/support" ]]
 
-# Existing short configs predate updates.*. The documented automatic=true
-# default still enables the timer instead of silently disabling background
-# updates for those users.
+# old short configs have no updates.*, automatic still defaults to on
 export FAKE_CHECK_CALLS="${TEMP_DIR}/default-scheduled-check-calls"
 export FAKE_REMOTE_VERSION=2628
 export BLOX7_UPDATE_LOCAL_VERSION=2628
@@ -596,9 +587,7 @@ export BLOX7_UPDATE_LOCAL_VERSION=2628
 unset FAKE_CHECK_CALLS
 export BLOX7_UPDATE_LOCAL_VERSION=none
 
-# A temporary metadata outage on a new installation still bootstraps the
-# newest explicitly supported profile instead of downloading unknown latest
-# bytes that cannot pass the compatibility gate.
+# metadata down on a new install: bootstrap the newest supported profile, not unknown latest bytes
 export BLOX7_DATA_ROOT="${TEMP_DIR}/offline-bootstrap-data"
 export FAKE_LIVE_DATA_ROOT="${BLOX7_DATA_ROOT}"
 export FAKE_VERSION_CODE=8888
@@ -614,9 +603,7 @@ rm -f -- "${FAKE_CALLS}" "${FAKE_FETCH_CALLS}" "${FAKE_FETCH_ARGUMENTS}"
   "8888-${FAKE_BUILD_ID}" ]]
 unset FAKE_CHECK_FAIL
 
-# A fresh install must not choose one of two supported Build IDs that share
-# the newest fallback versionCode. It skips that ambiguous version and uses
-# the next unique exact profile.
+# two supported build ids on the same newest versionCode: skip that version, take the next unique one
 PRIMARY_COMPATIBILITY_PATH="${BLOX7_UPDATE_COMPATIBILITY_PATH}"
 AMBIGUOUS_BOOTSTRAP_BUILD=cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd
 jq --arg build_id "${AMBIGUOUS_BOOTSTRAP_BUILD}" '
@@ -653,9 +640,7 @@ mapfile -t ambiguous_bootstrap_fetches < "${FAKE_FETCH_ARGUMENTS}"
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/current.json")" == \
   "2546-${FAKE_BUILD_ID}" ]]
 
-# A provider can reuse a versionCode for a different ELF Build ID. If that
-# happens on first run, keep the unknown bytes staged and retry one lower
-# unique compatibility profile instead of leaving the installation inert.
+# a provider reused a versionCode for another build id: keep it staged, try one profile lower
 export BLOX7_UPDATE_COMPATIBILITY_PATH="${PRIMARY_COMPATIBILITY_PATH}"
 export FAKE_EXPECTED_COMPATIBILITY_PATH="${BLOX7_UPDATE_COMPATIBILITY_PATH}"
 export BLOX7_DATA_ROOT="${TEMP_DIR}/unknown-exact-bootstrap-data"
@@ -695,9 +680,8 @@ unset FAKE_STORE_MODE
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/current.json")" == \
   "2546-${FAKE_BUILD_ID}" ]]
 
-# A distinct supported update exercises the actual 2546 -> candidate path.
-# A regular readiness failure, native crash, or watchdog timeout must preserve
-# both live manifests byte-for-byte and must not invoke payload promotion.
+# real 2546 -> candidate update. readiness fail, crash or watchdog keeps both manifests
+# byte for byte and never promotes
 PREVIOUS_ID=2400-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 previous_payload_dir="${BLOX7_DATA_ROOT}/payloads/${PREVIOUS_ID}"
 mkdir -p "${previous_payload_dir}/assets/content"
@@ -801,9 +785,8 @@ for smoke_mode in fail exit3 crash hang; do
 done
 unset FAKE_SMOKE_MODE
 
-# A successful smoke followed by a store failure still preserves both
-# manifests. If the store reports failure after its commit point, the updater
-# observes candidate=current and performs a conditional rollback to 2546.
+# smoke passes but the store fails: manifests stay, and a failure after its commit point
+# means candidate=current, so roll back to 2546
 for store_mode in fail_before_commit fail_after_commit; do
   rm -f -- "${FAKE_CALLS}"
   export FAKE_STORE_MODE="${store_mode}"
@@ -847,9 +830,7 @@ for store_mode in fail_before_commit fail_after_commit; do
   fi
 done
 
-# If both the post-commit promotion result and its conditional rollback fail,
-# current is uncertain. The updater must return a hard failure instead of
-# treating the candidate as the previous working payload.
+# promotion and its rollback both failing leaves current unknown, so hard fail
 rm -f -- "${FAKE_CALLS}"
 export FAKE_STORE_MODE=fail_after_commit_and_rollback
 set +e
@@ -871,8 +852,7 @@ unset FAKE_STORE_MODE
 cp -- "${TEMP_DIR}/previous.before-canary" \
   "${BLOX7_DATA_ROOT}/previous_good.json"
 
-# A concurrent writer changing current during canary wins the CAS race; the
-# updater must not overwrite that manifest with its candidate.
+# another writer changed current during the canary, it wins the cas
 rm -f -- "${FAKE_CALLS}"
 export FAKE_SMOKE_MODE=race
 set +e
@@ -921,8 +901,7 @@ export BLOX7_UPDATE_LOCAL_VERSION=2546
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/previous_good.json")" == \
   2546-d0cb1fa0deb3d9161b4cd77530cbcd2e50de3a21 ]]
 
-# The same selection must work without another download when the unsupported
-# remote payload was already staged by an earlier check.
+# same pick with no new download when the payload is already staged
 cp -- "${TEMP_DIR}/current.before-canary" \
   "${BLOX7_DATA_ROOT}/current.json"
 cp -- "${TEMP_DIR}/previous.before-canary" \
@@ -939,8 +918,7 @@ rm -f -- "${FAKE_CALLS}"
   exit 1
 }
 
-# Two exact-supported Build IDs at the same newest staged version are
-# ambiguous. Neither may be selected automatically.
+# two supported build ids staged at the same newest version, pick neither
 AMBIGUOUS_BUILD_A=1111111111111111111111111111111111111111
 AMBIGUOUS_BUILD_B=2222222222222222222222222222222222222222
 jq --arg first "${AMBIGUOUS_BUILD_A}" --arg second "${AMBIGUOUS_BUILD_B}" '
@@ -970,8 +948,7 @@ rm -f -- "${FAKE_CALLS}"
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/current.json")" == \
   "8888-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]]
 
-# The ambiguity check must also apply when the provider remote version is the
-# same version shared by both exact-supported staged Build IDs.
+# same ambiguity when the remote version is that shared version
 export FAKE_REMOTE_VERSION=9000
 rm -f -- "${FAKE_CALLS}"
 "${AUTO_UPDATE}" --skip-build
@@ -980,8 +957,7 @@ rm -f -- "${FAKE_CALLS}"
   "8888-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]]
 export FAKE_REMOTE_VERSION=9999
 
-# Reconsider a staged candidate after its exact Build-ID profile is approved,
-# without downloading the same payload again.
+# staged candidate gets another look once its profile is approved, no second download
 fetch_calls_before_approval="$(wc -l < "${FAKE_FETCH_CALLS}")"
 jq '(.profiles[] | select(.version_code == 9999)) |=
       (.status = "supported" | .default_allowed = true)' \
@@ -1005,7 +981,7 @@ export BLOX7_UPDATE_LOCAL_VERSION=8888
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/previous_good.json")" == \
   8888-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ]]
 
-# Stale provider metadata must never turn an update check into a downgrade.
+# stale provider metadata never downgrades
 export BLOX7_UPDATE_LOCAL_VERSION=9999
 export FAKE_REMOTE_VERSION=9000
 fetch_calls_before_regression="$(wc -l < "${FAKE_FETCH_CALLS}")"
@@ -1017,9 +993,8 @@ rm -f -- "${FAKE_CALLS}"
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/current.json")" == \
   "9999-${FAKE_BUILD_ID}" ]]
 
-# An exact derived sidecar is exercised twice in separate HOME/XDG roots. Only
-# after both attestations bind the same candidate/profile/runtime fingerprint
-# may the store receive promote-probation.
+# derived sidecar runs in two separate HOME/XDG roots, promote-probation only once both
+# attestations agree on candidate/profile/runtime
 main_data_root="${BLOX7_DATA_ROOT}"
 probation_data_root="${TEMP_DIR}/probation-data"
 export BLOX7_DATA_ROOT="${probation_data_root}"
@@ -1122,9 +1097,8 @@ new_approval_ref="$(jq -r .approval_path "${BLOX7_DATA_ROOT}/current.json")"
 cmp --silent "${TEMP_DIR}/probation-previous.before-refresh" \
   "${BLOX7_DATA_ROOT}/previous_good.json"
 
-# Receipt refresh happens before the version API. If the new runtime canary
-# fails, rollback to validated previous_good must complete even while that API
-# is down; the stale dynamic approval is never launched.
+# receipts refresh before the version api, so rollback to previous_good still works with it down.
+# the stale dynamic approval never launches
 cp -- "${BLOX7_DATA_ROOT}/current.json" \
   "${TEMP_DIR}/probation-current.after-refresh"
 export BLOX7_UPDATE_RUNTIME_BUILD_ID=abababababababababababababababababababab
@@ -1139,8 +1113,7 @@ mapfile -t stale_api_calls < "${FAKE_CALLS}"
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/current.json")" == \
   "${seed_payload_id}" ]]
 
-# A stale dynamic previous_good is not a usable rollback target after a runtime
-# change. Recover through the newest staged exact-supported payload instead.
+# stale dynamic previous_good after a runtime change: recover through the newest staged payload
 cp -- "${TEMP_DIR}/probation-current.after-refresh" \
   "${BLOX7_DATA_ROOT}/current.json"
 cp -- "${TEMP_DIR}/probation-current.after-refresh" \
@@ -1159,8 +1132,7 @@ mapfile -t supported_fallback_calls < "${FAKE_CALLS}"
 grep -Fq "activating exact-supported local fallback ${seed_payload_id}" \
   "${TEMP_DIR}/stale-supported-fallback.stderr"
 
-# The rejection backoff must take the same recovery path without repeating the
-# failed canary on every launch.
+# rejection backoff goes the same way and doesn't redo the failed canary every launch
 cp -- "${TEMP_DIR}/probation-current.after-refresh" \
   "${BLOX7_DATA_ROOT}/current.json"
 cp -- "${TEMP_DIR}/probation-current.after-refresh" \
@@ -1175,8 +1147,7 @@ grep -Fq 'runtime reapproval matches a recent failed canary' \
 [[ "$(jq -r .payload_id "${BLOX7_DATA_ROOT}/current.json")" == \
   "${seed_payload_id}" ]]
 
-# With neither a runtime-valid previous_good nor a staged exact-supported
-# payload, the updater still fails closed.
+# no usable previous_good and nothing staged: still fails closed
 no_fallback_data_root="${TEMP_DIR}/no-fallback-data"
 dynamic_payload_id="10001-${FAKE_BUILD_ID}"
 mkdir -p "${no_fallback_data_root}/payloads"
@@ -1203,9 +1174,7 @@ grep -Fq 'rollback failed' "${TEMP_DIR}/stale-no-fallback.stderr"
 unset FAKE_SMOKE_MODE FAKE_CHECK_FAIL
 unset BLOX7_UPDATE_RUNTIME_BUILD_ID
 
-# An exact rejected candidate is not re-canaryed on every normal launch. The
-# key includes candidate/profile/runtime/analyzer evidence, and an explicit
-# override remains available for manual retry.
+# a rejected candidate isn't re-canaried every launch, the override is there for a manual retry
 backoff_data_root="${TEMP_DIR}/backoff-data"
 export BLOX7_DATA_ROOT="${backoff_data_root}"
 export FAKE_LIVE_DATA_ROOT="${BLOX7_DATA_ROOT}"
@@ -1248,9 +1217,8 @@ unset BLOX7_UPDATE_PROFILE_DERIVER BLOX7_UPDATE_REFERENCE_PROFILE
 export BLOX7_DATA_ROOT="${main_data_root}"
 export FAKE_LIVE_DATA_ROOT="${BLOX7_DATA_ROOT}"
 
-# The version returned by the latest API is part of the probation identity.
-# A valid signed payload for a different version may remain staged, but it
-# must never reach canary or replace the working current payload.
+# the latest api's version is part of the probation identity. a signed payload for another
+# version can sit in staging but never gets a canary or replaces current
 provider_mismatch_root="${TEMP_DIR}/provider-mismatch-data"
 export BLOX7_DATA_ROOT="${provider_mismatch_root}"
 export FAKE_LIVE_DATA_ROOT="${BLOX7_DATA_ROOT}"
@@ -1284,8 +1252,7 @@ grep -Fq \
 export BLOX7_DATA_ROOT="${main_data_root}"
 export FAKE_LIVE_DATA_ROOT="${BLOX7_DATA_ROOT}"
 
-# A failure outside the canary still produces a persistent bundle with a
-# structured phase reason and a canonical updater event, not an empty log.
+# failures outside the canary still leave a bundle with a phase reason and an updater event
 export BLOX7_DATA_ROOT="${TEMP_DIR}/validation-failure-data"
 export BLOX7_CACHE_ROOT="${TEMP_DIR}/validation-failure-cache"
 export BLOX7_STATE_ROOT="${TEMP_DIR}/validation-failure-state"
