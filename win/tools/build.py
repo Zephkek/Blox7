@@ -150,9 +150,6 @@ def win_flags(src, libc):
     flags = [f for f in flags if f != '-w'] + ['-Wall', '-Wextra', '-Wno-unused-parameter', '-Wno-missing-field-initializers',
                                                '-I', f'{BIONIC}/libc/bionic', '-I', os.path.join(WIN, 'libc'),
                                                '-I', os.path.join(WIN, 'libc', 'gen')]
-    if src.endswith('.c'):
-        flags = [f for f in flags if f not in ('-std=gnu++20', '-fno-exceptions', '-fno-rtti', '-nostdinc++')]
-        flags = ['-std=gnu11'] + flags
     return flags
 
 
