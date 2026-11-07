@@ -348,7 +348,7 @@ void AAsset_close(AAsset* asset) {
   if (asset != nullptr && AssetTraceEnabled() &&
       asset->path.find("shader") != std::string::npos) {
     std::fprintf(stderr, "[asset] close %s buffer=%p size=%zu\n",
-                 asset->path.c_str(), asset->data.data(), asset->data.size());
+                 asset->path.c_str(), static_cast<void*>(asset->data.data()), asset->data.size());
   }
   delete asset;
 }
