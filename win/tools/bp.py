@@ -1,6 +1,6 @@
 """just enough Android.bp parsing to build bionic outside aosp
 usage: bp.py <Android.bp> [...] <module> [--static] [--json]"""
-import json, os, re, sys
+import glob, json, os, re, sys
 
 TOKEN = re.compile(r'\s+|//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|`[^`]*`|[A-Za-z_][\w.]*|-?\d+|[{}\[\]:,=+()]', re.S)
 
@@ -177,7 +177,6 @@ def collect(name, modules, static=False, seen=None):
                 srcs.append(s)
             continue
         if '*' in s:
-            import glob
             srcs += [os.path.normpath(g) for g in sorted(glob.glob(os.path.join(base, s), recursive=True))
                      if os.path.normpath(g) not in excl]
             continue
