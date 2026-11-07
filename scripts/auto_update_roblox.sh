@@ -22,8 +22,7 @@ fi
 COMPATIBILITY_PATH="${BLOX7_UPDATE_COMPATIBILITY_PATH:-${DEFAULT_METADATA_ROOT}/roblox_compatibility.json}"
 BOOTSTRAP_SOURCES_PATH="${BLOX7_BOOTSTRAP_SOURCES_PATH:-${DEFAULT_METADATA_ROOT}/roblox_bootstrap_sources.json}"
 SIGNING_TRUST_PATH="${BLOX7_UPDATE_SIGNING_TRUST_PATH:-${DEFAULT_METADATA_ROOT}/roblox_signing_certificates.json}"
-# Child validators/providers must use the same resolved source/install layout.
-# In an installed tree PROJECT_ROOT contains metadata/, never config/.
+# child validators/providers need the same layout. installed trees have metadata/, not config/
 export BLOX7_UPDATE_COMPATIBILITY_PATH="${COMPATIBILITY_PATH}"
 export BLOX7_BOOTSTRAP_SOURCES_PATH="${BOOTSTRAP_SOURCES_PATH}"
 export BLOX7_UPDATE_SIGNING_TRUST_PATH="${SIGNING_TRUST_PATH}"

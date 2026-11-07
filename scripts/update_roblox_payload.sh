@@ -204,10 +204,8 @@ main() {
   parse_arguments "$@"
   require_commands
 
-  # Serialise both validation and activation. The directory descriptor avoids
-  # a persistent lock file while protecting the active payload namespace. A
-  # store import must not write beside PROJECT_ROOT: portable/AppImage roots
-  # may be mounted read-only, while the XDG payload store is writable.
+  # one update at a time, locked on the dir fd so no lock file. imports never write next to
+  # PROJECT_ROOT (portable roots can be read-only), the payload store is writable
   local workspace_dir="${RBX_BIN_DIR}"
   if [[ -n "${STORE_ROOT}" ]]; then
     workspace_dir="${STORE_ROOT}"
@@ -219,9 +217,8 @@ main() {
   [[ -f "${BASE_APK}" && -r "${BASE_APK}" ]] || die "base APK is not readable: ${BASE_APK}"
   [[ -f "${SPLIT_APK}" && -r "${SPLIT_APK}" ]] || die "x86_64 split APK is not readable: ${SPLIT_APK}"
 
-  # Snapshot the external bundle before inspecting it. Sober may atomically
-  # replace its cache during an update; every check below must describe the
-  # exact bytes that would become active, not a moving source path.
+  # copy the bundle first, sober can swap its cache mid-update and every check below has to
+  # see the exact bytes that go live
   TEMP_DIR="$(mktemp -d "${workspace_dir}/.payload-update.XXXXXX")"
   trap cleanup EXIT
   local -r stage_dir="${TEMP_DIR}/new"

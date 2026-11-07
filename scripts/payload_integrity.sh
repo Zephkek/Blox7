@@ -7,8 +7,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-# Produce a deterministic digest over every regular asset path and its bytes.
-# NUL-delimited GNU coreutils output keeps unusual file names unambiguous.
+# same digest every time: every asset path and its bytes, NUL-separated so odd names stay unambiguous
 PayloadAssetTreeSha256() {
   local -r assets_root="$1"
   [[ -d "${assets_root}" && ! -L "${assets_root}" ]] || return 1
