@@ -14,8 +14,8 @@ typedef int BOOL;
 typedef uint32_t DWORD;
 typedef uint16_t WCHAR;
 typedef uint64_t SOCKET;
-#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
-#define INVALID_SOCKET ((SOCKET)~0ull)
+#define INVALID_HANDLE_VALUE (reinterpret_cast<HANDLE>(static_cast<intptr_t>(-1)))
+#define INVALID_SOCKET (~static_cast<SOCKET>(0))
 
 struct W32_FILETIME { DWORD lo, hi; };
 struct W32_BY_HANDLE_FILE_INFORMATION {
