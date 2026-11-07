@@ -1648,7 +1648,7 @@ HRESULT draw_frame() {
 void paint() {
   g.clock = static_cast<float>(GetTickCount64() % 3600000) / 1000.0f;
   if (!create_device(*c)) return;
-  if (draw_frame() == static_cast<HRESULT>(D2DERR_RECREATE_TARGET)) drop_device(*c);
+  if (draw_frame() == D2DERR_RECREATE_TARGET) drop_device(*c);
   sync_timer();
 }
 
