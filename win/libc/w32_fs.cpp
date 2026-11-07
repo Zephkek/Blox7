@@ -1716,7 +1716,10 @@ long sys_flock(long fd, long op, long, long, long, long) {
   return with_file(fd, [&](W32File* f) -> long {
     if (f->kind != W32Kind::kFile) return 0;
     W32_OVERLAPPED ov{};
-    if ((op & ~LOCK_NB) == LOCK_UN) return w32.UnlockFileEx(f->handle, 0, 0xffffffff, 0xffffffff, &ov) ? 0 : 0;
+    if ((op & ~LOCK_NB) == LOCK_UN) {
+      w32.UnlockFileEx(f->handle, 0, 0xffffffff, 0xffffffff, &ov);
+      return 0;
+    }
     DWORD flags = ((op & ~LOCK_NB) == LOCK_EX ? 2 /* EXCLUSIVE */ : 0) | ((op & LOCK_NB) ? 1 /* FAIL_IMMEDIATELY */ : 0);
     if (!w32.LockFileEx(f->handle, flags, 0, 0xffffffff, 0xffffffff, &ov)) return (op & LOCK_NB) ? -EWOULDBLOCK : w32_fail();
     return 0;
