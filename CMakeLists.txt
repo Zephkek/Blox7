@@ -568,12 +568,7 @@ target_include_directories(blox7_bionic_abi_exports
   PRIVATE src
 )
 blox7_apply_compile_options(blox7_bionic_abi_exports)
-# These exported Bionic FORTIFY symbols intentionally overlap glibc's
-# __*_chk entry points.  When the bridge is visible to whole-program LTO,
-# GCC can fold a fortified host call back into its own compatibility wrapper
-# and turn the resulting tail recursion into an infinite loop.  Keep this
-# translation unit opaque to interprocedural optimization and make its calls
-# to the host C library explicit external calls.
+# our fortify exports share names with glibc's __*_chk, lto folds them into themselves and loops forever
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   set_property(SOURCE src/compat/bionic_abi_exports.cc APPEND PROPERTY
     COMPILE_OPTIONS
@@ -638,9 +633,7 @@ target_link_options(blox7 PRIVATE
   -Wl,--export-dynamic
 )
 if(BLOX7_WIN32)
-  # Windows port: the process C library is bionic itself. Blox7's stdio runtime for glibc hosts
-  # (__sF) must not be exported over it. (bionic_abi_exports.cc leaves out its libc-named
-  # definitions there; the rest, blox7_egl_display and the like, are what the stubs look up.)
+  # bionic is the real libc here, so the glibc-host stdio (__sF) stays unexported
   target_link_options(blox7 PRIVATE
     -Wl,--exclude-libs,libblox7_bionic_stdio_runtime.a
   )
@@ -649,9 +642,7 @@ if(BLOX7_WIN32)
   target_link_libraries(blox7 PRIVATE Blox7::Update SDL3::SDL3)
 endif()
 
-# Native FreeBSD helper for Linuxulator's unsupported DF socket option.
-# The helper is x86-64 assembly; other host architectures have nothing to
-# assemble.
+# FreeBSD Linuxulator helper for the DF socket option, x86-64 asm only
 if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
   set(BLOX7_BUILD_FREEBSD_SOCKET_HELPER OFF)
 endif()
@@ -736,7 +727,7 @@ install(FILES
 )
 
 if(BLOX7_WIN32)
-  # Windows port: no GTK/WebKit helpers
+  # no gtk/webkit helpers on windows
   add_dependencies(blox7 stub_sys_m stub_sys_z stub_sys_dl stub_sys_c stub_android stub_log
     stub_mediandk blox7_opensles stub_openmax stub_egl stub_glesv2 stub_vulkan)
 else()
