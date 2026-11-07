@@ -10,9 +10,7 @@
 set -Eeuo pipefail
 umask 077
 
-# Diagnostics must not inherit shell/tool injection controls from the failed
-# process. Keep command lookup deterministic; display/session variables that
-# Vulkan needs are retained separately in the environment.
+# don't inherit the failed process's shell/tool overrides. vulkan's display/session vars are kept apart
 unset BASH_ENV ENV TAR_OPTIONS GZIP BZIP2 BZIP GZIP_OPT ZSTD_CLEVEL \
   AWKPATH AWKLIBPATH PERL5OPT PERL5LIB PYTHONPATH RUBYOPT CDPATH \
   GREP_OPTIONS POSIXLY_CORRECT LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT
@@ -231,9 +229,8 @@ SanitizeLog() {
         line = $0
         lower = tolower(line)
 
-        # Never copy a tagged line wholesale. Only emit canonical events from
-        # a small grammar so a future log message cannot turn a
-        # user name, window title, device label, URL, or token into telemetry.
+        # only canonical events from a tiny grammar, never a tagged line as is, so names, titles,
+        # urls or tokens never leak into the bundle
         if (line ~ /^[[:space:]]*\[FATAL\]/) {
           if (lower ~ /compat/) print "[FATAL] compatibility failure"
           else if (lower ~ /(payload|build id|load)/) print "[FATAL] payload load failure"
@@ -574,9 +571,7 @@ WriteVulkanSummary() {
     raw="/proc/self/fd/${fixture_fd}"
     raw_is_temporary=false
   else
-    # Do not honor an executable override from a failed process. A collector
-    # runs beside private work files, so only the fixed, root-owned system tool
-    # is allowed and it receives a minimal display/session environment.
+    # no exe override from a failed process: only the fixed system tool, with a bare display/session env
     local vulkaninfo=/usr/bin/vulkaninfo
     if [[ ! -f "${vulkaninfo}" || -L "${vulkaninfo}" ||
           ! -x "${vulkaninfo}" ||
