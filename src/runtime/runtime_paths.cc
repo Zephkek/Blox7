@@ -63,7 +63,7 @@ std::optional<std::string> ApprovalGeneration(
     }
     return std::nullopt;
   }
-  const std::string generation = filename.substr(prefix.size(), 40);
+  std::string generation = filename.substr(prefix.size(), 40);
   if (!IsLowerHexBuildId(generation)) {
     if (error != nullptr) {
       *error = "active payload approval generation is invalid";
@@ -407,7 +407,7 @@ std::filesystem::path RuntimePaths::DefaultAssetPath() const {
   if (active && active.active) {
     return active.assets_content;
   }
-  const std::filesystem::path relative = "rbx_bin/assets/content";
+  std::filesystem::path relative = "rbx_bin/assets/content";
   if (Exists(working_directory_ / relative)) {
     return relative;
   }

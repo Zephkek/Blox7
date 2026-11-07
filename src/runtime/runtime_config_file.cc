@@ -30,7 +30,7 @@ class LayeredEnvironment final : public Environment {
       : primary_(primary), fallback_(std::move(fallback)) {}
 
   std::optional<std::string> Get(std::string_view name) const override {
-    const std::optional<std::string> primary = primary_.Get(name);
+    std::optional<std::string> primary = primary_.Get(name);
     if (primary.has_value()) {
       return primary;
     }

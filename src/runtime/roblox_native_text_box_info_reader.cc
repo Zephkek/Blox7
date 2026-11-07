@@ -136,7 +136,7 @@ Status Snapshot(JNIEnv* env, jobject info,
   }
 
   env->DeleteLocalRef(info_class);
-  const Status delete_status = CheckJni(env, "DeleteLocalRef(class)");
+  Status delete_status = CheckJni(env, "DeleteLocalRef(class)");
   if (!status.ok()) {
     return status;
   }
@@ -180,7 +180,7 @@ Status QueryRobloxNativeTextBoxInfo(
   RobloxNativeTextBoxInfoSnapshot snapshot;
   status = Snapshot(env, local_info, &snapshot);
   env->DeleteLocalRef(local_info);
-  const Status delete_status = CheckJni(env, "DeleteLocalRef(info)");
+  Status delete_status = CheckJni(env, "DeleteLocalRef(info)");
   if (!status.ok()) {
     return status;
   }
