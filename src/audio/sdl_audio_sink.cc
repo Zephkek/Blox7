@@ -663,7 +663,7 @@ Status ShutdownSdlAudioSubsystem() {
     return Status::Error(StatusCode::kFailedPrecondition,
                          "SDL audio shutdown requires every sink to close");
   }
-  const Status capture_status = PrepareSdlAudioCaptureSubsystemShutdown();
+  Status capture_status = PrepareSdlAudioCaptureSubsystemShutdown();
   if (!capture_status.ok()) {
     return capture_status;
   }
