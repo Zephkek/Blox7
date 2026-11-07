@@ -205,7 +205,6 @@ def compile_all(jobs):
 
 
 def obj_path(src, kind):
-    rel = src.replace(':', '').replace('/', '_')
     return norm(os.path.join(OUT, 'obj', kind, hashlib.sha1((src + kind).encode()).hexdigest()[:8] + '_' + os.path.basename(src) + '.o'))
 
 
@@ -236,7 +235,7 @@ def build_libc():
     subprocess.check_call([sys.executable, '-I', os.path.join(HERE, 'gen-syscalls.py'), f'{BIONIC}/libc/SYSCALLS.TXT',
                            f'{BIONIC}/libc/kernel/uapi/asm-x86/asm/unistd_64.h',
                            os.path.join(gen, 'w32_syscalls.c'), os.path.join(gen, 'w32_syscalls.h')])
-    units, libc, libm = libc_sources()
+    units, libc, _ = libc_sources()
     jobs = [(src, obj_path(src, module), libc_flags(module, src, mflags)) for module, src, mflags in units]
     ssrcs, sd = scudo_units()
     jobs += [(s, obj_path(s, 'scudo'), scudo_flags(sd)) for s in ssrcs]
