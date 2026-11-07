@@ -4,9 +4,8 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-# Validates an authenticated public-place readiness log. Marker matches can
-# contain account, game, ticket, server, or address data, so this script never
-# prints matching lines or caller-provided values.
+# checks a signed-in public join log. markers can hold account, game, ticket or server bits,
+# so nothing matched or passed in ever gets printed
 
 set -euo pipefail
 
@@ -165,10 +164,8 @@ NetworkOrderedRegex \
   "\\[D/rbx\\.jni\\] onGameLoaded\\(\\) SessionReporterState_GameLoaded placeId:${EXPECTED_PLACE_ID}([^0-9]|$)"
 network_game_loaded_line="${network_previous_line}"
 
-# Graphics and network startup run concurrently after UGCGame. A first frame
-# may be presented while the server connection is still being accepted, so do
-# not impose a false ordering between the two branches. Both branches must
-# complete before teardown starts.
+# graphics and network start together after UGCGame, a frame can show up before the server
+# accepts us. no order between them, both just finish before teardown
 network_previous_line="${network_ugc_game_line}"
 NetworkOrderedFixed \
   "first real Vulkan frame" \

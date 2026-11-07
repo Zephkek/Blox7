@@ -39,8 +39,7 @@ if rg -q "${fmod_failure_pattern}" "${log_path}"; then
   exit 1
 fi
 
-# Opening an audio player is not evidence that the payload emitted PCM. Audio
-# remains optional when no buffer crossed the guest boundary.
+# an open audio player doesn't mean pcm came out, no buffer crossing over = still optional
 if (( opensl_emitted == 0 && fmod_emitted == 0 )); then
   if rg -q "${consumption_pattern}|${fmod_consumption_pattern}" "${log_path}"; then
     echo "audio readiness evidence is inconsistent: consumption without submission" >&2

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Validates that test-only SDL mouse and touch input crossed the real
-# production event path and reached Roblox's exported native entrypoints.
+# checks the test-only sdl mouse/touch input went through the real event path into roblox
 
 set -euo pipefail
 
