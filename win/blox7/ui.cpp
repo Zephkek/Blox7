@@ -1257,8 +1257,7 @@ std::wstring flags_file_dialog(bool save) {
   dialog.Flags = OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
   using DialogFn = BOOL(WINAPI*)(LPOPENFILENAMEW);
   static HMODULE comdlg = LoadLibraryW(L"comdlg32.dll");
-  const auto run = reinterpret_cast<DialogFn>(
-      reinterpret_cast<void*>(GetProcAddress(comdlg, save ? "GetSaveFileNameW" : "GetOpenFileNameW")));
+  const auto run = reinterpret_cast<DialogFn>(GetProcAddress(comdlg, save ? "GetSaveFileNameW" : "GetOpenFileNameW"));
   if (!run || !run(&dialog)) return {};
   return file;
 }

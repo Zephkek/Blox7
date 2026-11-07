@@ -21,7 +21,7 @@ void opt_out_of_power_throttling() {
   } state{1, 0x1 | 0x4, 0};
   using SetProcessInformationFn = BOOL(WINAPI*)(HANDLE, int, void*, DWORD);
   const auto set = reinterpret_cast<SetProcessInformationFn>(
-      reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetProcessInformation")));
+      GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetProcessInformation"));
   if (set) set(GetCurrentProcess(), 4, &state, sizeof state);
 }
 
