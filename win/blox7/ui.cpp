@@ -1444,7 +1444,7 @@ void page_about(const D2D1_RECT_F& page) {
 }
 
 void slider(Control control, float x, float y, float w, float value, float lo, float hi, bool enabled,
-            std::function<void(float)> set) {
+            const std::function<void(float)>& set) {
   const int id = option_id(control, 0);
   const float left = x + 6, right = x + w - 6;
   const float t = std::clamp((value - lo) / (hi - lo), 0.0f, 1.0f);
