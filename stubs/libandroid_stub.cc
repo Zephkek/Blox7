@@ -487,7 +487,9 @@ AAssetManager* AAssetManager_fromJava(void*, void*) {
   return &g_asset_manager;
 }
 
-struct AConfiguration {};
+struct AConfiguration {
+  char unused;
+};
 
 AConfiguration* AConfiguration_new() {
   return static_cast<AConfiguration*>(calloc(1, sizeof(AConfiguration)));
@@ -982,7 +984,9 @@ int ALooper_pollAll(int timeout_ms, int* out_fd, int* out_events,
   }
 }
 
-struct ANativeWindow {};
+struct ANativeWindow {
+  char unused;
+};
 
 void ANativeWindow_acquire(ANativeWindow*) {}
 void ANativeWindow_release(ANativeWindow*) {}
