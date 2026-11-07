@@ -71,7 +71,7 @@ static void map_libc(const wchar_t *path) {
     uint64_t lo = UINT64_MAX, hi = 0, rela = 0, relasz = 0, jmprel = 0, pltrelsz = 0;
     DWORD old;
 
-    if (size < sizeof(Ehdr) || memcmp(eh->ident, "\177ELF\2\1", 6) || eh->machine != 62 ||
+    if (size < sizeof(Ehdr) || memcmp(eh->ident, "\177ELF\2\1", 6) != 0 || eh->machine != 62 ||
         eh->phoff + (uint64_t)eh->phnum * sizeof(Phdr) > size)
         boot_fail(L"libc.so is not an x86_64 ELF file", 0);
     ph = (const Phdr *)(file + eh->phoff);
@@ -174,7 +174,7 @@ static int elf_module(uintptr_t addr, char *name, size_t name_size, uintptr_t *o
     int i;
     if (!VirtualQuery((void *)addr, &m, sizeof m) || !m.AllocationBase) return 0;
     base = (const unsigned char *)m.AllocationBase;
-    if (!VirtualQuery(base, &m, sizeof m) || m.State != MEM_COMMIT || memcmp(base, "\177ELF", 4)) return 0;
+    if (!VirtualQuery(base, &m, sizeof m) || m.State != MEM_COMMIT || memcmp(base, "\177ELF", 4) != 0) return 0;
     eh = (const Ehdr *)base;
     ph = (const Phdr *)(base + eh->phoff);
     *offset = addr - (uintptr_t)base;
