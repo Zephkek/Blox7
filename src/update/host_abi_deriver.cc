@@ -2289,7 +2289,7 @@ bool ValidateReferenceIdentity(const Json& sidecar, const ElfImage& reference,
 std::optional<Json> LoadCandidateMetadata(const std::filesystem::path& root,
                                           const ElfImage& candidate,
                                           std::string* error) {
-  const auto metadata = ReadJson(root / "roblox_payload.json", error);
+  auto metadata = ReadJson(root / "roblox_payload.json", error);
   if (!metadata.has_value()) return std::nullopt;
   const std::string version_name = metadata->value("version_name", "");
   const std::uint64_t version_code = metadata->value("version_code", 0ULL);

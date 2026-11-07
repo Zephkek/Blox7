@@ -268,7 +268,7 @@ std::string HashAssetTree(const std::filesystem::path& root,
     }
   }
   if (file_count != nullptr) *file_count = relative_files.size();
-  const std::string tree_hex = tree.FinalHex();
+  std::string tree_hex = tree.FinalHex();
   if (tree_hex.empty()) {
     *error = "cannot finalise asset tree digest";
     return {};
