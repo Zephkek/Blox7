@@ -162,4 +162,4 @@ void w32_vex_arm_thread_suspended(HANDLE thread) {
   arm_suspended(thread);
 }
 
-}  
+}

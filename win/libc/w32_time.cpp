@@ -1,4 +1,4 @@
-// clocks and sleeping on windows, these replace bionic's vdso.cpp 
+// clocks and sleeping on windows, these replace bionic's vdso.cpp
 
 
 #include <cpuid.h>
@@ -64,14 +64,14 @@ uint64_t tsc_hz() {
   if (!((d >> 8) & 1)) return 0;
   __cpuid(0, a, b, c, d);
   if (a >= 0x15) {
-    __cpuid(0x15, a, b, c, d);  
+    __cpuid(0x15, a, b, c, d);
     if (a && b && c) return static_cast<uint64_t>(c) * b / a;
   }
   __cpuid(1, a, b, c, d);
-  if ((c >> 31) & 1) {  
+  if ((c >> 31) & 1) {
     __cpuid(0x40000000, a, b, c, d);
     if (a >= 0x40000010) {
-      __cpuid(0x40000010, a, b, c, d); 
+      __cpuid(0x40000010, a, b, c, d);
       if (a) return static_cast<uint64_t>(a) * 1000;
     }
   }

@@ -1,4 +1,4 @@
-// ms_abi exception filter for the syscall sites published by w32_vex.cpp 
+// ms_abi exception filter for the syscall sites published by w32_vex.cpp
     .text
     .globl vex_handler
     .hidden vex_handler
