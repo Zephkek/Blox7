@@ -68,17 +68,6 @@ using EGLNativeWindowType = void*;
 using __eglMustCastFP = void (*)();
 
 static constexpr EGLint EGL_NONE_VAL = 0x3038;
-static constexpr EGLint EGL_SURFACE_TYPE_VAL = 0x3033;
-static constexpr EGLint EGL_WINDOW_BIT_VAL = 0x0004;
-static constexpr EGLint EGL_RENDERABLE_TYPE_VAL = 0x3040;
-static constexpr EGLint EGL_OPENGL_ES2_BIT_VAL = 0x0004;
-static constexpr EGLint EGL_BLUE_SIZE_VAL = 0x3022;
-static constexpr EGLint EGL_GREEN_SIZE_VAL = 0x3023;
-static constexpr EGLint EGL_RED_SIZE_VAL = 0x3024;
-static constexpr EGLint EGL_ALPHA_SIZE_VAL = 0x3021;
-static constexpr EGLint EGL_DEPTH_SIZE_VAL = 0x3025;
-static constexpr EGLint EGL_STENCIL_SIZE_VAL = 0x3026;
-static constexpr EGLint EGL_CONTEXT_CLIENT_VERSION_VAL = 0x3098;
 static constexpr EGLint EGL_EXTENSIONS_VAL = 0x3055;
 static constexpr EGLint EGL_MIN_SWAP_INTERVAL_VAL = 0x303B;
 static constexpr EGLint EGL_MAX_SWAP_INTERVAL_VAL = 0x303C;
@@ -105,8 +94,6 @@ static constexpr EGLint EGL_FALSE_VAL = 0;
 static constexpr EGLBoolean EGL_TRUE_B = 1;
 static constexpr EGLBoolean EGL_FALSE_B = 0;
 static constexpr EGLDisplay EGL_NO_DISPLAY = nullptr;
-static constexpr EGLContext EGL_NO_CONTEXT = nullptr;
-static constexpr EGLSurface EGL_NO_SURFACE = nullptr;
 
 using PFN_eglGetDisplay = EGLDisplay (*)(EGLNativeDisplayType);
 using PFN_eglInitialize = EGLBoolean (*)(EGLDisplay, EGLint*, EGLint*);
