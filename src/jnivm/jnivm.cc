@@ -5907,9 +5907,7 @@ void VM::InitJNIFunctionTables() {
   };
 
   native_interface_.IsAssignableFrom =
-      [](JNIEnv*, jclass sub, jclass sup) -> jboolean {
-    return (sub == sup || sup == nullptr) ? JNI_TRUE : JNI_TRUE;
-  };
+      [](JNIEnv*, jclass, jclass) -> jboolean { return JNI_TRUE; };
 
   native_interface_.IsInstanceOf =
       [](JNIEnv*, jobject obj, jclass) -> jboolean {
