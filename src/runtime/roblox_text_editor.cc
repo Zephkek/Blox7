@@ -688,7 +688,8 @@ RobloxTextEditResult RobloxTextEditor::ReplaceLocked(
     sink_.release_focus(sink_.context, session_.textbox_handle);
     ClearLocked();
   }
-  return Result(true, status.ok(), !status.ok(), std::move(status));
+  const bool ok = status.ok();
+  return Result(true, ok, !ok, std::move(status));
 }
 
 RobloxTextEditResult RobloxTextEditor::ReplaceCompositionLocked(
@@ -751,7 +752,8 @@ RobloxTextEditResult RobloxTextEditor::ReplaceCompositionLocked(
     sink_.release_focus(sink_.context, session_.textbox_handle);
     ClearLocked();
   }
-  return Result(true, status.ok(), !status.ok(), std::move(status));
+  const bool ok = status.ok();
+  return Result(true, ok, !ok, std::move(status));
 }
 
 RobloxTextEditResult RobloxTextEditor::MoveCursorLocked(
@@ -779,7 +781,8 @@ RobloxTextEditResult RobloxTextEditor::MoveCursorLocked(
   } else {
     PublishDisplayLocked(RobloxTextDisplayEvent::kUpdate);
   }
-  return Result(true, status.ok(), !status.ok(), std::move(status));
+  const bool ok = status.ok();
+  return Result(true, ok, !ok, std::move(status));
 }
 
 RobloxTextEditResult RobloxTextEditor::SelectAllLocked() {
@@ -809,8 +812,8 @@ RobloxTextEditResult RobloxTextEditor::SelectRangeLocked(
   } else {
     PublishDisplayLocked(RobloxTextDisplayEvent::kUpdate);
   }
-  return Result(true, cursor_changed && status.ok(), !status.ok(),
-                std::move(status));
+  const bool ok = status.ok();
+  return Result(true, cursor_changed && ok, !ok, std::move(status));
 }
 
 RobloxTextEditResult RobloxTextEditor::CopySelectionLocked(bool cut) {
@@ -869,7 +872,8 @@ RobloxTextEditResult RobloxTextEditor::FinishLocked() {
     ClearLocked();
     ended = true;
   }
-  return Result(true, status.ok(), ended, std::move(status));
+  const bool ok = status.ok();
+  return Result(true, ok, ended, std::move(status));
 }
 
 RobloxTextEditResult RobloxTextEditor::ReleaseLocked() {
