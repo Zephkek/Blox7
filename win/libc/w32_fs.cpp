@@ -1067,7 +1067,7 @@ void fill_stat(const W32_BY_HANDLE_FILE_INFORMATION& info, struct stat* st) {
   st->st_nlink = info.links ? info.links : 1;
   bool dir = info.attributes & FILE_ATTRIBUTE_DIRECTORY;
   // owner-only modes, careful linux code checks its private files for that
-  unsigned perms = dir ? 0700 : 0700;
+  unsigned perms = 0700;
   if ((info.attributes & FILE_ATTRIBUTE_READONLY) && !dir) perms &= ~0222u;
   st->st_mode = (dir ? S_IFDIR : S_IFREG) | perms;
   st->st_uid = st->st_gid = 10000;
