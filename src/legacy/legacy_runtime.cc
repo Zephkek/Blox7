@@ -1843,10 +1843,9 @@ extern "C" void blox7_before_soinfo_constructors(const char* realpath,
     return;
   }
 
-  const bool force_run_ctors =
-      (std::getenv("BLOX7_SKIP_LIBROBLOX_CTORS") != nullptr &&
-       std::strcmp(std::getenv("BLOX7_SKIP_LIBROBLOX_CTORS"), "0") == 0) ||
-      IsEnabled("BLOX7_RUN_LIBROBLOX_CTORS");
+  const char* skip_ctors = std::getenv("BLOX7_SKIP_LIBROBLOX_CTORS");
+  const bool force_run_ctors = (skip_ctors != nullptr && std::strcmp(skip_ctors, "0") == 0) ||
+                               IsEnabled("BLOX7_RUN_LIBROBLOX_CTORS");
   const bool want_light_wrap =
       IsEnabled("BLOX7_WRAP_LIBROBLOX_CTORS") || force_run_ctors;
   const bool use_native_mimalloc =
