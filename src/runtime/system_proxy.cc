@@ -14,7 +14,9 @@ namespace blox7 {
 namespace runtime {
 namespace {
 
+#ifndef BLOX7_WIN32
 constexpr char kSystemProxyProbeUrl[] = "https://www.roblox.com/";
+#endif
 
 bool IsDirectProxy(const std::string& candidate) {
   return strcasecmp(candidate.c_str(), "direct://") == 0;
