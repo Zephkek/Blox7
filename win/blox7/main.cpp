@@ -8,7 +8,6 @@
 #include "../boot/boot.h"
 #include "blox7.h"
 
-// laptops read these off the exe and hand us the big gpu
 extern "C" {
 __declspec(dllexport) DWORD NvOptimusEnablement = 1;
 __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -16,7 +15,6 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 namespace {
 
-// win11 throttles minimized windows and 1 ms sleeps turn into 15. no thanks
 void opt_out_of_power_throttling() {
   struct {
     ULONG version, control_mask, state_mask;

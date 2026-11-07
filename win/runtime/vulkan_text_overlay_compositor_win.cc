@@ -417,7 +417,6 @@ struct VulkanTextOverlayCompositor::Impl {
     return f.vkEndCommandBuffer(cmd) == VK_SUCCESS;
   }
 
-  // hot reload, the launcher rebuilds shader.spv when the .frag changes
   void ReloadCustomShader() {
     const std::int64_t stamp = FileStamp(custom_path);
     if (stamp == 0 || stamp == custom_stamp) return;

@@ -1,10 +1,11 @@
-// files and paths on windows. names windows forbids map to U+F000 + c, like cygwin
+// names windows forbids map to U+F000 + c, like cygwin
 // FILE_SHARE_DELETE everywhere and unlink parks files in <root>\.deleted, so open files can go like on linux
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/falloc.h>
+#include <linux/magic.h>
 #include <linux/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -252,8 +253,6 @@ long w32_unix_path(const WCHAR* win, char* out, size_t cap) {
   strcpy(out, tail);
   return 0;
 }
-
-// real symlinks when windows lets us, else junctions for dirs and cygwin-style link files for files
 
 namespace {
 
@@ -754,7 +753,7 @@ long sys_fcntl(long fd_l, long cmd, long arg, long, long, long) {
     case F_SETLKW:
     case F_OFD_SETLK:
     case F_OFD_SETLKW:
-      break;  // advisory record locks: every process of ours is alone with its files
+      break;
     case F_GETPIPE_SZ:
       r = 65536;
       break;
@@ -1295,16 +1294,16 @@ bool pseudo_fs(const char* abs, unsigned long* type, unsigned long* flags) {
     return strncmp(abs, dir, n) == 0 && (abs[n] == 0 || abs[n] == '/');
   };
   if (under("/proc")) {
-    *type = 0x9fa0;  // PROC_SUPER_MAGIC
+    *type = PROC_SUPER_MAGIC;
     *flags = kStValid | kStNosuid | kStNodev | kStNoexec | kStRelatime;
   } else if (under("/sys")) {
-    *type = 0x62656572;  // SYSFS_MAGIC
+    *type = SYSFS_MAGIC;
     *flags = kStValid | kStNosuid | kStNodev | kStNoexec | kStRelatime;
   } else if (under("/dev/pts")) {
-    *type = 0x1cd1;  // DEVPTS_SUPER_MAGIC
+    *type = DEVPTS_SUPER_MAGIC;
     *flags = kStValid | kStNosuid | kStNoexec | kStRelatime;
   } else if (under("/dev")) {
-    *type = 0x01021994;  // TMPFS_MAGIC
+    *type = TMPFS_MAGIC;
     *flags = kStValid | kStNosuid | kStRelatime;
   } else {
     return false;
@@ -1354,7 +1353,7 @@ long statfs_impl(long path, long buf) {
   uint64_t avail = 0, total = 0, free_bytes = 0;
   if (!w32.GetDiskFreeSpaceExW(win, &avail, &total, &free_bytes)) return w32_fail();
   memset(s, 0, sizeof(*s));
-  s->f_type = 0xef53;  // ext4
+  s->f_type = EXT4_SUPER_MAGIC;
   s->f_bsize = 4096;
   s->f_frsize = 4096;
   s->f_blocks = total / 4096;
@@ -1707,7 +1706,6 @@ long sys_fchdir(long fd, long, long, long, long, long) {
   return dir ? change_dir(abs) : -ENOTDIR;
 }
 
-// pipes are socket pairs so poll can select() them
 long w32_pipe_pair(int* fds, int flags);
 
 long sys_pipe2(long fds_l, long flags, long, long, long, long) {

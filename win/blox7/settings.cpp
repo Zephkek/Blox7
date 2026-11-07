@@ -1,6 +1,7 @@
 #include <dxgi1_6.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cwchar>
 #include <map>
@@ -155,7 +156,6 @@ std::string yaml_set_block(const std::string& text, const std::string& key, cons
   return join_lines(lines);
 }
 
-// phones as the real app sees them
 struct Phone {
   const wchar_t* id;
   const wchar_t* name;
@@ -318,6 +318,26 @@ const char* const kPresetFlags[][2] = {
     {"DFFlagTextureQualityOverrideEnabled", "\"True\""},
 };
 
+// roblox's own dynamic resolution: lanczos scales the 3D back up, the ui stays sharp
+const char* const kScaleFlags[] = {"DFIntDebugDynamicRenderKiloPixels", "FFlagRenderLoadExperimentalUpscalers",
+                                   "DFFlagRenderLanczosUpsamplingNonRinging"};
+
+using FlagList = std::vector<std::pair<std::string, std::string>>;
+
+bool own_flags(FlagList& flags, std::map<std::string, std::string>& ini, const char* key, const FlagList& wanted,
+               bool (*mine)(const std::string&)) {
+  if (wanted.empty() && ini[key] != "1") return false;
+  flags.erase(std::remove_if(flags.begin(), flags.end(), [mine](const auto& f) { return mine(f.first); }), flags.end());
+  flags.insert(flags.end(), wanted.begin(), wanted.end());
+  ini[key] = wanted.empty() ? "" : "1";
+  return true;
+}
+
+bool is_preset_flag(const std::string& name);
+bool is_scale_flag(const std::string& name) {
+  return std::find(std::begin(kScaleFlags), std::end(kScaleFlags), name) != std::end(kScaleFlags);
+}
+
 void apply_quality(const Paths& paths, const Settings& s) {
   const std::string id = narrow(s.quality);
   const Preset* preset = nullptr;
@@ -325,23 +345,21 @@ void apply_quality(const Paths& paths, const Settings& s) {
     if (id == p.id) preset = &p;
 
   auto ini = read_ini(ini_path(paths));
-  const bool owned = ini["preset_flags"] == "1";
   const std::wstring flags_file = fflags_path(paths);
   auto flags = read_flags(read_all(flags_file));
-  const auto drop_owned = [&] {
-    for (const auto& pair : kPresetFlags)
-      flags.erase(std::remove_if(flags.begin(), flags.end(), [&](const auto& f) { return f.first == pair[0]; }),
-                  flags.end());
-  };
-  if (preset && preset->flags) {
-    drop_owned();
-    for (const auto& pair : kPresetFlags) flags.emplace_back(pair[0], pair[1]);
-    ini["preset_flags"] = "1";
-  } else if (owned) {
-    drop_owned();
-    ini["preset_flags"] = "";
+  FlagList preset_flags, scale_flags;
+  if (preset && preset->flags)
+    for (const auto& pair : kPresetFlags) preset_flags.emplace_back(pair[0], pair[1]);
+  const bool vulkan = s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan";
+  if (vulkan && s.render_scale > 0 && s.render_scale < 100) {
+    const SIZE size = render_size(s);
+    scale_flags = {{kScaleFlags[0], std::to_string(std::max<long>(1, (size.cx * size.cy + 500) / 1000))},
+                   {kScaleFlags[1], "\"True\""},
+                   {kScaleFlags[2], "\"True\""}};
   }
-  if ((preset && preset->flags) || owned) {
+  const bool presets = own_flags(flags, ini, "preset_flags", preset_flags, is_preset_flag);
+  const bool scaled = own_flags(flags, ini, "scale_flags", scale_flags, is_scale_flag);
+  if (presets || scaled) {
     make_parent(flags_file);
     write_all(flags_file, write_flags(flags));
     write_ini(ini_path(paths), ini);
@@ -468,7 +486,7 @@ void set_windows_gpu_preference(const Paths& paths, int preference, std::map<std
   RegCloseKey(key);
 }
 
-// the join button on roblox.com. HKCU so no admin, and whoever had the links before gets parked till we let go
+// HKCU so no admin, whoever had the links before gets parked till we let go
 constexpr const wchar_t* kLinkSchemes[] = {L"roblox", L"roblox-player"};
 
 std::wstring link_key(const wchar_t* scheme) { return std::wstring(L"Software\\Classes\\") + scheme; }
@@ -606,6 +624,8 @@ Settings load_settings(const Paths& paths) {
   if (const auto quality = ini.find("quality"); quality != ini.end()) s.quality = widen(quality->second);
   if (const auto gpu = ini.find("gpu"); gpu != ini.end()) s.gpu = widen(gpu->second);
   if (const auto links = ini.find("join_links"); links != ini.end()) s.join_links = !links->second.empty();
+  if (const auto scale = ini.find("render_scale"); scale != ini.end() && !scale->second.empty())
+    s.render_scale = std::clamp(atoi(scale->second.c_str()), 50, 100);
   if (const auto refresh = ini.find("refresh_rate"); refresh != ini.end()) s.refresh_rate = std::max(0, atoi(refresh->second.c_str()));
   const auto number = [&ini](const char* key, float fallback) {
     const auto found = ini.find(key);
@@ -707,6 +727,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["quality"] = narrow(s.quality);
   ini["gpu"] = narrow(s.gpu);
   ini["refresh_rate"] = s.refresh_rate > 0 ? std::to_string(s.refresh_rate) : "";
+  ini["render_scale"] = s.render_scale < 100 ? std::to_string(s.render_scale) : "";
   ini["profile"] = profile;
   const auto decimal = [](float value) {
     char text[32];
@@ -851,20 +872,41 @@ std::vector<int> refresh_rates() {
 }
 
 std::vector<FastFlag> load_fast_flags(const Paths& paths) {
-  const bool owned = read_ini(ini_path(paths))["preset_flags"] == "1";
+  auto ini = read_ini(ini_path(paths));
+  const bool presets = ini["preset_flags"] == "1", scaled = ini["scale_flags"] == "1";
   std::vector<FastFlag> flags;
-  for (const auto& [name, raw] : read_flags(read_all(fflags_path(paths))))
-    flags.push_back({widen(name), shown_value(raw), owned && is_preset_flag(name)});
+  for (const auto& [name, raw] : read_flags(read_all(fflags_path(paths)))) {
+    const wchar_t* owner = presets && is_preset_flag(name) ? L"Super HQ" : scaled && is_scale_flag(name) ? L"Render scale" : nullptr;
+    flags.push_back({widen(name), shown_value(raw), owner != nullptr, owner ? owner : L""});
+  }
   return flags;
 }
 
-std::wstring check_fast_flag(const std::wstring& name, std::wstring* value, bool super_hq) {
+SIZE render_size(const Settings& s) {
+  double w = s.width, h = s.height;
+  if (s.fullscreen) {
+    w = GetSystemMetrics(SM_CXSCREEN);
+    h = GetSystemMetrics(SM_CYSCREEN);
+  } else if (s.high_dpi) {
+    HDC screen = GetDC(nullptr);
+    const double dpi = screen ? GetDeviceCaps(screen, LOGPIXELSX) / 96.0 : 1.0;
+    if (screen) ReleaseDC(nullptr, screen);
+    w *= dpi;
+    h *= dpi;
+  }
+  const double scale = std::clamp(s.render_scale, 50, 100) / 100.0;
+  return {static_cast<LONG>(std::lround(w * scale)), static_cast<LONG>(std::lround(h * scale))};
+}
+
+std::wstring check_fast_flag(const std::wstring& name, std::wstring* value, const Settings& pending) {
   const FlagKind kind = flag_kind(name);
   if (kind == FlagKind::kNone) return L"Flag names start with FFlag, FInt, FString or FLog.";
   const std::string plain = narrow(name);
   for (const char* forced : kForcedFlags)
     if (plain == forced) return L"Blox7 sets this flag itself, so it can't be added.";
-  if (super_hq && is_preset_flag(plain)) return L"Super HQ sets this flag. Change the preset first.";
+  if (pending.quality == L"superhq" && is_preset_flag(plain)) return L"Super HQ sets this flag. Change the preset first.";
+  if (pending.backend.find(L"vulkan") != std::wstring::npos && pending.render_scale < 100 && is_scale_flag(plain))
+    return L"Render scale sets this flag. Change it under Graphics.";
   std::wstring v = trimmed_wide(*value);
   if (kind == FlagKind::kFlag) {
     std::wstring lower = v;
@@ -902,7 +944,7 @@ std::wstring save_fast_flags(const Paths& paths, const std::vector<FastFlag>& fl
   return write_all(file, write_flags(out)) ? std::wstring() : L"cannot write " + file;
 }
 
-std::wstring import_fast_flags(const std::wstring& file, std::vector<FastFlag>* flags, bool super_hq, bool* failed) {
+std::wstring import_fast_flags(const std::wstring& file, std::vector<FastFlag>* flags, const Settings& pending, bool* failed) {
   const auto entries = read_flags(read_all(file));
   *failed = entries.empty();
   if (entries.empty()) return L"No flags in that file.";
@@ -910,13 +952,13 @@ std::wstring import_fast_flags(const std::wstring& file, std::vector<FastFlag>* 
   for (const auto& [name, raw] : entries) {
     const std::wstring wide_name = widen(name);
     std::wstring value = shown_value(raw);
-    if (!check_fast_flag(wide_name, &value, super_hq).empty()) {
+    if (!check_fast_flag(wide_name, &value, pending).empty()) {
       ++skipped;
       continue;
     }
     auto found = std::find_if(flags->begin(), flags->end(), [&](const FastFlag& flag) { return flag.name == wide_name; });
     if (found == flags->end()) {
-      flags->push_back({wide_name, value, false});
+      flags->push_back({wide_name, value, false, {}});
       ++added;
     } else if (found->managed) {
       ++skipped;

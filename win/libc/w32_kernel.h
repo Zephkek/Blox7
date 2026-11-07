@@ -90,7 +90,6 @@ struct W32Api {
 extern W32Api w32;
 
 extern struct w32boot* w32_boot;
-// what /proc/self/exe says
 extern char w32_program[];
 extern int w32_tls_index;
 
@@ -127,7 +126,6 @@ void w32_loader_segments(void (*fn)(void* ctx, uintptr_t start, uintptr_t file_e
                          void* ctx);
 uint64_t w32_loader_generation();
 
-// BLOX7_W32_STATS counters, free when off
 extern bool g_w32_stats;
 void w32_stats_start();
 uintptr_t w32_stats_caller();
@@ -138,7 +136,6 @@ void w32_stats_yield(uintptr_t caller);
 void w32_stats_madvise(int advice, size_t bytes);
 void w32_stall_start();
 
-// vex catches android's raw syscalls, every thread gets armed as it starts
 extern "C" void w32_init_vex(void);
 extern "C" void w32_vex_set_roblox_range(uintptr_t text_lo, uintptr_t text_hi);
 extern "C" void w32_vex_arm_thread(void);

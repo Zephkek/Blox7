@@ -1,4 +1,3 @@
-// sockets on winsock, with linux's answers wherever winsock has its own opinion
 // af_unix is loopback tcp with the port in a file at the path, pipes are socket pairs so one select() waits on all
 // dns: bionic asks netd over a socket, a thread on the other end answers with GetAddrInfoW
 
@@ -62,8 +61,6 @@ constexpr int kLinuxKeepIdle = 7200, kLinuxKeepIntvl = 75, kLinuxKeepCnt = 9;
 constexpr int kUdpMaxSegments = 64;
 constexpr int64_t kSegmentStallNs = 20 * 1000000;
 
-constexpr size_t kMaxIov = 1024;  // UIO_MAXIOV
-
 struct LinuxInPktinfo {
   int ifindex;
   uint32_t spec_dst, addr;
@@ -91,16 +88,16 @@ struct SocketInfo {
   // winsock's own SO_RCVTIMEO runs ~500 ms late, so we wait ourselves
   int64_t rcvtimeo_ns, sndtimeo_ns;
   bool pktinfo, pktinfo6;
-  bool recvtos, recvtclass; // IP_RECVTOS / IPV6_RECVTCLASS
-  bool keepalive;           // SO_KEEPALIVE
+  bool recvtos, recvtclass;
+  bool keepalive;
   int recverr, recverr6;
   int rcvbuf, sndbuf;
   int keepidle, keepintvl, keepcnt;
   bool reuseaddr, reuseport;
   uint8_t timestamp;
-  bool dontfrag6;           // IPV6_DONTFRAG
-  int tclass6;              // IPV6_TCLASS
-  int bound_if;             // SO_BINDTODEVICE
+  bool dontfrag6;
+  int tclass6;
+  int bound_if;  // SO_BINDTODEVICE
   struct { int16_t level, name; int value; } kept[24];
   uint8_t nkept;
   SOCKET nl_kernel;
@@ -296,7 +293,6 @@ long loopback_pair(int type, SOCKET out[2]) {
   return 0;
 }
 
-// a named af_unix socket is a system file with "!<socket >" and the port, cygwin's format
 void unix_port_file(const sockaddr_un* sun, socklen_t len, char* out) {
   size_t n = len > offsetof(sockaddr_un, sun_path) ? len - offsetof(sockaddr_un, sun_path) : 0;
   if (n > sizeof(sun->sun_path)) n = sizeof(sun->sun_path);
@@ -1509,7 +1505,6 @@ long send_packet(W32File* f, const void* buf, size_t len, int flags) {
   return r;
 }
 
-// never waits: an overlapped receive, cancelled if it would block
 int recv_now(W32File* f, char* buf, uint32_t len, DWORD flags, int* err) {
   SOCKET sk = sock(f);
   W32_WSABUF b{len, buf};
@@ -1932,7 +1927,7 @@ long nl_sendmsg(SocketInfo* s, const msghdr* m, size_t total) {
 
 long msg_send(W32File* f, SocketInfo* s, const msghdr* m, int flags) {
   if ((f->flags & O_ACCMODE) == O_RDONLY) return -EBADF;
-  if (m->msg_iovlen > kMaxIov) return -EMSGSIZE;
+  if (m->msg_iovlen > UIO_MAXIOV) return -EMSGSIZE;
   size_t total = 0;
   for (size_t i = 0; i < m->msg_iovlen; i++) total += m->msg_iov[i].iov_len;
   if (netlink_socket(s)) return nl_sendmsg(s, m, total);
@@ -1967,7 +1962,7 @@ long msg_send(W32File* f, SocketInfo* s, const msghdr* m, int flags) {
 
 long msg_recv(W32File* f, SocketInfo* s, msghdr* m, int flags) {
   if ((f->flags & O_ACCMODE) == O_WRONLY) return -EBADF;
-  if (m->msg_iovlen > kMaxIov) return -EMSGSIZE;
+  if (m->msg_iovlen > UIO_MAXIOV) return -EMSGSIZE;
   if (flags & MSG_ERRQUEUE) return -EAGAIN;
   const size_t room = m->msg_control ? m->msg_controllen : 0;
   m->msg_controllen = 0;

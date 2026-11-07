@@ -744,10 +744,14 @@ CookieLoadResult LoadSavedCookie(const Environment& environment,
   StoredCookie saved = LoadManagedRobloxCookie(paths.cookie_file(), secrets);
   if (saved.from_secret_store &&
       saved.status == CookieLoadStatus::kUnavailable) {
+#ifdef BLOX7_WIN32
+    secrets.Warn("The saved Roblox session can't be read on this Windows account. Sign in again.");
+#else
     secrets.Warn(
         "Secure storage is unavailable. A saved Roblox session "
         "could not be read. Unlock your keyring, or sign in again "
         "to use an unencrypted private cookie file.");
+#endif
     return {};
   }
   CookieLoadResult result{saved.status, std::move(saved.value),

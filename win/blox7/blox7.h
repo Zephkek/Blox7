@@ -48,6 +48,7 @@ struct Settings {
   std::wstring quality = L"auto";
   std::wstring gpu;
   bool join_links = false;
+  int render_scale = 100;
 };
 
 enum class DeviceKind { kPhone, kTablet, kPc, kConsole };
@@ -70,6 +71,7 @@ struct FastFlag {
   std::wstring name;
   std::wstring value;
   bool managed = false;
+  std::wstring owner;
 };
 
 using Progress = std::function<void(double fraction)>;
@@ -82,10 +84,11 @@ std::vector<DeviceChoice> device_choices();
 std::vector<GpuChoice> gpu_choices();
 std::vector<int> refresh_rates();
 std::vector<FastFlag> load_fast_flags(const Paths& paths);
-std::wstring check_fast_flag(const std::wstring& name, std::wstring* value, bool super_hq);
+std::wstring check_fast_flag(const std::wstring& name, std::wstring* value, const Settings& pending);
 std::wstring save_fast_flags(const Paths& paths, const std::vector<FastFlag>& flags);
 std::wstring refresh_shader(const Paths& paths, const std::wstring& source, bool* rebuilt);
-std::wstring import_fast_flags(const std::wstring& file, std::vector<FastFlag>* flags, bool super_hq, bool* failed);
+std::wstring import_fast_flags(const std::wstring& file, std::vector<FastFlag>* flags, const Settings& pending, bool* failed);
+SIZE render_size(const Settings& settings);
 std::wstring export_fast_flags(const std::wstring& file, const std::vector<FastFlag>& flags);
 void effects_preset(Settings* settings, const std::wstring& preset);
 std::wstring compile_shader(const Paths& paths, const std::wstring& source);

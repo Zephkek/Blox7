@@ -1,5 +1,4 @@
-// posix_spawn, exec and wait. the attribute and file-action functions are bionic's (BSD licence, bionic/libc/NOTICE)
-// no fork: an android program runs in a new bootstrap process, file actions apply to a plan of its std handles
+// the attribute and file-action functions are bionic's (BSD licence, bionic/libc/NOTICE)
 
 #include <errno.h>
 #include <fcntl.h>

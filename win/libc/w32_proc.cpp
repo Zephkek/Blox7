@@ -1,4 +1,3 @@
-// linux's /proc and the /sys bits android reads, made up from what windows says about the process
 #include <elf.h>
 #include <dirent.h>
 #include <errno.h>
@@ -334,7 +333,6 @@ void proc_stat(Text& t) {
   uint64_t blocked, ignored, caught;
   w32_signal_masks(&blocked, &ignored, &caught);
   const unsigned long p = pid();
-  // fields as in man 5 proc, in order
   t.add("%lu (%s) R 1 %lu %lu 0 -1 4194304 %lu 0 0 0 %llu %llu 0 0 20 0 %u 0 %llu %llu %llu 18446744073709551615 "
         "%llu %llu %llu 0 0 0 %llu %llu %llu 0 0 0 17 %lu 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
         p, w32_process_comm(), p, p, static_cast<unsigned long>(pmc.page_fault_count), static_cast<unsigned long long>(times.user_ticks),

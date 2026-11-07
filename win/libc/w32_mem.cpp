@@ -1,4 +1,4 @@
-// mmap on windows. linux maps 4 KB pages anywhere, windows reserves 64 KB at a time and commits 4 KB inside
+// linux maps 4 KB pages anywhere, windows reserves 64 KB at a time and commits 4 KB inside
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1311,7 +1311,7 @@ long sys_mlock2(long, long, long, long, long, long) { return 0; }
 long sys_munlock(long, long, long, long, long, long) { return 0; }
 long sys_mlockall(long, long, long, long, long, long) { return 0; }
 long sys_munlockall(long, long, long, long, long, long) { return 0; }
-long sys_brk(long, long, long, long, long, long) { return 0; }  // no heap break: malloc uses mmap
+long sys_brk(long, long, long, long, long, long) { return 0; }
 
 long sys_mincore(long addr, long length, long vec, long, long, long) {
   size_t pages = page_up(static_cast<size_t>(length)) / kPage;

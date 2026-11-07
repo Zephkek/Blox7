@@ -176,7 +176,7 @@ struct Extraction {
   std::wstring error;
 };
 
-// fdi callbacks get no context so the extraction lives here. one at a time, as god intended
+// fdi callbacks get no context, so a global. one at a time, as god intended
 Extraction* g_extraction = nullptr;
 
 FNALLOC(fdi_alloc) { return std::malloc(cb); }
@@ -299,7 +299,6 @@ void rename_old_files(const std::wstring& dir) {
   FindClose(search);
 }
 
-// approvals point at libroblox by full path, so they move too
 void fix_approvals(const std::wstring& dir) {
   WIN32_FIND_DATAW found;
   HANDLE search = FindFirstFileW((dir + L"\\*.json").c_str(), &found);
@@ -466,7 +465,6 @@ void prepare_data(const Paths& paths) {
   copy_tree(paths.runtime + L"\\root", paths.data);
 }
 
-// the game keeps its runtime's marker open while it runs, that's how cleanup knows what's still in use
 void hold_runtime(const Paths& paths) {
   CreateFileW((paths.runtime + L"\\" + kComplete).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
 }
@@ -479,7 +477,7 @@ static bool runtime_busy(const std::wstring& dir) {
   return false;
 }
 
-// builds from before hold_runtime don't hold anything, so hands off while another Blox7.exe runs
+// old builds don't hold their runtime, so hands off while another Blox7.exe runs
 static bool another_blox7_running() {
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if (snapshot == INVALID_HANDLE_VALUE) return true;

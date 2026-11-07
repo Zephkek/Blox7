@@ -100,6 +100,7 @@ enum : int {
 enum Control : int {
   kRenderer,
   kQuality,
+  kRenderScale,
   kGpu,
   kWindowSize,
   kFullscreen,
@@ -386,6 +387,21 @@ void path(std::initializer_list<D2D1_POINT_2F> points, ID2D1Brush* brush, float 
   if (filled) c->rt->FillGeometry(geometry, brush);
   else c->rt->DrawGeometry(geometry, brush, width, g.round);
   geometry->Release();
+}
+
+void heart(float cx, float cy) {
+  ID2D1Brush* red = ink(0xD13438);
+  dot(pt(cx - 2.2f, cy - 1.6f), 2.6f, 2.6f, red);
+  dot(pt(cx + 2.2f, cy - 1.6f), 2.6f, 2.6f, red);
+  path({pt(cx - 4.7f, cy - 0.9f), pt(cx + 4.7f, cy - 0.9f), pt(cx, cy + 4.2f)}, red, 1, true, true);
+}
+
+void warning_sign(float x, float y) {
+  path({pt(x + 7, y), pt(x + 14, y + 13), pt(x, y + 13)}, gradient({{0, 0xFFE57A}, {1, 0xF4B400}}, pt(0, y), pt(0, y + 13)), 1,
+       true, true);
+  path({pt(x + 7, y + 0.5f), pt(x + 13.5f, y + 12.5f), pt(x + 0.5f, y + 12.5f)}, ink(0xB78B00), 1, true);
+  path({pt(x + 7, y + 4), pt(x + 7, y + 8.5f)}, ink(0x000000), 1.6f, false);
+  dot(pt(x + 7, y + 10.6f), 0.9f, 0.9f, ink(0x000000));
 }
 
 float text_width(const std::wstring& s, IDWriteTextFormat* format) {
@@ -880,7 +896,7 @@ std::wstring status_line() {
 }
 
 float main_content_height() {
-  float h = 84;
+  float h = 101;
   if (!status_line().empty()) h += 20;
   if (busy()) h += 22;
   if (g.stage == Stage::Failed && g.details) h += 11 + 16 + 15 * static_cast<float>(std::max<size_t>(1, g.error_lines.size())) + 7 + 15;
@@ -911,10 +927,19 @@ void draw_main() {
   draw_logo(31, 32, 32);
   const float x = 62, tw = w - x - kMargin;
   text(headline(), g.fonts.instruction, rect(x, 9, tw, 22), kInstruction);
-  text(L"Renderer: " + g.backend, g.fonts.body, rect(x, 37, 150, 15), kText);
-  text(L"Quality: " + quality_name(g.settings.quality), g.fonts.body, rect(x + 160, 37, tw - 160, 15), kText);
-  text(L"Device: " + device_name(g.settings.device), g.fonts.body, rect(x, 54, tw, 15), kText);
-  float y = 80;
+  const std::pair<const wchar_t*, std::wstring> facts[] = {
+      {L"Renderer:", g.backend},
+      {L"Quality:", quality_name(g.settings.quality) + (uses_vulkan(g.settings.backend) && g.settings.render_scale < 100
+                                                         ? L", " + std::to_wstring(g.settings.render_scale) + L"% resolution"
+                                                         : L"")},
+      {L"Device:", device_name(g.settings.device)}};
+  float y = 37;
+  for (const auto& [label, value] : facts) {
+    text(label, g.fonts.body, rect(x, y, 64, 15), kSecondary);
+    text(value, g.fonts.body, rect(x + 64, y, tw - 64, 15), kText);
+    y += 17;
+  }
+  y += 9;
   const std::wstring status = status_line();
   if (!status.empty()) {
     text(status, g.fonts.body, rect(x, y, tw, 15), g.stage == Stage::Failed ? kError : kText);
@@ -1001,14 +1026,28 @@ void page_graphics(const D2D1_RECT_F& page) {
   y += 68 + kMargin;
 
   static const std::vector<std::wstring> qualities = {L"auto", L"performance", L"balanced", L"high", L"superhq"};
-  group(rect(x, y, w, 72), L"Quality");
+  group(rect(x, y, w, 96), L"Quality");
   combo_row(L"Preset:", ix, y + 16, 64, 200, kQuality, {L"Roblox decides", L"Performance", L"Balanced", L"High", L"Super HQ"},
             index_of(qualities, g.pending.quality), true, [](size_t i) {
               g.pending.quality = qualities[i];
               mark_dirty();
             });
-  text(quality_note(g.pending.quality), g.fonts.body, rect(ix, y + 46, iw, 15), kSecondary);
-  y += 72 + kMargin;
+  static const int scales[] = {100, 90, 80, 70, 60, 50};
+  size_t scale = 0;
+  for (size_t i = 0; i < std::size(scales); ++i)
+    if (scales[i] == g.pending.render_scale) scale = i;
+  combo_row(L"Resolution:", ix, y + 42, 64, 120, kRenderScale, {L"Native", L"90%", L"80%", L"70%", L"60%", L"50%"}, scale,
+            vulkan, [](size_t i) {
+              g.pending.render_scale = scales[i];
+              mark_dirty();
+            });
+  if (vulkan && g.pending.render_scale < 100) {
+    const SIZE size = render_size(g.pending);
+    text(L"3D at " + std::to_wstring(size.cx) + L" x " + std::to_wstring(size.cy), g.fonts.body,
+         rect(ix + 194, y + 46, iw - 194, 15), kSecondary);
+  }
+  text(quality_note(g.pending.quality), g.fonts.body, rect(ix, y + 72, iw, 15), kSecondary);
+  y += 96 + kMargin;
 
   std::vector<std::wstring> labels{L"Automatic"};
   size_t selected = g.pending.gpu.empty() ? 0 : g.gpus.size() + 1;
@@ -1157,7 +1196,7 @@ void add_flag() {
   std::wstring name = g.name_text, value = g.value_text;
   while (!name.empty() && name.back() == L' ') name.pop_back();
   while (!name.empty() && name.front() == L' ') name.erase(0, 1);
-  const std::wstring error = check_fast_flag(name, &value, g.pending.quality == L"superhq");
+  const std::wstring error = check_fast_flag(name, &value, g.pending);
   if (!error.empty()) {
     g.flag_message = error;
     g.flag_error = true;
@@ -1178,7 +1217,7 @@ void add_flag() {
       mark_dirty();
       return;
     }
-  g.flags.push_back({name, value, false});
+  g.flags.push_back({name, value, false, {}});
   g.flag_selected = static_cast<int>(g.flags.size()) - 1;
   g.flag_message = L"Added " + name + L".";
   g.flag_error = false;
@@ -1224,7 +1263,7 @@ void import_flags() {
   const size_t before = g.flags.size();
   bool failed = false;
   const std::vector<FastFlag> old = g.flags;
-  g.flag_message = import_fast_flags(file, &g.flags, g.pending.quality == L"superhq", &failed);
+  g.flag_message = import_fast_flags(file, &g.flags, g.pending, &failed);
   g.flag_error = failed;
   if (g.flags.size() != before || g.flags.size() != old.size() ||
       !std::equal(g.flags.begin(), g.flags.end(), old.begin(), [](const FastFlag& a, const FastFlag& b) { return a.value == b.value; }))
@@ -1289,7 +1328,7 @@ void page_flags(const D2D1_RECT_F& page) {
     explorer_highlight(item, g.flag_selected == i, g.flag_selected == i ? 0 : hover(id));
     const uint32_t ink_color = flag.managed ? kDisabled : kText;
     text(flag.name, g.fonts.field, D2D1::RectF(item.left + 5, item.top, list.left + name_width - 4, item.bottom), ink_color);
-    text(flag.managed ? flag.value + L" (Super HQ)" : flag.value, g.fonts.field,
+    text(flag.managed ? flag.value + L" (" + flag.owner + L")" : flag.value, g.fonts.field,
          D2D1::RectF(list.left + name_width + 8, item.top, item.right - 4, item.bottom), ink_color);
     clickable(id, item, [i] {
       g.flag_selected = i;
@@ -1322,6 +1361,11 @@ void page_flags(const D2D1_RECT_F& page) {
                          !g.flags[g.flag_selected].managed;
   if (!g.flag_message.empty()) text(g.flag_message, g.fonts.body, rect(x, y + 4, w - kButtonWidth - kGap, 15), g.flag_error ? kError : kSecondary);
   push_button(kRemoveFlag, rect(x + w - kButtonWidth, y, kButtonWidth, kButtonHeight), L"Remove", removable, remove_flag);
+
+  const float wy = page.bottom - kMargin - 15;
+  warning_sign(x, wy + 1);
+  text(L"Some flags send capability bits to Roblox. Use at your own risk.", g.fonts.body, rect(x + 21, wy, w - 21, 15),
+       kSecondary);
 }
 
 Glyph device_glyph(DeviceKind kind) {
@@ -1368,22 +1412,16 @@ void page_about(const D2D1_RECT_F& page) {
   float y = page.top + kMargin;
   draw_logo(x + 24, y + 24, 36);
   text(L"Blox7", g.fonts.instruction, rect(x + 60, y, w - 60, 21), kInstruction);
-  text(L"Version 0.1", g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kText);
-  text(L"Roblox ported back to Windows 7. Made by Zeph.", g.fonts.body, rect(x + 60, y + 39, w - 60, 15), kText);
+  text(L"Version 0.1", g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kSecondary);
+  text(L"Roblox ported back to Windows 7.", g.fonts.body, rect(x + 60, y + 39, w - 60, 15), kText);
   y += 66;
-  text(L"Runs Roblox's Android app natively on Windows 7 through 11, on a Linux system-call layer written for "
-       L"Windows. Built on Mocktail by komaruworld.",
-       g.fonts.paragraph, rect(x, y, w, 46), kText);
-  y += 50;
+  text(L"Runs Roblox's Android app natively on Windows 7 through 11. Built on Mocktail by komaruworld.",
+       g.fonts.paragraph, rect(x, y, w, 32), kText);
+  y += 40;
   text(L"Blox7 is not affiliated with or endorsed by Roblox Corporation or Microsoft. Roblox and the Roblox logo are "
        L"trademarks of Roblox Corporation. Windows is a trademark of Microsoft.",
        g.fonts.paragraph, rect(x, y, w, 46), kSecondary);
-  y += 50;
-  text(L"Open-source parts: Android bionic, Scudo and libc++, SDL3, SDL_ttf, FreeType, HarfBuzz, BoringSSL, curl, "
-       L"libpng, zlib, libyaml, nlohmann/json, capstone, utf8proc, shaderc, the WebView2 loader and the Mozilla CA "
-       L"certificates.",
-       g.fonts.paragraph, rect(x, y, w, 62), kSecondary);
-  y += 70;
+  y += 58;
   link(kDataLink, x, y, L"Open the data folder", [] { ShellExecuteW(g.dialog.hwnd, L"open", g.paths.data.c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
   link(kLogsLink, x + 140, y, L"Open the logs folder",
        [] { ShellExecuteW(g.dialog.hwnd, L"open", logs_dir(g.paths).c_str(), nullptr, nullptr, SW_SHOWNORMAL); });
@@ -1391,6 +1429,12 @@ void page_about(const D2D1_RECT_F& page) {
     const std::wstring notices = g.paths.runtime + L"\\THIRD-PARTY-NOTICES.txt";
     ShellExecuteW(g.dialog.hwnd, L"open", notices.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
   });
+
+  const float before = text_width(L"Made with ", g.fonts.body), after = text_width(L" by Zeph", g.fonts.body);
+  const float left = std::round(x + (w - before - 11 - after) / 2), cy = page.bottom - kMargin - 15;
+  text(L"Made with ", g.fonts.body, rect(left, cy, before + 2, 15), kSecondary);
+  heart(left + before + 5.5f, cy + 8);
+  text(L" by Zeph", g.fonts.body, rect(left + before + 11, cy, after + 2, 15), kSecondary);
 }
 
 void slider(Control control, float x, float y, float w, float value, float lo, float hi, bool enabled,
@@ -1515,7 +1559,7 @@ void page_effects(const D2D1_RECT_F& page) {
 }
 
 void draw_tabs(const D2D1_RECT_F& strip) {
-  float x = strip.left;
+  float x = strip.left + 2;
   D2D1_RECT_F chosen{};
   for (size_t i = 0; i < std::size(kTabs); ++i) {
     const float w = text_width(kTabs[i].label, g.fonts.body) + 12;
@@ -2184,6 +2228,7 @@ int render_ui(const std::wstring& dir) {
   g.settings = Settings{};
   g.settings.quality = L"superhq";
   g.settings.frame_rate_limit = L"144";
+  g.settings.render_scale = 80;
   effects_preset(&g.settings, L"vivid");
   g.pending = g.settings;
   g.version = L"2.746.1266";
@@ -2191,11 +2236,11 @@ int render_ui(const std::wstring& dir) {
   g.error_lines = {L"[engine] joining startup thread with timeout 120000ms",
                    L"[runtime] could not open the Vulkan driver: VK_ERROR_INCOMPATIBLE_DRIVER",
                    L"[FATAL] no graphics backend could start"};
-  g.flags = {{L"FIntDebugForceMSAASamples", L"4", true},
-             {L"DFIntTextureQualityOverride", L"3", true},
-             {L"DFFlagTextureQualityOverrideEnabled", L"True", true},
-             {L"FFlagDebugGraphicsPreferD3D11", L"False", false},
-             {L"FIntFRMMinGrassDistance", L"0", false}};
+  g.flags = {{L"FIntDebugForceMSAASamples", L"4", true, L"Super HQ"},
+             {L"DFIntTextureQualityOverride", L"3", true, L"Super HQ"},
+             {L"DFFlagTextureQualityOverrideEnabled", L"True", true, L"Super HQ"},
+             {L"FFlagDebugGraphicsPreferD3D11", L"False", false, {}},
+             {L"FIntFRMMinGrassDistance", L"0", false, {}}};
   CreateDirectoryW(dir.c_str(), nullptr);
   g.main.draw = draw_main;
   g.dialog.draw = draw_dialog;

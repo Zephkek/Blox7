@@ -1,4 +1,4 @@
-// poll, select, epoll, eventfd, timerfd: everything waitable is a socket underneath, one select() covers it all
+// everything waitable is a socket underneath, one select() covers it all
 // epoll reports edge-triggered as level-triggered, callers that read until EAGAIN can't tell
 
 #include <errno.h>

@@ -23,6 +23,11 @@
 
 extern char** environ;
 
+#ifdef BLOX7_WIN32
+extern "C" int __w32_protect(const void* in, size_t size, void** out, size_t* out_size);
+extern "C" int __w32_unprotect(const void* in, size_t size, void** out, size_t* out_size);
+#endif
+
 #ifndef BLOX7_INSTALL_LIBDIR
 #define BLOX7_INSTALL_LIBDIR "lib"
 #endif
@@ -54,6 +59,92 @@ class DisabledSecretStore final : public NotifyingSecretStore {
   bool enabled() const override { return false; }
   StoredCookie Load(const std::filesystem::path&) override { return {}; }
 };
+
+#ifdef BLOX7_WIN32
+// no keyring on windows, dpapi ties the cookie to the windows account instead
+class DpapiSecretStore final : public NotifyingSecretStore {
+ public:
+  StoredCookie Load(const std::filesystem::path& profile) override {
+    StoredCookie result;
+    result.from_secret_store = true;
+    std::string sealed;
+    const int error = ReadSealed(Sealed(profile), &sealed);
+    if (error == ENOENT) return result;
+    void* plain = nullptr;
+    size_t size = 0;
+    if (error != 0 || __w32_unprotect(sealed.data(), sealed.size(), &plain, &size) != 0) {
+      result.status = StoredCookieStatus::kUnavailable;
+      result.error = "the saved Roblox session belongs to another Windows account";
+      return result;
+    }
+    result.status = StoredCookieStatus::kFound;
+    result.value.assign(static_cast<const char*>(plain), size);
+    volatile char* wipe = static_cast<char*>(plain);
+    for (size_t i = 0; i < size; ++i) wipe[i] = '\0';
+    free(plain);
+    return result;
+  }
+
+  bool Store(const std::filesystem::path& profile, const std::string& cookie) override {
+    void* sealed = nullptr;
+    size_t size = 0;
+    if (__w32_protect(cookie.data(), cookie.size(), &sealed, &size) != 0) return false;
+    const bool written = WriteSealed(Sealed(profile), sealed, size);
+    free(sealed);
+    return written;
+  }
+
+  bool Clear(const std::filesystem::path& profile) override {
+    return unlink(Sealed(profile).c_str()) == 0 || errno == ENOENT;
+  }
+
+ private:
+  static std::filesystem::path Sealed(const std::filesystem::path& profile) { return profile.string() + ".dpapi"; }
+
+  static int ReadSealed(const std::filesystem::path& path, std::string* out) {
+    const int descriptor = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor < 0) return errno;
+    struct stat metadata{};
+    int error = 0;
+    if (fstat(descriptor, &metadata) != 0 || !S_ISREG(metadata.st_mode) || metadata.st_uid != geteuid() ||
+        metadata.st_size < 0 || static_cast<uintmax_t>(metadata.st_size) > kMaximumCookieBytes * 2) {
+      error = EPERM;
+    } else {
+      out->resize(static_cast<size_t>(metadata.st_size));
+      size_t done = 0;
+      while (done < out->size()) {
+        const ssize_t count = read(descriptor, out->data() + done, out->size() - done);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) {
+          error = EIO;
+          break;
+        }
+        done += static_cast<size_t>(count);
+      }
+    }
+    close(descriptor);
+    return error;
+  }
+
+  static bool WriteSealed(const std::filesystem::path& path, const void* data, size_t size) {
+    const std::filesystem::path temporary = path.string() + ".tmp-" + std::to_string(getpid());
+    const int descriptor = open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (descriptor < 0) return false;
+    size_t done = 0;
+    while (done < size) {
+      const ssize_t count = write(descriptor, static_cast<const char*>(data) + done, size - done);
+      if (count < 0 && errno == EINTR) continue;
+      if (count <= 0) break;
+      done += static_cast<size_t>(count);
+    }
+    const bool written = done == size && fsync(descriptor) == 0;
+    close(descriptor);
+    if (written && rename(temporary.c_str(), path.c_str()) == 0) return true;
+    unlink(temporary.c_str());
+    return false;
+  }
+};
+#endif
 
 std::filesystem::path CookieHelper() {
   std::error_code error;
@@ -259,6 +350,10 @@ std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore() {
 
 std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore(
     const Environment& environment) {
+#ifdef BLOX7_WIN32
+  (void)environment;
+  return std::make_shared<DpapiSecretStore>();
+#endif
   const auto paths = RuntimePaths::FromEnvironment(environment);
   const auto loaded = LoadRuntimeConfig(environment, paths.config_file());
   if (loaded && loaded.config.use_libsecret())

@@ -1,8 +1,11 @@
 #include <errno.h>
+#include <sched.h>
 #include <stdint.h>
-#include <sys/utsname.h>
-#include <sys/sysinfo.h>
 #include <string.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
+#include <sys/sysinfo.h>
+#include <sys/utsname.h>
 
 #include "private/icu4x.h"
 #include "gwp_asan_wrappers.h"
@@ -150,7 +153,7 @@ long sys_sched_getaffinity(long, long size, long mask, long, long, long) {
 }
 
 long sys_sched_setaffinity(long, long, long, long, long, long) { return 0; }
-long sys_sched_getscheduler(long, long, long, long, long, long) { return 0; }  // SCHED_OTHER
+long sys_sched_getscheduler(long, long, long, long, long, long) { return SCHED_OTHER; }
 long sys_sched_getparam(long, long param, long, long, long, long) {
   *reinterpret_cast<int*>(param) = 0;
   return 0;
@@ -178,8 +181,8 @@ long sys_prlimit64(long, long resource, long new_l, long old_l, long, long) {
   if (old_l) {
     auto o = reinterpret_cast<rl*>(old_l);
     switch (resource) {
-      case 3: o->cur = 8 << 20; o->max = ~0ull; break;     // RLIMIT_STACK
-      case 7: o->cur = o->max = 65536; break;               // RLIMIT_NOFILE
+      case RLIMIT_STACK: o->cur = 8 << 20; o->max = ~0ull; break;
+      case RLIMIT_NOFILE: o->cur = o->max = 65536; break;
       default: o->cur = o->max = ~0ull; break;
     }
   }
@@ -191,25 +194,25 @@ long sys_setrlimit(long, long, long, long, long, long) { return 0; }
 
 long sys_prctl(long option, long arg2, long arg3, long arg4, long arg5, long) {
   switch (option) {
-    case 15: {  // PR_SET_NAME
+    case PR_SET_NAME: {
       char* comm = w32_thread_comm();
       strncpy(comm, reinterpret_cast<const char*>(arg2), 15);
       comm[15] = 0;
       w32_note_thread_name(comm);
       return 0;
     }
-    case 16:  // PR_GET_NAME
+    case PR_GET_NAME:
       memcpy(reinterpret_cast<char*>(arg2), w32_thread_comm(), 16);
       return 0;
-    case 0x53564d41:  // PR_SET_VMA
+    case PR_SET_VMA:
       if (arg2 != 0) return -EINVAL;
       return w32_mem_set_anon_name(static_cast<uintptr_t>(arg3), static_cast<size_t>(arg4),
                                    reinterpret_cast<const char*>(arg5));
-    case 4:   // PR_SET_DUMPABLE
-    case 1:   // PR_SET_PDEATHSIG
-    case 38:  // PR_SET_NO_NEW_PRIVS
+    case PR_SET_DUMPABLE:
+    case PR_SET_PDEATHSIG:
+    case PR_SET_NO_NEW_PRIVS:
       return 0;
-    case 3:  // PR_GET_DUMPABLE
+    case PR_GET_DUMPABLE:
       return 1;
     default:
       return -EINVAL;

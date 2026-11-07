@@ -143,7 +143,6 @@ bool word_moved(const Waiter& w, const volatile int* addr, int value) {
   return __atomic_load_n(&w.addr, __ATOMIC_RELAXED) == addr && *addr != value;
 }
 
-// short waits spin the last bit, never past linux's 50 us slack
 constexpr int64_t kShortBelowNs = 2000000;
 constexpr int64_t kSlackNs = 50000;
 

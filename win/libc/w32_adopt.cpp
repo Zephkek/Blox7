@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -79,6 +80,45 @@ extern "C" __attribute__((visibility("default"))) int __w32_win32_path(const cha
 }
 
 extern "C" __attribute__((visibility("default"))) const char* __w32_exe_dir() { return w32_boot->exe_dir; }
+
+struct W32DataBlob {
+  DWORD size;
+  uint8_t* data;
+};
+
+static int w32_crypt(bool protect, const void* in, size_t size, void** out, size_t* out_size) {
+  using Crypt = BOOL(WINAPI*)(W32DataBlob*, void*, W32DataBlob*, void*, void*, DWORD, W32DataBlob*);
+  using Free = void*(WINAPI*)(void*);
+  void* crypt32 = w32_boot->LoadLibraryW(reinterpret_cast<const uint16_t*>(u"crypt32.dll"));
+  void* kernel32 = w32_boot->LoadLibraryW(reinterpret_cast<const uint16_t*>(u"kernel32.dll"));
+  const auto crypt = reinterpret_cast<Crypt>(
+      crypt32 ? w32_boot->GetProcAddress(crypt32, protect ? "CryptProtectData" : "CryptUnprotectData") : nullptr);
+  const auto local_free = reinterpret_cast<Free>(kernel32 ? w32_boot->GetProcAddress(kernel32, "LocalFree") : nullptr);
+  if (!crypt || !local_free) return ENOSYS;
+  if (size > 0x1000000) return E2BIG;
+  static const char kEntropy[] = "blox7 roblox session";
+  W32DataBlob input{static_cast<DWORD>(size), static_cast<uint8_t*>(const_cast<void*>(in))};
+  W32DataBlob entropy{sizeof kEntropy - 1, reinterpret_cast<uint8_t*>(const_cast<char*>(kEntropy))};
+  W32DataBlob output{0, nullptr};
+  if (!crypt(&input, nullptr, &entropy, nullptr, nullptr, 1 /* CRYPTPROTECT_UI_FORBIDDEN */, &output)) return EIO;
+  void* copy = malloc(output.size ? output.size : 1);
+  if (copy) memcpy(copy, output.data, output.size);
+  volatile uint8_t* wipe = output.data;
+  for (DWORD i = 0; i < output.size; i++) wipe[i] = 0;
+  local_free(output.data);
+  if (!copy) return ENOMEM;
+  *out = copy;
+  *out_size = output.size;
+  return 0;
+}
+
+extern "C" __attribute__((visibility("default"))) int __w32_protect(const void* in, size_t size, void** out, size_t* out_size) {
+  return w32_crypt(true, in, size, out, out_size);
+}
+
+extern "C" __attribute__((visibility("default"))) int __w32_unprotect(const void* in, size_t size, void** out, size_t* out_size) {
+  return w32_crypt(false, in, size, out, out_size);
+}
 
 extern "C" __attribute__((visibility("default"))) int pthread_tryjoin_np(pthread_t t, void** result) {
   pthread_internal_t* thread = __pthread_internal_find(t, "pthread_tryjoin_np");

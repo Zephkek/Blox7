@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -2413,6 +2414,39 @@ void MaybeReportVulkanPresentStall() {
                                       1000000ULL));
 }
 
+// a wheel notch eases in over a few frames like the windows client, BLOX7_SMOOTH_ZOOM=0 for the old jump
+struct SmoothWheel {
+  float left = 0, x = 0, y = 0;
+  bool relative = false;
+  uint64_t last_ns = 0;
+};
+static SmoothWheel g_wheel;
+
+static bool SmoothWheelEnabled() {
+  static const bool enabled = [] {
+    const char* value = GetEnvNonEmpty("BLOX7_SMOOTH_ZOOM");
+    return value == nullptr || std::strcmp(value, "0") != 0;
+  }();
+  return enabled;
+}
+
+static void EmitSmoothWheel() {
+  if (g_wheel.left == 0.0f) {
+    g_wheel.last_ns = 0;
+    return;
+  }
+  const uint64_t now = SDL_GetTicksNS();
+  const float dt = g_wheel.last_ns != 0 ? static_cast<float>(now - g_wheel.last_ns) / 1e9f : 1.0f / 60;
+  g_wheel.last_ns = now;
+  float step = g_wheel.left * (1.0f - std::exp(-dt / 0.07f));
+  if (std::fabs(g_wheel.left - step) < 0.02f) step = g_wheel.left;
+  g_wheel.left -= step;
+  platform::PlatformEvent event;
+  event.timestamp_ns = now;
+  event.payload = platform::MouseWheelEvent{0.0f, step, g_wheel.x, g_wheel.y, g_wheel.relative};
+  g_platform_event_observer.Notify(event);
+}
+
 bool PumpEvents() {
 #ifdef BLOX7_WIN32
   g_pump_thread_id.store(SDL_GetCurrentThreadID(), std::memory_order_release);
@@ -2603,6 +2637,16 @@ bool PumpEvents() {
             has_pending_motion = true;
           }
         }
+      } else if (auto* wheel = std::get_if<platform::MouseWheelEvent>(&platform_event.payload);
+                 wheel != nullptr && wheel->delta_y != 0.0f && SmoothWheelEnabled()) {
+        g_wheel.left += wheel->delta_y;
+        g_wheel.x = wheel->mouse_x;
+        g_wheel.y = wheel->mouse_y;
+        g_wheel.relative = wheel->relative_mode;
+        if (wheel->delta_x != 0.0f) {
+          wheel->delta_y = 0.0f;
+          g_platform_event_observer.Notify(platform_event);
+        }
       } else {
         g_platform_event_observer.Notify(platform_event);
       }
@@ -2631,6 +2675,7 @@ bool PumpEvents() {
     }
   }
   flush_motion();
+  EmitSmoothWheel();
 #ifdef BLOX7_WIN32
   UpdateWindowTextLayer();
 #endif

@@ -490,11 +490,11 @@ bool relocate(Object* o) {
       case DT_JMPREL: jmprel = reinterpret_cast<const ElfW(Rela)*>(v); break;
       case DT_PLTRELSZ: pltrelsz = d->d_un.d_val; break;
       case DT_RELR:
-      case 0x6fffe000:  // DT_ANDROID_RELR
+      case DT_ANDROID_RELR:
         relr = reinterpret_cast<const ElfW(Relr)*>(v);
         break;
       case DT_RELRSZ:
-      case 0x6fffe001:  // DT_ANDROID_RELRSZ
+      case DT_ANDROID_RELRSZ:
         relrsz = d->d_un.d_val;
         break;
       case DT_ANDROID_RELA: packed = reinterpret_cast<const uint8_t*>(v); break;

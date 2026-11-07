@@ -46,7 +46,6 @@ void w32_init_api() {
     }
     void* fn = module ? w32_boot->GetProcAddress(module, e.name) : nullptr;
     if (fn == nullptr) {
-      // nothing works yet so a message box it is
       void* user32 = w32_boot->LoadLibraryW(reinterpret_cast<const uint16_t*>(u"user32.dll"));
       auto box = reinterpret_cast<int(WINAPI*)(HANDLE, const char*, const char*, DWORD)>(
           w32_boot->GetProcAddress(user32, "MessageBoxA"));

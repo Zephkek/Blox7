@@ -497,7 +497,6 @@ bool in_windows_image(void* address) {
 long WINAPI on_exception(WinExceptionPointers* ep) {
   WinExceptionRecord* r = ep->record;
   WinContext* c = ep->context;
-  // not a bionic thread, not our problem
   if (__get_tls() == nullptr) return kContinueSearch;
   int sig = 0, code = 0;
   void* addr = r->address;

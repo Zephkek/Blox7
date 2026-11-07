@@ -1,4 +1,3 @@
-// the fd table: fds point at open descriptions shared by dup, like linux
 #pragma once
 
 #include <stdint.h>
