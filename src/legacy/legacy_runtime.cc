@@ -736,15 +736,6 @@ uint64_t MonotonicMillis() {
          static_cast<uint64_t>(ts.tv_nsec) / 1000000ULL;
 }
 
-uint64_t MonotonicNanos() {
-  timespec ts{};
-  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
-    return 0;
-  }
-  return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL +
-         static_cast<uint64_t>(ts.tv_nsec);
-}
-
 JNIEnv* AttachMainThreadJniEnv() {
   if (g_vm_for_main_thread_pump == nullptr) {
     return nullptr;
