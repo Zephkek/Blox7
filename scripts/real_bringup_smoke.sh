@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
-# Progressive real-startup harness for Blox7.
-# Tiers A, B, and LEGACY are diagnostic modes. Tier C verifies the
-# supported LuaApp graphics path. GAME verifies the local UGCGame graphics
-# path. INPUT adds a real SDL-to-JNI click to that gate. NETWORK verifies an
-# authenticated public-place join without exposing
-# its credential, identifiers, ticket, server address, or raw native log.
+# real startup smoke. A, B and LEGACY are diagnostics, C = luaapp frame, GAME = local ugcgame,
+# INPUT = a real click on top, NETWORK = signed-in public join (account bits never printed)
 
 set -euo pipefail
 umask 077
@@ -110,9 +106,7 @@ esac
 
 export BLOX7_VALIDATE_ROBLOX_COOKIE="${BLOX7_VALIDATE_ROBLOX_COOKIE:-0}"
 if [[ "${BLOX7_ISOLATED_CANARY:-0}" == 1 ]]; then
-  # Automatic probation must never copy or depend on the user's Roblox
-  # credentials. The LuaApp guest path is enough to prove native startup,
-  # rendering, and controlled lifecycle/audio shutdown.
+  # canaries never touch the user's cookies, the guest luaapp is enough
   unset BLOX7_COOKIE_FILE BLOX7_ROBLOX_COOKIES
   export BLOX7_ALLOW_NO_COOKIE_LUA_APP=1
 fi
@@ -121,15 +115,11 @@ export BLOX7_CALL_REAL_APP_BRIDGE_INIT="${BLOX7_CALL_REAL_APP_BRIDGE_INIT:-1}"
 export BLOX7_CALL_REAL_APP_BRIDGE_INIT_THREAD="${BLOX7_CALL_REAL_APP_BRIDGE_INIT_THREAD:-0}"
 export BLOX7_ENGINE_TRACE="${BLOX7_ENGINE_TRACE:-1}"
 export BLOX7_SKIP_LIBROBLOX_CTORS="${BLOX7_SKIP_LIBROBLOX_CTORS:-0}"
-# The exact Build-ID profile selects Roblox's native mimalloc by default.
-# BLOX7_HOST_ALLOCATOR_BRIDGES=1 remains an explicit research override.
+# the build-id profile picks roblox's own mimalloc, BLOX7_HOST_ALLOCATOR_BRIDGES=1 is for research
 export BLOX7_HOST_JNI_SINGLETON_SEED="${BLOX7_HOST_JNI_SINGLETON_SEED:-0}"
 export BLOX7_INIT_CLIENT_SETTINGS="${BLOX7_INIT_CLIENT_SETTINGS:-1}"
 
-# Roblox 2.725's multithreaded pack loader performs fseek/fread pairs against
-# one shared Android FILE. Host stdio cannot make that two-call transaction
-# atomic, so use Roblox's supported vendor deny policy for NVIDIA (0x10de =
-# 4318) until the loader owns independent positional streams.
+# 2.725's mt pack loader does fseek+fread on one shared FILE, so nvidia (0x10de = 4318) gets the mt shader deny
 DEFAULT_VULKAN_CLIENT_SETTINGS_OVERRIDES='{"FStringGraphicsVulkanShaderMTDenyPattern":"4318:.*"}'
 
 case "${TIER}" in
@@ -162,8 +152,7 @@ case "${TIER}" in
     EXTRA=(--allow-unverified-build --headless)
     ;;
   C)
-    # Minimal real-window LuaApp path through Roblox's native Vulkan backend.
-    # Keep the game surface out until the first app frame is proven.
+    # luaapp in a real window on roblox's vulkan backend, no game surface until the first frame
     export BLOX7_HEADLESS=0
     export BLOX7_STARTUP_THREAD_TIMEOUT_MS="${BLOX7_STARTUP_THREAD_TIMEOUT_MS:-120000}"
     export BLOX7_CALL_REAL_APP_BRIDGE_START=1
@@ -175,8 +164,7 @@ case "${TIER}" in
     export BLOX7_POST_CLIENT_SETTINGS="${BLOX7_POST_CLIENT_SETTINGS:-1}"
     export BLOX7_STEP_POST_CLIENT_SETTINGS="${BLOX7_STEP_POST_CLIENT_SETTINGS:-1}"
     export BLOX7_FETCH_CLIENT_SETTINGS="${BLOX7_FETCH_CLIENT_SETTINGS:-1}"
-    # ActivityNativeMain.loadDataModel starts LuaApp after V2Init; the surface
-    # callback starts AppBridge only afterwards. Preserve that APK ordering.
+    # loadDataModel starts luaapp after V2Init, the surface callback starts AppBridge after that. same order as the apk
     export BLOX7_START_LUA_APP_DM_AFTER_START_APP="${BLOX7_START_LUA_APP_DM_AFTER_START_APP:-0}"
     export BLOX7_START_LUA_APP_DM_INLINE="${BLOX7_START_LUA_APP_DM_INLINE:-1}"
     export BLOX7_START_LUA_APP_DM_DELAY_MS="${BLOX7_START_LUA_APP_DM_DELAY_MS:-0}"
@@ -187,25 +175,19 @@ case "${TIER}" in
     export BLOX7_MAIN_THREAD_MESSAGE_PUMP=1
     export BLOX7_GRAPHICS_BACKEND="${BLOX7_GRAPHICS_BACKEND:-direct-vulkan}"
     export BLOX7_PRELOAD_VULKAN_SHIM=1
-    # Do not force the broken GLES UBO translator. Roblox selects its native
-    # Vulkan renderer after the adapter advertises VK_KHR_android_surface.
+    # no forced gles ubo translator, roblox picks vulkan once VK_KHR_android_surface is there
     export BLOX7_CLIENT_SETTINGS_OVERRIDES_JSON="${BLOX7_CLIENT_SETTINGS_OVERRIDES_JSON:-${DEFAULT_VULKAN_CLIENT_SETTINGS_OVERRIDES}}"
     export BLOX7_REQUIRE_REAL_GRAPHICS=1
-    # The gate consumes the present serial from this trace; do not allow a
-    # caller override to silently remove its primary graphics evidence.
+    # the gate reads the present serial from this trace, so no override
     export BLOX7_WINDOW_TRACE=1
     export BLOX7_EGL_TRACE="${BLOX7_EGL_TRACE:-1}"
-    # Keep the smoke deterministic: retain the first real frame long enough to
-    # observe it, then exercise Roblox lifecycle teardown before SDL shutdown.
+    # hold the first frame a bit, then tear roblox down before sdl
     export BLOX7_AUTO_EXIT_AFTER_PRESENT_MS="${BLOX7_AUTO_EXIT_AFTER_PRESENT_MS:-3000}"
-    # Tier C is the supported readiness path for the exact Build ID in the
-    # compatibility manifest. It must pass the normal fail-closed gate.
+    # C is the supported path for the exact build id, normal gate
     EXTRA=(--windowed)
     ;;
   GAME|INPUT|RESIZE)
-    # Local UGCGame graphics gate after the LuaApp-window tier succeeds.
-    # The APK's first valid surface starts the game directly. Update is only
-    # for an already-running game, and Resume is only for a paused game.
+    # ugcgame once luaapp works. the first surface starts the game, Update/Resume are for running/paused ones
     export BLOX7_UPDATE_SURFACE_GAME_BEFORE_START_GAME=0
     export BLOX7_RESUME_GAME_WITH_PLATFORM_PARAMS_AFTER_START_GAME=0
     export BLOX7_HEADLESS=0
@@ -213,14 +195,14 @@ case "${TIER}" in
     export BLOX7_CALL_REAL_APP_BRIDGE_START=1
     export BLOX7_START_LUA_APP_DM=1
     export BLOX7_START_GAME_WITH_PARAM=1
-    # This event belongs to the app-restoration path, not initial StartGame.
+    # restore path only, not StartGame
     export BLOX7_SEND_GAME_LOADED=0
     export BLOX7_FETCH_CLIENT_SETTINGS="${BLOX7_FETCH_CLIENT_SETTINGS:-1}"
     export BLOX7_GRAPHICS_BACKEND="${BLOX7_GRAPHICS_BACKEND:-direct-vulkan}"
     export BLOX7_PRELOAD_VULKAN_SHIM=1
     export BLOX7_CLIENT_SETTINGS_OVERRIDES_JSON="${BLOX7_CLIENT_SETTINGS_OVERRIDES_JSON:-${DEFAULT_VULKAN_CLIENT_SETTINGS_OVERRIDES}}"
     export BLOX7_REQUIRE_REAL_GRAPHICS=1
-    # The ordered gate consumes vkQueuePresentKHR serials from this trace.
+    # the gate counts vkQueuePresentKHR serials from this trace
     export BLOX7_WINDOW_TRACE=1
     export BLOX7_AUTO_EXIT_AFTER_PRESENT_MS="${BLOX7_AUTO_EXIT_AFTER_PRESENT_MS:-4000}"
     if [[ "${TIER}" == "INPUT" ]]; then
@@ -231,13 +213,11 @@ case "${TIER}" in
       export BLOX7_RESIZE_WIDTH="${BLOX7_RESIZE_WIDTH:-1024}"
       export BLOX7_RESIZE_HEIGHT="${BLOX7_RESIZE_HEIGHT:-640}"
     fi
-    # GAME uses the same exact Build-ID profile and fail-closed policy as C.
+    # same profile and gate as C
     EXTRA=(--windowed)
     ;;
   NETWORK)
-    # Authenticated public-place gate. Unlike GAME, this requires a positive
-    # place ID and an authenticated identity. The public-place contract
-    # excludes private/reserved/follow-user launch selectors.
+    # signed-in public join: needs a place id and an account, no private/reserved/follow joins
     place_id="${BLOX7_PLACE_ID:-}"
     if [[ ! "${place_id}" =~ ^[1-9][0-9]{0,18}$ ]] ||
        { [[ "${#place_id}" -eq 19 ]] &&
@@ -306,8 +286,7 @@ case "${TIER}" in
     export BLOX7_CALL_REAL_APP_BRIDGE_START=1
     export BLOX7_START_LUA_APP_DM=1
     export BLOX7_START_GAME_WITH_PARAM=1
-    # onGameLoaded must arrive from the real joined DataModel, never from the
-    # restoration-only native event used by research paths.
+    # onGameLoaded has to come from the joined DataModel, not the restore event
     export BLOX7_SEND_GAME_LOADED=0
     export BLOX7_FETCH_CLIENT_SETTINGS="${BLOX7_FETCH_CLIENT_SETTINGS:-1}"
     export BLOX7_GRAPHICS_BACKEND="${BLOX7_GRAPHICS_BACKEND:-direct-vulkan}"
@@ -327,8 +306,7 @@ case "${TIER}" in
       echo "NETWORK requires a smoke timeout of at least 90 seconds" >&2
       exit 2
     fi
-    # No unverified-build escape hatch: NETWORK is valid only for a supported
-    # exact Build-ID profile.
+    # NETWORK only runs on a supported build id
     EXTRA=(--windowed)
     ;;
   LEGACY)
@@ -350,17 +328,12 @@ case "${TIER}" in
 esac
 
 echo "tier=${TIER} log=${LOG}"
-# The outer readiness harness owns the raw log and can produce one useful
-# sanitized archive after binary, marker, audio, input, resize, or network
-# failure. Suppress the inner normal-launch guard to avoid duplicate bundles.
+# the outer harness keeps the raw log and makes the one bundle, so the inner guard stays off
 SUPPORT_BUNDLE_DISABLED="${BLOX7_DISABLE_SUPPORT_BUNDLE:-0}"
 export BLOX7_DISABLE_SUPPORT_BUNDLE=1
 set +e
-# Roblox may ignore SIGTERM while a native engine thread is
-# active. Bound the smoke run even in that state so the caller gets a
-# deterministic result and no stale window/process is left behind. Tier C with
-# an explicitly disabled present timer is the supported interactive launch,
-# however, and must remain alive until the user closes it.
+# roblox can ignore SIGTERM while an engine thread is busy, so the run gets a hard limit.
+# C with the present timer off is the interactive launch and stays up until the window closes
 if [[ "${TIER}" == "NETWORK" ]]; then
   timeout --kill-after=5s "${BLOX7_SMOKE_TIMEOUT_S}" \
     "${BIN}" "${EXTRA[@]}" "${USER_ARGUMENTS[@]}" >"${LOG}" 2>&1
@@ -397,8 +370,7 @@ if [[ "${TIER}" == "C" && "${rc}" -eq 0 ]]; then
       rc=1
     fi
   done
-  # Roblox may omit the shader-pack summary even after rendering hundreds of
-  # frames. A numbered queue present is stable, renderer-level evidence.
+  # the shader-pack summary sometimes never shows up, a numbered present always does
   if ! rg --quiet '\[window\] vkQueuePresentKHR #[1-9][0-9]*' "${LOG}"; then
     echo "Tier C readiness marker missing: real Vulkan queue present" >&2
     rc=1
