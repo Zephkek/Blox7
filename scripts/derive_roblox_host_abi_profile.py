@@ -60,6 +60,7 @@ PROGRAM_HEADER = struct.Struct("<IIQQQQQQ")
 SECTION_HEADER = struct.Struct("<IIQQQQIIQQ")
 SYMBOL_ENTRY = struct.Struct("<IBBHQQ")
 NOTE_HEADER = struct.Struct("<III")
+SHT_NOBITS = 8
 
 ELF_CLASS_64 = 2
 ELF_DATA_LITTLE_ENDIAN = 1
@@ -364,7 +365,7 @@ class ElfImage:
                 link=values[6],
                 entry_size=values[9],
             )
-            if section.section_type != 8:  # SHT_NOBITS has no file bytes.
+            if section.section_type != SHT_NOBITS:
                 self._checked_range(section.offset, section.size, f"section {name}")
             if name and name in by_name:
                 raise AnalyzerError(f"ELF contains duplicate section {name}")
