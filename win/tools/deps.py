@@ -1,6 +1,6 @@
 """builds the third-party libs for android x86_64 api 28 with the ndk
 usage: deps.py [name ...]"""
-import os, shutil, subprocess, sys
+import os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WIN = os.path.dirname(HERE)
