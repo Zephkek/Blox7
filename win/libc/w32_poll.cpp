@@ -740,7 +740,7 @@ long w32_special_read(W32File* f, void* buf, size_t len) {
       const bool shared = timer_wait_begin(t);
       while (!(n = timer_take(t))) {
         int64_t due = timer_due(t);
-        if (shared && (due == kNever || due > 50000000)) due = 50000000;
+        if (shared && due > 50000000) due = 50000000;
         if (wait_readable(t->r, due == kNever ? -1 : due > 0 ? due : 0)) timer_drain(t);
       }
       timer_wait_end(t);
