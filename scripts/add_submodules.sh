@@ -2,10 +2,7 @@
 # Copyright 2026 Mocktail Project Authors
 # Apache 2.0 License
 #
-# scripts/add_submodules.sh — Initialises pinned upstream dependencies.
-#
-# Run once after the initial clone:
-#   ./scripts/add_submodules.sh
+# pulls the pinned upstream deps, run once after cloning
 
 set -euo pipefail
 
