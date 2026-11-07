@@ -395,14 +395,14 @@ constexpr uint16_t kBionicMutexCounterOne = 1u << 2;
 constexpr uint16_t kBionicMutexTypeFieldMask =
     kBionicMutexTypeMask << kBionicMutexTypeShift;
 constexpr uint16_t kBionicMutexTypeBitsNormal = 0;
-constexpr uint16_t kBionicMutexTypeBitsRecursive =
+[[maybe_unused]] constexpr uint16_t kBionicMutexTypeBitsRecursive =
     1u << kBionicMutexTypeShift;
 constexpr uint16_t kBionicMutexTypeBitsErrorCheck =
     2u << kBionicMutexTypeShift;
 constexpr uint16_t kBionicMutexTypeBitsPi = kBionicMutexTypeFieldMask;
 constexpr int64_t kBionicMutexAttrTypeMask = 0x0f;
 constexpr int kBionicMutexNormal = 0;
-constexpr int kBionicMutexRecursive = 1;
+[[maybe_unused]] constexpr int kBionicMutexRecursive = 1;
 constexpr int kBionicMutexErrorCheck = 2;
 static_assert(sizeof(pthread_mutex_t) >= kBionicMutexSize);
 
