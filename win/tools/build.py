@@ -159,7 +159,7 @@ def compile_all(jobs):
         if not os.path.exists(obj) or not os.path.exists(deps):
             return False
         t = os.path.getmtime(obj)
-        text = open(deps).read().replace('\\\n', ' ')
+        text = open(deps, encoding='utf-8', errors='replace').read().replace('\\\n', ' ')
         if ': ' not in text:
             return False
         files = [f.replace('\\ ', ' ') for f in re.split(r'(?<!\\)\s+', text.split(': ', 1)[1]) if f]
@@ -248,7 +248,8 @@ def build_libc():
     builtins = f'{resource_dir()}/lib/linux/libclang_rt.builtins-x86_64-android.a'
     unwind = f'{resource_dir()}/lib/linux/x86_64/libunwind.a'
     rsp = os.path.join(OUT, 'libc.rsp')
-    open(rsp, 'w').write('\n'.join(f'"{o}"' for o in objs))
+    with open(rsp, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(f'"{o}"' for o in objs))
     cmd = [CLANGXX, '--target=x86_64-linux-android36', '-shared', '-nostdlib', '-fuse-ld=lld', '-o', os.path.join(OUT, 'libc.so'),
            '-Wl,-soname,libc.so', '-Wl,-Bsymbolic', '-Wl,-e,__w32_libc_start', '-Wl,--gc-sections', '-Wl,-z,max-page-size=4096',
            '-Wl,--hash-style=both', '-Wl,-z,now', '-Wl,--no-undefined', '-Wl,--build-id=sha1',
