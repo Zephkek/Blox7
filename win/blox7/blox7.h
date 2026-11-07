@@ -78,7 +78,8 @@ using Progress = std::function<void(double fraction)>;
 
 Settings load_settings(const Paths& paths);
 std::wstring save_settings(const Paths& paths, const Settings& settings);
-void apply_launch_settings(const Paths& paths);
+bool vulkan_installed();
+void apply_launch_settings(const Paths& paths, bool vulkan_driver = vulkan_installed());
 void refresh_join_links(const Paths& paths);
 std::vector<DeviceChoice> device_choices();
 std::vector<GpuChoice> gpu_choices();

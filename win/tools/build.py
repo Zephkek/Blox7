@@ -370,7 +370,7 @@ def build_webview():
            os.path.join(root, 'src', 'webview', 'webview_helper_policy.cc'),
            f'-I{sdk}/include', f'-I{root}/src', f'-I{root}/include', f'-I{OUT}/deps/include',
            '-Wl,--subsystem,windows:6.1', '-Wl,--major-os-version,6', '-Wl,--minor-os-version,1',
-           '-lole32', '-lws2_32', '-lgdi32', '-luser32', '-luuid', '-lcomctl32']
+           '-lole32', '-lws2_32', '-lgdi32', '-luser32', '-luuid', '-lcomctl32', '-lshell32']
     subprocess.check_call(cmd)
     shutil.copyfile(f'{sdk}/x64/WebView2Loader.dll', os.path.join(OUT, 'WebView2Loader.dll'))
     print('built', out)

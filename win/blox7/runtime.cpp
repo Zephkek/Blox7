@@ -561,6 +561,59 @@ std::wstring graphics_backend(const Paths& paths) {
   return backend;
 }
 
+static bool file_exists(const wchar_t* path) { return path && *path && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES; }
+
+// what the vulkan loader itself reads: Khronos\Vulkan\Drivers, then each display adapter's VulkanDriverName
+static bool listed_driver(HKEY key) {
+  wchar_t name[1024];
+  for (DWORD i = 0;; ++i) {
+    DWORD length = 1024, type = 0, value = 1, size = sizeof value;
+    const LONG result = RegEnumValueW(key, i, name, &length, nullptr, &type, reinterpret_cast<BYTE*>(&value), &size);
+    if (result == ERROR_NO_MORE_ITEMS) return false;
+    if (result == ERROR_SUCCESS && type == REG_DWORD && value == 0 && file_exists(name)) return true;
+  }
+}
+
+static bool adapter_driver(HKEY adapters) {
+  wchar_t sub[64];
+  for (DWORD i = 0;; ++i) {
+    DWORD length = 64;
+    const LONG result = RegEnumKeyExW(adapters, i, sub, &length, nullptr, nullptr, nullptr, nullptr);
+    if (result == ERROR_NO_MORE_ITEMS) return false;
+    wchar_t path[1024] = {};
+    DWORD size = sizeof path - sizeof(wchar_t);
+    if (result == ERROR_SUCCESS &&
+        RegGetValueW(adapters, sub, L"VulkanDriverName", RRF_RT_REG_SZ | RRF_RT_REG_MULTI_SZ, nullptr, path, &size) ==
+            ERROR_SUCCESS &&
+        file_exists(path))
+      return true;
+  }
+}
+
+bool vulkan_installed() {
+  static const bool found = [] {
+    wchar_t dir[MAX_PATH];
+    const UINT n = GetSystemDirectoryW(dir, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH || !file_exists((std::wstring(dir, n) + L"\\vulkan-1.dll").c_str())) return false;
+    if (GetEnvironmentVariableW(L"VK_ICD_FILENAMES", nullptr, 0) || GetEnvironmentVariableW(L"VK_DRIVER_FILES", nullptr, 0))
+      return true;
+    HKEY key;
+    for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
+      if (RegOpenKeyExW(root, L"SOFTWARE\\Khronos\\Vulkan\\Drivers", 0, KEY_READ, &key) != ERROR_SUCCESS) continue;
+      const bool listed = listed_driver(key);
+      RegCloseKey(key);
+      if (listed) return true;
+    }
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}",
+                      0, KEY_READ, &key) != ERROR_SUCCESS)
+      return false;
+    const bool adapter = adapter_driver(key);
+    RegCloseKey(key);
+    return adapter;
+  }();
+  return found;
+}
+
 UpdateState update_state(const Paths& paths) {
   UpdateState state;
   const std::wstring path = blox7_dir(paths, L".local\\share\\blox7\\update.json");

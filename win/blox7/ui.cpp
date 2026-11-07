@@ -198,6 +198,7 @@ struct App {
   Stage stage = Stage::Ready;
   std::atomic<double> unpacked{0};
   std::wstring version, backend, detail;
+  bool vulkan_driver = true;
   std::vector<std::wstring> error_lines;
   DWORD exit_code = 0;
   bool details = false;
@@ -607,7 +608,9 @@ void step_animation() {
 
 void refresh_info() {
   g.version = roblox_version(g.paths);
+  g.vulkan_driver = vulkan_installed();
   g.backend = graphics_backend(g.paths);
+  if (g.backend == L"Vulkan" && !g.vulkan_driver) g.backend = L"OpenGL ES (no Vulkan driver)";
 }
 
 size_t index_of(const std::vector<std::wstring>& values, const std::wstring& value) {
@@ -617,6 +620,8 @@ size_t index_of(const std::vector<std::wstring>& values, const std::wstring& val
 bool uses_vulkan(const std::wstring& backend) {
   return backend == L"direct-vulkan" || backend == L"vulkan" || backend == L"native-vulkan";
 }
+
+bool runs_vulkan(const std::wstring& backend) { return uses_vulkan(backend) && g.vulkan_driver; }
 
 bool uses_gles(const std::wstring& backend) {
   return backend == L"opengl" || backend == L"gles" || backend == L"system" || backend == L"auto";
@@ -929,7 +934,7 @@ void draw_main() {
   text(headline(), g.fonts.instruction, rect(x, 9, tw, 22), kInstruction);
   const std::pair<const wchar_t*, std::wstring> facts[] = {
       {L"Renderer:", g.backend},
-      {L"Quality:", quality_name(g.settings.quality) + (uses_vulkan(g.settings.backend) && g.settings.render_scale < 100
+      {L"Quality:", quality_name(g.settings.quality) + (runs_vulkan(g.settings.backend) && g.settings.render_scale < 100
                                                          ? L", " + std::to_wstring(g.settings.render_scale) + L"% resolution"
                                                          : L"")},
       {L"Device:", device_name(g.settings.device)}};
@@ -1015,7 +1020,8 @@ void page_graphics(const D2D1_RECT_F& page) {
   float y = page.top + kMargin;
   const bool vulkan = uses_vulkan(g.pending.backend);
   group(rect(x, y, w, 68), L"Renderer");
-  radio(kRenderer, 0, ix, y + 16, iw, vulkan, L"Vulkan (recommended, fastest)", [] {
+  const wchar_t* vulkan_label = g.vulkan_driver ? L"Vulkan (recommended, fastest)" : L"Vulkan (no Vulkan driver found)";
+  radio(kRenderer, 0, ix, y + 16, iw, vulkan, vulkan_label, [] {
     g.pending.backend = L"direct-vulkan";
     mark_dirty();
   });
@@ -1037,11 +1043,11 @@ void page_graphics(const D2D1_RECT_F& page) {
   for (size_t i = 0; i < std::size(scales); ++i)
     if (scales[i] == g.pending.render_scale) scale = i;
   combo_row(L"Resolution:", ix, y + 42, 64, 120, kRenderScale, {L"Native", L"90%", L"80%", L"70%", L"60%", L"50%"}, scale,
-            vulkan, [](size_t i) {
+            runs_vulkan(g.pending.backend), [](size_t i) {
               g.pending.render_scale = scales[i];
               mark_dirty();
             });
-  if (vulkan && g.pending.render_scale < 100) {
+  if (runs_vulkan(g.pending.backend) && g.pending.render_scale < 100) {
     const SIZE size = render_size(g.pending);
     text(L"3D at " + std::to_wstring(size.cx) + L" x " + std::to_wstring(size.cy), g.fonts.body,
          rect(ix + 194, y + 46, iw - 194, 15), kSecondary);
@@ -1495,7 +1501,7 @@ void browse_shader() {
 void page_effects(const D2D1_RECT_F& page) {
   const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18;
   float y = page.top + kMargin;
-  const bool vulkan = uses_vulkan(g.pending.backend);
+  const bool vulkan = runs_vulkan(g.pending.backend);
   static const std::vector<std::wstring> presets = {L"off", L"crisp", L"vivid", L"cinematic", L"custom"};
   const float look = vulkan ? 158 : 177;
   group(rect(x, y, w, look), L"Look");
@@ -1729,7 +1735,7 @@ void launch() {
 void watch_shader() {
   static int tick = 0;
   static FILETIME failed{};
-  if (g.stage != Stage::Running || ++tick % 4 || g.settings.shader.empty() || !uses_vulkan(g.settings.backend)) return;
+  if (g.stage != Stage::Running || ++tick % 4 || g.settings.shader.empty() || !runs_vulkan(g.settings.backend)) return;
   WIN32_FILE_ATTRIBUTE_DATA source{};
   if (!GetFileAttributesExW(g.settings.shader.c_str(), GetFileExInfoStandard, &source) ||
       CompareFileTime(&source.ftLastWriteTime, &failed) == 0)

@@ -759,8 +759,13 @@ void refresh_join_links(const Paths& paths) {
   write_ini(ini_path(paths), ini);
 }
 
-void apply_launch_settings(const Paths& paths) {
-  const Settings s = load_settings(paths);
+void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
+  Settings s = load_settings(paths);
+  // no vulkan driver (most intel gpus on win7): this launch runs opengl es, the saved choice stays
+  if (!vulkan_driver && (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan")) {
+    s.backend = L"opengl";
+    SetEnvironmentVariableW(L"BLOX7_GRAPHICS_BACKEND", L"opengl");
+  }
   apply_quality(paths, s);
   SetEnvironmentVariableW(L"BLOX7_VULKAN_DEVICE", s.gpu.empty() ? nullptr : s.gpu.c_str());
   if (s.quality == L"high" || s.quality == L"superhq") SetEnvironmentVariableW(L"BLOX7_GRAPHICS_QUALITY", L"high");

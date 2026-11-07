@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <commctrl.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -2362,7 +2363,46 @@ void AttachWebView(Surface* surface, std::function<void(Surface*)> ready) {
 
 using CreateEnvironmentFn = HRESULT(STDAPICALLTYPE*)(PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions*,
                                                      ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*);
+using BrowserVersionFn = HRESULT(STDAPICALLTYPE*)(PCWSTR, LPWSTR*);
 CreateEnvironmentFn g_create_environment;
+BrowserVersionFn g_browser_version;
+
+bool RuntimeInstalled() {
+  if (g_browser_version == nullptr) return true;
+  LPWSTR version = nullptr;
+  const HRESULT result = g_browser_version(g_app.runtime_folder.empty() ? nullptr : g_app.runtime_folder.c_str(), &version);
+  const bool found = SUCCEEDED(result) && version != nullptr;
+  if (version != nullptr) CoTaskMemFree(version);
+  return found;
+}
+
+// 7, 8 and 8.1 stop at webview2 109, so those get pointed at the update catalog
+void ExplainMissingRuntime() {
+  using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
+  OSVERSIONINFOW os{};
+  os.dwOSVersionInfoSize = sizeof os;
+  if (const auto get = reinterpret_cast<RtlGetVersionFn>(
+          reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"))))
+    get(&os);
+  const bool old_windows = os.dwMajorVersion < 10;
+  const std::wstring text = std::wstring(L"Signing in needs Microsoft Edge WebView2, and it isn't installed.\n\n") +
+                            (old_windows ? L"This version of Windows needs WebView2 Runtime 109, the last one made for it.\n\n"
+                                         : L"") +
+                            L"Open the download page?";
+  const HWND owner = g_app.primary != nullptr ? g_app.primary->window : nullptr;
+  if (MessageBoxW(owner, text.c_str(), L"Blox7", MB_YESNO | MB_ICONINFORMATION) == IDYES)
+    ShellExecuteW(owner, L"open",
+                  old_windows ? L"https://www.catalog.update.microsoft.com/Search.aspx?q=WebView2%20Runtime%20109"
+                              : L"https://developer.microsoft.com/microsoft-edge/webview2/",
+                  nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void WebView2StartFailed(HRESULT result) {
+  Log("cannot start WebView2: 0x%08lx", static_cast<unsigned long>(result));
+  if (result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) ExplainMissingRuntime();
+  g_app.startup_failed = true;
+  BeginTermination("WebView2 start-up failed");
+}
 
 bool IsUsableUserAgent(const std::string& agent) {
   return !agent.empty() && agent.size() <= 1024 && !HasControlBytes(agent) && agent.find('"') == std::string::npos;
@@ -2746,14 +2786,16 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
   std::wstring arguments = g_app.browser_arguments;
   if (!user_agent_argument.empty()) arguments += (arguments.empty() ? L"" : L" ") + user_agent_argument;
   SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments.empty() ? nullptr : arguments.c_str());
+  if (!RuntimeInstalled()) {
+    WebView2StartFailed(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+    return;
+  }
   const HRESULT started = g_create_environment(
       g_app.runtime_folder.empty() ? nullptr : g_app.runtime_folder.c_str(), g_app.data_directory.c_str(), nullptr,
       MakeHandler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, HRESULT, ICoreWebView2Environment*>(
           [](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
             if (FAILED(result) || environment == nullptr) {
-              Log("cannot start WebView2: 0x%08lx", static_cast<unsigned long>(result));
-              g_app.startup_failed = true;
-              BeginTermination("WebView2 start-up failed");
+              WebView2StartFailed(result);
               return S_OK;
             }
             environment->AddRef();
@@ -2775,11 +2817,7 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
             });
             return S_OK;
           }));
-  if (FAILED(started)) {
-    Log("cannot start WebView2: 0x%08lx", static_cast<unsigned long>(started));
-    g_app.startup_failed = true;
-    BeginTermination("WebView2 start-up failed");
-  }
+  if (FAILED(started)) WebView2StartFailed(started);
 }
 
 void StartWebView2(const std::string& first_url) {
@@ -2919,6 +2957,8 @@ bool LoadWebView2() {
   if (loader == nullptr) return false;
   g_create_environment =
       reinterpret_cast<CreateEnvironmentFn>(GetProcAddress(loader, "CreateCoreWebView2EnvironmentWithOptions"));
+  g_browser_version =
+      reinterpret_cast<BrowserVersionFn>(GetProcAddress(loader, "GetAvailableCoreWebView2BrowserVersionString"));
   return g_create_environment != nullptr;
 }
 
