@@ -35,15 +35,17 @@ if '--configure' in sys.argv or not os.path.exists(os.path.join(BUILD, 'build.ni
         '-DBLOX7_BUILD_FREEBSD_SOCKET_HELPER=OFF',
         '-DBLOX7_WIN32=ON',
     ]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace')
     print(p.stdout[-3000:])
     if p.returncode:
         print(p.stderr[-6000:])
         sys.exit('configure failed')
 
-p = subprocess.run(['cmake', '--build', BUILD, '--parallel', '--target'] + targets + ['--', '-k', '0'], capture_output=True, text=True)
+p = subprocess.run(['cmake', '--build', BUILD, '--parallel', '--target'] + targets + ['--', '-k', '0'], capture_output=True,
+                   encoding='utf-8', errors='replace')
 out = p.stdout + p.stderr
-open(os.path.join(WIN, 'out', 'runtime-build.log'), 'w').write(out)
+with open(os.path.join(WIN, 'out', 'runtime-build.log'), 'w', encoding='utf-8') as log:
+    log.write(out)
 errors = [l for l in out.splitlines() if 'error:' in l or 'FAILED:' in l]
 print('\n'.join(errors[:80]))
 print(f'{len(errors)} error lines; build {"ok" if p.returncode == 0 else "failed"}')
