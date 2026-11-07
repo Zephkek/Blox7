@@ -363,7 +363,8 @@ def build_webview():
     sdk = os.environ.get('BLOX7_WEBVIEW2_SDK', 'D:/toolchains/src/webview2-sdk/pkg/build/native')
     root = os.path.dirname(WIN)
     out = os.path.join(OUT, 'blox7_webview_helper.exe')
-    cmd = [f'{MINGW}/bin/clang++.exe', '-std=c++20', '-O2', '-Wall', '-municode', '-static', '-o', out,
+    cmd = [f'{MINGW}/bin/clang++.exe', '-std=c++20', '-O2', '-Wall', '-Wextra', '-Wno-missing-field-initializers', '-municode',
+           '-static', '-o', out,
            os.path.join(WIN, 'webview', 'blox7_webview_helper_win.cc'),
            os.path.join(root, 'src', 'webview', 'webview_helper_policy.cc'),
            f'-isystem{sdk}/include', f'-I{root}/src', f'-I{root}/include', f'-I{OUT}/deps/include',
