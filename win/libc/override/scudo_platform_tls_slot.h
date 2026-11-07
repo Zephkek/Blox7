@@ -1,5 +1,4 @@
-// Blox7 Windows port: an unchanged copy of bionic/libc/platform/scudo_platform_tls_slot.h, so its
-// "bionic/tls.h" include finds the port's tls.h (override/bionic/tls.h).
+// untouched bionic copy, only here so its "bionic/tls.h" include finds ours
 /*
  * Copyright (C) 2020 The Android Open Source Project
  * All rights reserved.

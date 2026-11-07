@@ -28,9 +28,7 @@
 
 #pragma once
 
-// Blox7 Windows port: a copy of bionic/libc/platform/bionic/tls.h with the x86_64 thread pointer
-// moved from %fs to a Windows TLS slot. win/tools/build.py puts this directory first on the include
-// path.
+// bionic's tls.h but the x86_64 thread pointer moved off %fs. build.py puts this dir first
 
 #include <sys/cdefs.h>
 
@@ -87,9 +85,7 @@ static inline void __set_tls(void* tls) {
 
 #elif defined(__x86_64__)
 
-// Blox7's Windows port: Windows owns %fs and %gs, so the thread pointer lives in Windows TLS slot
-// W32_TLS_SLOT of the TEB (gs:0x1480 + 8 * slot), which libc.so claims at start-up. Reading it is
-// one instruction, like the %fs:0 read it replaces.
+// windows owns %fs and %gs, so it's a TEB tls slot libc.so grabs at start. still one mov
 #define W32_TLS_SLOT 63
 #define W32_TLS_TEB_OFFSET (0x1480 + 8 * W32_TLS_SLOT)
 

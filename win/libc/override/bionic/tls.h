@@ -1,3 +1,3 @@
 #pragma once
-// Blox7 Windows port: quoted "bionic/tls.h" includes (scudo_platform_tls_slot.h) land here.
+// scudo's quoted "bionic/tls.h" lands here
 #include <platform/bionic/tls.h>
