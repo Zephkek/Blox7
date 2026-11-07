@@ -11,11 +11,6 @@
 #include "pthread_internal.h"
 #include "w32_kernel.h"
 
-void __init_tcb_stack_guard(bionic_tcb* tcb);
-void __init_bionic_tls_ptrs(bionic_tcb* tcb, bionic_tls* tls);
-ThreadMapping __allocate_thread_mapping(size_t stack_size, size_t stack_guard_size);
-int __init_thread(pthread_internal_t* thread);
-
 extern "C" __attribute__((visibility("default"))) void* __w32_attach_thread() {
   if (__get_tls() != nullptr) return __get_thread();
 
