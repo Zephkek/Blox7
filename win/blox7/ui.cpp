@@ -833,7 +833,11 @@ void text_field(int id, const D2D1_RECT_F& r, const std::wstring& value) {
   const float hv = focused ? 0 : hover(id);
   fill_rect(r, ink(kWhite));
   uint32_t top = mix(0xABADB3, 0x5794BF, hv), sides = mix(0xE2E3EA, 0xB7D5EA, hv), bottom = mix(0xE3E9EF, 0xC7E2F1, hv);
-  if (focused) top = 0x3D7BAD, sides = 0xA4C9E3, bottom = 0xB7D9ED;
+  if (focused) {
+    top = 0x3D7BAD;
+    sides = 0xA4C9E3;
+    bottom = 0xB7D9ED;
+  }
   hline(r.left, r.right, r.top, top);
   vline(r.left, r.top + 1, r.bottom - 1, sides);
   vline(r.right - 1, r.top + 1, r.bottom - 1, sides);
