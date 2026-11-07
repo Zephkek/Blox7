@@ -38,10 +38,8 @@ ALLOWED_ARCHITECTURES = {
     "x86",
     "x86_64",
 }
-# APKPure's architecture-filtered index occasionally omits an older XAPK even
-# though that archive contains the requested split. Exact-version discovery
-# may therefore use the broad index; the staging validator still rejects an
-# archive that does not actually contain x86_64.
+# apkpure's x86_64 index sometimes drops an older xapk that has the split, so exact versions can
+# use the full index. staging still rejects one without x86_64
 DISCOVERY_ARCHITECTURES = "arm64-v8a,armeabi-v7a,armeabi,x86,x86_64"
 MAX_METADATA_BYTES = 4 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024

@@ -7,16 +7,8 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Report when the pinned Roblox payload metadata has fallen behind.
-
-Two kinds of drift make a first launch fail, and neither one shows up until a
-user hits it:
-
-* the compatibility catalog no longer lists the Roblox version the provider
-  publishes, so every new install lands on a version Roblox has since retired;
-* the preferred supported profile has no pinned bootstrap source, so the
-  pinned bootstrap path cannot produce the version the updater falls back to.
-"""
+"""Reports pinned Roblox payload metadata that fell behind: the catalog missing the
+provider's current version, or the fallback profile without a pinned bootstrap source."""
 
 from __future__ import annotations
 
