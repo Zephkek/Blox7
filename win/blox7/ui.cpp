@@ -1244,6 +1244,13 @@ void remove_flag() {
   mark_dirty();
 }
 
+bool run_file_dialog(OPENFILENAMEW& dialog, bool save) {
+  using DialogFn = BOOL(WINAPI*)(LPOPENFILENAMEW);
+  static HMODULE comdlg = LoadLibraryW(L"comdlg32.dll");
+  const auto run = reinterpret_cast<DialogFn>(GetProcAddress(comdlg, save ? "GetSaveFileNameW" : "GetOpenFileNameW"));
+  return run && run(&dialog);
+}
+
 std::wstring flags_file_dialog(bool save) {
   wchar_t file[MAX_PATH] = L"ClientAppSettings.json";
   OPENFILENAMEW dialog{};
@@ -1255,10 +1262,7 @@ std::wstring flags_file_dialog(bool save) {
   dialog.lpstrDefExt = L"json";
   dialog.lpstrTitle = save ? L"Export fast flags" : L"Import fast flags";
   dialog.Flags = OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-  using DialogFn = BOOL(WINAPI*)(LPOPENFILENAMEW);
-  static HMODULE comdlg = LoadLibraryW(L"comdlg32.dll");
-  const auto run = reinterpret_cast<DialogFn>(GetProcAddress(comdlg, save ? "GetSaveFileNameW" : "GetOpenFileNameW"));
-  if (!run || !run(&dialog)) return {};
+  if (!run_file_dialog(dialog, save)) return {};
   return file;
 }
 
@@ -1487,9 +1491,7 @@ void browse_shader() {
   dialog.lpstrInitialDir = folder.c_str();
   dialog.lpstrTitle = L"Pick a custom shader";
   dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER;
-  using OpenFn = BOOL(WINAPI*)(LPOPENFILENAMEW);
-  static const auto open = reinterpret_cast<OpenFn>(GetProcAddress(LoadLibraryW(L"comdlg32.dll"), "GetOpenFileNameW"));
-  if (!open || !open(&dialog)) return;
+  if (!run_file_dialog(dialog, false)) return;
   g.pending.shader = file;
   const std::wstring error = compile_shader(g.paths, file);
   g.shader_error = !error.empty();
