@@ -177,7 +177,8 @@ DWORD WINAPI watchdog(void*) {
 }
 
 // always on: a frame gap past BLOX7_STALL_REPORT ms (default 400, 0 = off) in a game that was running smoothly gets
-// one line in the session log: who burned cpu during it, and where the presenting and the busiest thread were
+// one line in the session log: who burned cpu during it, and where the presenting and the busiest thread were.
+// at most 200 a session
 int64_t g_report_ns = 400000000;
 int g_reports;
 
@@ -256,7 +257,7 @@ DWORD WINAPI reporter(void*) {
   enum { kIdle, kArmed, kSampled } phase = kIdle;
   uint64_t stall_beats = 0;
   int64_t stall_from = 0, armed_at = 0;
-  static char present_at[700], busy_at[700], busy[400], line[2400];
+  static char present_at[2200], busy_at[1600], busy[400], line[4400];
   for (;;) {
     w32.Sleep(25);
     const int64_t now = w32_monotonic_ns();
@@ -264,7 +265,7 @@ DWORD WINAPI reporter(void*) {
     const int64_t last = __atomic_load_n(&g_beat_ns, __ATOMIC_RELAXED);
     ticks[head] = Tick{now, beats};
     head = (head + 1) % kTicks;
-    if (beats == 0 || g_reports >= 20) continue;
+    if (beats == 0 || g_reports >= 200) continue;
     if (phase != kIdle && beats != stall_beats) {
       if (phase == kSampled) {
         Busy top[4];
@@ -323,11 +324,11 @@ DWORD WINAPI reporter(void*) {
     }
     if (phase == kArmed && armed_at && since >= g_report_ns) {
       const DWORD present = __atomic_load_n(&g_beat_thread, __ATOMIC_RELAXED);
-      sample(present, present_at, sizeof present_at, 14);
+      sample(present, present_at, sizeof present_at, 48);
       Busy top[1];
       busy_at[0] = 0;
       if (busiest(top, 1) && top[0].cpu >= 500000 /* 50 ms */ && top[0].id != present) {
-        sample(top[0].id, busy_at, sizeof busy_at, 14);
+        sample(top[0].id, busy_at, sizeof busy_at, 32);
       }
       phase = kSampled;
     }
