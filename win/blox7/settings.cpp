@@ -768,6 +768,13 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
   }
   apply_quality(paths, s);
   SetEnvironmentVariableW(L"BLOX7_VULKAN_DEVICE", s.gpu.empty() ? nullptr : s.gpu.c_str());
+  // the loader starts every installed driver for each instance roblox makes, and intel's igvk64 sat on the
+  // render thread for ~800 ms at game joins on an nvidia laptop. a picked gpu only loads its own vendor's
+  const wchar_t* driver = nullptr;
+  if (s.gpu.rfind(L"10de:", 0) == 0) driver = L"*nv-vk*";
+  else if (s.gpu.rfind(L"8086:", 0) == 0) driver = L"*igvk*";
+  else if (s.gpu.rfind(L"1002:", 0) == 0) driver = L"*amd*";
+  SetEnvironmentVariableW(L"VK_LOADER_DRIVERS_SELECT", driver);
   if (s.quality == L"high" || s.quality == L"superhq") SetEnvironmentVariableW(L"BLOX7_GRAPHICS_QUALITY", L"high");
   else if (s.quality == L"performance") SetEnvironmentVariableW(L"BLOX7_GRAPHICS_QUALITY", L"1");
   else SetEnvironmentVariableW(L"BLOX7_GRAPHICS_QUALITY", nullptr);
