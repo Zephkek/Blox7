@@ -388,8 +388,6 @@ void w32_note_thread_name(const char* comm) {
   }
 }
 
-DWORD w32_main_thread_id() { return g_main_thread_id; }
-
 const char* w32_thread_name_of(DWORD id) {
   for (size_t i = id % 1024, probes = 0; probes < 1024; i = (i + 1) % 1024, probes++) {
     const DWORD seen = __atomic_load_n(&g_named[i].id, __ATOMIC_ACQUIRE);
