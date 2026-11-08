@@ -701,6 +701,21 @@ Status CreateSdlAudioSink(const SdlAudioSinkOptions& options,
       playback_device_id == 0
           ? SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK
           : static_cast<SDL_AudioDeviceID>(playback_device_id);
+  // roblox restarts fmod on every game join. closing the last logical device shuts wasapi down and opening
+  // the next one sat on the render thread for ~950 ms, so one paused logical device stays open for good
+  {
+    static std::mutex keepalive_mutex;
+    static std::vector<SDL_AudioDeviceID> kept;
+    std::lock_guard<std::mutex> lock(keepalive_mutex);
+    if (std::find(kept.begin(), kept.end(), device) == kept.end()) {
+      const SDL_AudioDeviceID keepalive = SDL_OpenAudioDevice(device, nullptr);
+      if (keepalive != 0 && SDL_PauseAudioDevice(keepalive)) {
+        kept.push_back(device);
+      } else if (keepalive != 0) {
+        SDL_CloseAudioDevice(keepalive);
+      }
+    }
+  }
   const SDL_AudioDeviceID logical_device = SDL_OpenAudioDevice(device, nullptr);
   if (logical_device == 0) {
     return SdlError("SDL_OpenAudioDevice");
