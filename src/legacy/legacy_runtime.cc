@@ -4412,8 +4412,6 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       HasEnvValue("BLOX7_CALL_REAL_APP_BRIDGE_START");
   const bool user_overrode_call_update_surface =
       HasEnvValue("BLOX7_CALL_REAL_APP_BRIDGE_UPDATE_SURFACE");
-  const bool user_overrode_main_thread_message_pump =
-      HasEnvValue("BLOX7_MAIN_THREAD_MESSAGE_PUMP");
 
   std::cout << "======================================================\n"
             << "  Blox7 Roblox Compatibility Layer\n"
@@ -4808,12 +4806,6 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       setenv("BLOX7_APP_LIFECYCLE_ACTIVE", "1", 1);
       std::cout << "  [window] windowed startup: auto-enabled "
                 << "AppLifecycleNativeAdapter.setActive\n"
-                << std::flush;
-    }
-    if (!user_overrode_main_thread_message_pump) {
-      setenv("BLOX7_MAIN_THREAD_MESSAGE_PUMP", "1", 1);
-      std::cout << "  [window] windowed startup: auto-enabled main-thread "
-                << "message pump\n"
                 << std::flush;
     }
     if (!user_overrode_call_update_surface) {

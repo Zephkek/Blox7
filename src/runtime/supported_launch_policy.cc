@@ -151,7 +151,6 @@ bool ApplySupportedLaunchPolicy(bool interactive, std::string* error) {
       {"BLOX7_RESUME_GAME_WITH_PLATFORM_PARAMS_AFTER_START_GAME", "0"},
       {"BLOX7_SEND_APP_READY", "0"},
       {"BLOX7_SEND_GAME_LOADED", "0"},
-      {"BLOX7_MAIN_THREAD_MESSAGE_PUMP", "1"},
       {"BLOX7_AUTO_EXIT_AFTER_PRESENT_MS", "0"},
   };
   for (const auto& [name, value] : defaults) {
