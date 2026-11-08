@@ -10,6 +10,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -165,6 +166,7 @@ struct AdapterState {
     PFN_vkBeginCommandBuffer begin_command_buffer = nullptr;
     PFN_vkEndCommandBuffer end_command_buffer = nullptr;
     PFN_vkResetCommandBuffer reset_command_buffer = nullptr;
+    PFN_vkAllocateMemory allocate_memory = nullptr;
   };
 
   struct QueueBinding {
@@ -192,6 +194,19 @@ struct AdapterState {
       nullptr;
   VkInstance latest_instance = VK_NULL_HANDLE;
   size_t active_instance_count = 0;
+  VkInstance kept_instance = VK_NULL_HANDLE;
+  std::string kept_instance_key;
+  VkSurfaceKHR kept_surface = VK_NULL_HANDLE;
+  VkInstance kept_surface_instance = VK_NULL_HANDLE;
+  VkDevice kept_device = VK_NULL_HANDLE;
+  std::string kept_device_key;
+  VkSwapchainKHR retired_swapchain = VK_NULL_HANDLE;
+  VkDevice retired_swapchain_device = VK_NULL_HANDLE;
+  VkSurfaceKHR retired_swapchain_surface = VK_NULL_HANDLE;
+  std::unordered_map<VkInstance, std::string> instance_keys;
+  std::unordered_map<VkDevice, std::string> device_keys;
+  std::unordered_map<VkDevice, std::int64_t> device_allocations;
+  std::unordered_map<VkSwapchainKHR, VkSurfaceKHR> swapchain_surfaces;
   blox7::graphics::VulkanTextOverlayCompositor text_overlay;
   blox7::graphics::VulkanEtc2Emulation etc2;
   std::atomic<NotePresentFn> note_present{nullptr};
@@ -495,6 +510,8 @@ void RegisterHostDeviceDispatch(VkDevice device,
       get_device_proc_addr(device, "vkEndCommandBuffer"));
   dispatch.reset_command_buffer = reinterpret_cast<PFN_vkResetCommandBuffer>(
       get_device_proc_addr(device, "vkResetCommandBuffer"));
+  dispatch.allocate_memory = reinterpret_cast<PFN_vkAllocateMemory>(
+      get_device_proc_addr(device, "vkAllocateMemory"));
 
   AdapterState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
@@ -750,6 +767,7 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
   BLOX7_VK_PROC(vkMapMemory2)
   BLOX7_VK_PROC(vkUnmapMemory)
   BLOX7_VK_PROC(vkUnmapMemory2)
+  BLOX7_VK_PROC(vkAllocateMemory)
   BLOX7_VK_PROC(vkFreeMemory)
   BLOX7_VK_PROC(vkDestroyBuffer)
   BLOX7_VK_PROC(vkCmdCopyBufferToImage)
@@ -846,6 +864,7 @@ bool IsDeviceAdapterProc(const char* name) {
                              std::strcmp(name, "vkQueueBindSparse") == 0 ||
                              std::strcmp(name, "vkQueueWaitIdle") == 0 ||
                              std::strcmp(name, "vkDeviceWaitIdle") == 0 ||
+                             std::strcmp(name, "vkAllocateMemory") == 0 ||
                              std::strcmp(name, "vkQueuePresentKHR") == 0);
 }
 
@@ -1101,6 +1120,263 @@ void PrepareEtc2Submit2(std::uint32_t submit_count,
                              static_cast<std::uint32_t>(command_buffers.size()));
 }
 
+bool KeepVulkanObjects() {
+  static const bool keep = [] {
+    const char* value = std::getenv("BLOX7_VULKAN_KEEP_DEVICE");
+    return value == nullptr || std::strcmp(value, "0") != 0;
+  }();
+  return keep;
+}
+
+void AppendKey(std::string* key, const void* data, std::size_t size) {
+  key->append(static_cast<const char*>(data), size);
+}
+
+void AppendKey(std::string* key, const char* text) {
+  if (text != nullptr) {
+    key->append(text);
+  }
+  key->push_back('\0');
+}
+
+std::string InstanceKey(const VkInstanceCreateInfo& info) {
+  std::string key;
+  if (info.pNext != nullptr || (info.pApplicationInfo != nullptr &&
+                                info.pApplicationInfo->pNext != nullptr)) {
+    return key;
+  }
+  AppendKey(&key, &info.flags, sizeof info.flags);
+  if (const VkApplicationInfo* app = info.pApplicationInfo) {
+    AppendKey(&key, app->pApplicationName);
+    AppendKey(&key, &app->applicationVersion, sizeof app->applicationVersion);
+    AppendKey(&key, app->pEngineName);
+    AppendKey(&key, &app->engineVersion, sizeof app->engineVersion);
+    AppendKey(&key, &app->apiVersion, sizeof app->apiVersion);
+  }
+  for (std::uint32_t index = 0; index < info.enabledLayerCount; ++index) {
+    AppendKey(&key, info.ppEnabledLayerNames[index]);
+  }
+  key.push_back('\1');
+  for (std::uint32_t index = 0; index < info.enabledExtensionCount; ++index) {
+    AppendKey(&key, info.ppEnabledExtensionNames[index]);
+  }
+  return key;
+}
+
+std::size_t FeatureStructSize(VkStructureType type) {
+  switch (type) {
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
+      return sizeof(VkPhysicalDeviceFeatures2);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+      return sizeof(VkPhysicalDeviceVulkan11Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+      return sizeof(VkPhysicalDeviceVulkan12Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
+      return sizeof(VkPhysicalDeviceVulkan13Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES:
+      return sizeof(VkPhysicalDeviceVulkan14Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES:
+      return sizeof(VkPhysicalDevice16BitStorageFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES:
+      return sizeof(VkPhysicalDevice8BitStorageFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderFloat16Int8Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES:
+      return sizeof(VkPhysicalDeviceMultiviewFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES:
+      return sizeof(VkPhysicalDeviceSamplerYcbcrConversionFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderDrawParametersFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES:
+      return sizeof(VkPhysicalDeviceTimelineSemaphoreFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES:
+      return sizeof(VkPhysicalDeviceHostQueryResetFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES:
+      return sizeof(VkPhysicalDeviceDescriptorIndexingFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES:
+      return sizeof(VkPhysicalDeviceBufferDeviceAddressFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES:
+      return sizeof(VkPhysicalDeviceScalarBlockLayoutFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES:
+      return sizeof(VkPhysicalDeviceImagelessFramebufferFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES:
+      return sizeof(VkPhysicalDeviceUniformBufferStandardLayoutFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES:
+      return sizeof(VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES:
+      return sizeof(VkPhysicalDeviceVulkanMemoryModelFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES:
+      return sizeof(VkPhysicalDeviceSynchronization2Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES:
+      return sizeof(VkPhysicalDeviceDynamicRenderingFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES:
+      return sizeof(VkPhysicalDeviceMaintenance4Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES:
+      return sizeof(VkPhysicalDevicePipelineCreationCacheControlFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceFaultFeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES:
+      return sizeof(VkPhysicalDeviceTextureCompressionASTCHDRFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES:
+      return sizeof(VkPhysicalDeviceSubgroupSizeControlFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES:
+      return sizeof(VkPhysicalDeviceInlineUniformBlockFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceRobustness2FeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES:
+      return sizeof(VkPhysicalDeviceImageRobustnessFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderTerminateInvocationFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderIntegerDotProductFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES:
+      return sizeof(VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES:
+      return sizeof(VkPhysicalDevicePrivateDataFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES:
+      return sizeof(VkPhysicalDeviceProtectedMemoryFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES:
+      return sizeof(VkPhysicalDeviceVariablePointersFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES:
+      return sizeof(VkPhysicalDeviceShaderAtomicInt64Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES:
+      return sizeof(VkPhysicalDeviceIndexTypeUint8Features);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES:
+      return sizeof(VkPhysicalDeviceLineRasterizationFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES:
+      return sizeof(VkPhysicalDeviceVertexAttributeDivisorFeatures);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceCustomBorderColorFeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceDepthClipEnableFeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT:
+      return sizeof(VkPhysicalDeviceMemoryPriorityFeaturesEXT);
+    case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT:
+      return sizeof(VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT);
+    default:
+      return 0;
+  }
+}
+
+std::string DeviceKey(VkPhysicalDevice physical_device,
+                      const VkDeviceCreateInfo& info,
+                      VkStructureType* unknown) {
+  std::string key;
+  AppendKey(&key, &physical_device, sizeof physical_device);
+  AppendKey(&key, &info.flags, sizeof info.flags);
+  for (std::uint32_t index = 0; index < info.queueCreateInfoCount; ++index) {
+    const VkDeviceQueueCreateInfo& queue = info.pQueueCreateInfos[index];
+    if (queue.pNext != nullptr) {
+      *unknown = static_cast<const VkBaseInStructure*>(queue.pNext)->sType;
+      return {};
+    }
+    AppendKey(&key, &queue.flags, sizeof queue.flags);
+    AppendKey(&key, &queue.queueFamilyIndex, sizeof queue.queueFamilyIndex);
+    AppendKey(&key, &queue.queueCount, sizeof queue.queueCount);
+    AppendKey(&key, queue.pQueuePriorities, sizeof(float) * queue.queueCount);
+  }
+  key.push_back('\1');
+  for (std::uint32_t index = 0; index < info.enabledExtensionCount; ++index) {
+    AppendKey(&key, info.ppEnabledExtensionNames[index]);
+  }
+  key.push_back('\1');
+  if (info.pEnabledFeatures != nullptr) {
+    AppendKey(&key, info.pEnabledFeatures, sizeof *info.pEnabledFeatures);
+  }
+  for (const auto* next = static_cast<const VkBaseInStructure*>(info.pNext);
+       next != nullptr; next = next->pNext) {
+    const std::size_t size = FeatureStructSize(next->sType);
+    if (size == 0) {
+      *unknown = next->sType;
+      return {};
+    }
+    AppendKey(&key, &next->sType, sizeof next->sType);
+    AppendKey(&key, reinterpret_cast<const char*>(next) + sizeof(VkBaseInStructure),
+              size - sizeof(VkBaseInStructure));
+  }
+  return key;
+}
+
+void DestroyRetiredSwapchain(VkDevice only_device = VK_NULL_HANDLE) {
+  VkDevice device = VK_NULL_HANDLE;
+  VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (only_device != VK_NULL_HANDLE &&
+        state.retired_swapchain_device != only_device) {
+      return;
+    }
+    device = state.retired_swapchain_device;
+    swapchain = state.retired_swapchain;
+    state.retired_swapchain = VK_NULL_HANDLE;
+    state.retired_swapchain_device = VK_NULL_HANDLE;
+    state.retired_swapchain_surface = VK_NULL_HANDLE;
+  }
+  if (swapchain == VK_NULL_HANDLE) {
+    return;
+  }
+  if (const auto destroy = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
+          HostDeviceProc(device, "vkDestroySwapchainKHR"))) {
+    destroy(device, swapchain, nullptr);
+  }
+}
+
+void ReleaseKeptDevice() {
+  VkDevice device = VK_NULL_HANDLE;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    device = state.kept_device;
+    state.kept_device = VK_NULL_HANDLE;
+    state.kept_device_key.clear();
+  }
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
+  DestroyRetiredSwapchain(device);
+  if (const auto destroy = reinterpret_cast<PFN_vkDestroyDevice>(
+          HostDeviceProc(device, "vkDestroyDevice"))) {
+    destroy(device, nullptr);
+  }
+}
+
+void ReleaseKeptObjects() {
+  ReleaseKeptDevice();
+  DestroyRetiredSwapchain();
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  VkInstance surface_instance = VK_NULL_HANDLE;
+  VkInstance instance = VK_NULL_HANDLE;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    surface = state.kept_surface;
+    surface_instance = state.kept_surface_instance;
+    instance = state.kept_instance;
+    state.kept_surface = VK_NULL_HANDLE;
+    state.kept_surface_instance = VK_NULL_HANDLE;
+    state.kept_instance = VK_NULL_HANDLE;
+    state.kept_instance_key.clear();
+  }
+  if (surface != VK_NULL_HANDLE) {
+    State().android_wsi.DestroySurface(surface_instance, surface, nullptr);
+  }
+  if (instance != VK_NULL_HANDLE) {
+    if (const auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(
+            HostInstanceProc(instance, "vkDestroyInstance"))) {
+      destroy(instance, nullptr);
+    }
+  }
+}
+
 }  // namespace
 
 extern "C" {
@@ -1156,6 +1432,27 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
     host_application_info.apiVersion = VK_API_VERSION_1_2;
     host_info.pApplicationInfo = &host_application_info;
   }
+  const std::string key = KeepVulkanObjects() && allocator == nullptr
+                              ? InstanceKey(host_info)
+                              : std::string();
+  {
+    AdapterState& state = State();
+    std::unique_lock<std::mutex> lock(state.mutex);
+    if (state.kept_instance != VK_NULL_HANDLE) {
+      if (!key.empty() && key == state.kept_instance_key) {
+        *instance = state.kept_instance;
+        state.kept_instance = VK_NULL_HANDLE;
+        state.kept_instance_key.clear();
+        state.instance_keys[*instance] = key;
+        ++state.active_instance_count;
+        state.latest_instance = *instance;
+        std::fprintf(stderr, "  [vulkan] host VkInstance reused\n");
+        return VK_SUCCESS;
+      }
+      lock.unlock();
+      ReleaseKeptObjects();
+    }
+  }
   const auto host_create = reinterpret_cast<PFN_vkCreateInstance>(
       HostInstanceProc(VK_NULL_HANDLE, "vkCreateInstance"));
   if (host_create == nullptr) {
@@ -1167,6 +1464,7 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
     std::lock_guard<std::mutex> lock(state.mutex);
     ++state.active_instance_count;
     state.latest_instance = *instance;
+    state.instance_keys[*instance] = key;
     state.host_get_device_proc_addr.store(
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
             state.host_get_instance_proc_addr(*instance, "vkGetDeviceProcAddr")),
@@ -1183,7 +1481,25 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
 
 VKAPI_ATTR void VKAPI_CALL
 vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
-  State().android_wsi.ReleaseParkedSurface(instance);
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    const auto found = state.instance_keys.find(instance);
+    if (found != state.instance_keys.end()) {
+      std::string key = std::move(found->second);
+      state.instance_keys.erase(found);
+      if (!key.empty() && allocator == nullptr &&
+          state.kept_instance == VK_NULL_HANDLE) {
+        state.kept_instance = instance;
+        state.kept_instance_key = std::move(key);
+        if (state.active_instance_count != 0) {
+          --state.active_instance_count;
+        }
+        return;
+      }
+    }
+  }
+  ReleaseKeptObjects();
   const auto host_destroy = reinterpret_cast<PFN_vkDestroyInstance>(
       HostInstanceProc(instance, "vkDestroyInstance"));
   if (host_destroy != nullptr) {
@@ -1202,6 +1518,9 @@ vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
     state.device_dispatches.clear();
     state.queue_bindings.clear();
     state.command_buffer_bindings.clear();
+    state.device_keys.clear();
+    state.device_allocations.clear();
+    state.swapchain_surfaces.clear();
     InvalidateFastDispatchCaches();
     state.host_surface_capabilities = nullptr;
     state.host_surface_present_modes = nullptr;
@@ -1226,6 +1545,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
   if (!EnsureInitialized()) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
+  if (surface != nullptr && allocator == nullptr) {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.kept_surface != VK_NULL_HANDLE &&
+        state.kept_surface_instance == instance) {
+      *surface = state.kept_surface;
+      state.kept_surface = VK_NULL_HANDLE;
+      state.kept_surface_instance = VK_NULL_HANDLE;
+      std::fprintf(stderr, "  [vulkan] Android surface reuses the window's host surface\n");
+      return VK_SUCCESS;
+    }
+  }
   const auto result = State().android_wsi.CreateAndroidSurface(
       instance, create_info, allocator, surface);
   if (result == VK_SUCCESS) {
@@ -1237,9 +1568,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
 VKAPI_ATTR void VKAPI_CALL
 vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
                     const VkAllocationCallbacks* allocator) {
-  if (EnsureInitialized()) {
-    State().android_wsi.DestroySurface(instance, surface, allocator);
+  if (!EnsureInitialized()) {
+    return;
   }
+  bool retired_uses_surface = false;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    const auto key = state.instance_keys.find(instance);
+    if (surface != VK_NULL_HANDLE && allocator == nullptr &&
+        state.kept_surface == VK_NULL_HANDLE &&
+        key != state.instance_keys.end() && !key->second.empty()) {
+      state.kept_surface = surface;
+      state.kept_surface_instance = instance;
+      return;
+    }
+    retired_uses_surface = state.retired_swapchain_surface == surface;
+  }
+  if (retired_uses_surface) {
+    DestroyRetiredSwapchain();
+  }
+  State().android_wsi.DestroySurface(instance, surface, allocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(
@@ -1422,14 +1771,49 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     }
   }
 
+  std::string key;
+  if (KeepVulkanObjects() && allocator == nullptr) {
+    VkStructureType unknown = VK_STRUCTURE_TYPE_MAX_ENUM;
+    key = DeviceKey(physical_device, host_info, &unknown);
+    static std::atomic<bool> unknown_logged{false};
+    if (key.empty() && !unknown_logged.exchange(true)) {
+      std::fprintf(stderr, "  [vulkan] VkDevice can't be kept across joins: struct %d\n",
+                   static_cast<int>(unknown));
+    }
+  }
+  bool reused = false;
+  {
+    AdapterState& state = State();
+    std::unique_lock<std::mutex> lock(state.mutex);
+    if (state.kept_device != VK_NULL_HANDLE) {
+      if (!key.empty() && key == state.kept_device_key) {
+        *device = state.kept_device;
+        state.kept_device = VK_NULL_HANDLE;
+        state.kept_device_key.clear();
+        reused = true;
+      } else {
+        lock.unlock();
+        ReleaseKeptDevice();
+      }
+    }
+  }
   const VkResult result =
-      host_create(physical_device, &host_info, allocator, device);
+      reused ? VK_SUCCESS
+             : host_create(physical_device, &host_info, allocator, device);
   if (requested_features2 != nullptr) {
     requested_features2->features.textureCompressionETC2 =
         requested_features2_etc2;
   }
   if (result != VK_SUCCESS) {
     return result;
+  }
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.device_keys[*device] = key;
+  }
+  if (reused) {
+    std::fprintf(stderr, "  [vulkan] host VkDevice reused\n");
   }
   RegisterHostDeviceDispatch(*device, physical_device,
                              host_get_device_proc_addr);
@@ -1506,8 +1890,48 @@ vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
       HostDeviceProc(device, "vkDestroyDevice"));
   State().text_overlay.DestroyDevice(device);
   State().etc2.DestroyDevice(device);
-  if (host_destroy != nullptr) {
-    host_destroy(device, allocator);
+  std::string key;
+  std::int64_t allocations = 0;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (const auto found = state.device_keys.find(device);
+        found != state.device_keys.end()) {
+      key = std::move(found->second);
+      state.device_keys.erase(found);
+    }
+    if (const auto found = state.device_allocations.find(device);
+        found != state.device_allocations.end()) {
+      allocations = found->second;
+      state.device_allocations.erase(found);
+    }
+  }
+  bool keep = device != VK_NULL_HANDLE && allocator == nullptr && !key.empty();
+  if (keep && allocations != 0) {
+    std::fprintf(stderr, "  [vulkan] VkDevice destroyed with %lld allocations left\n",
+                 static_cast<long long>(allocations));
+    keep = false;
+  }
+  if (keep) {
+    const auto wait_idle = reinterpret_cast<PFN_vkDeviceWaitIdle>(
+        HostDeviceProc(device, "vkDeviceWaitIdle"));
+    keep = wait_idle != nullptr && wait_idle(device) == VK_SUCCESS;
+  }
+  if (keep) {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.kept_device == VK_NULL_HANDLE) {
+      state.kept_device = device;
+      state.kept_device_key = std::move(key);
+    } else {
+      keep = false;
+    }
+  }
+  if (!keep) {
+    DestroyRetiredSwapchain(device);
+    if (host_destroy != nullptr) {
+      host_destroy(device, allocator);
+    }
   }
   RemoveHostDeviceDispatch(device);
 }
@@ -1655,10 +2079,44 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     }
   }
 #endif
-  const VkResult result =
-      host_create(device, &host_info, allocator, swapchain);
+  VkSwapchainKHR chained = VK_NULL_HANDLE;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.retired_swapchain != VK_NULL_HANDLE &&
+        create_info->oldSwapchain == VK_NULL_HANDLE &&
+        state.retired_swapchain_device == device &&
+        state.retired_swapchain_surface == create_info->surface) {
+      chained = state.retired_swapchain;
+      state.retired_swapchain = VK_NULL_HANDLE;
+      state.retired_swapchain_device = VK_NULL_HANDLE;
+      state.retired_swapchain_surface = VK_NULL_HANDLE;
+    }
+  }
+  if (chained == VK_NULL_HANDLE) {
+    DestroyRetiredSwapchain();
+  }
+  if (chained != VK_NULL_HANDLE) {
+    host_info.oldSwapchain = chained;
+  }
+  VkResult result = host_create(device, &host_info, allocator, swapchain);
+  if (chained != VK_NULL_HANDLE) {
+    if (const auto destroy = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
+            HostDeviceProc(device, "vkDestroySwapchainKHR"))) {
+      destroy(device, chained, nullptr);
+    }
+    if (result != VK_SUCCESS) {
+      host_info.oldSwapchain = VK_NULL_HANDLE;
+      result = host_create(device, &host_info, allocator, swapchain);
+    }
+  }
   if (result != VK_SUCCESS) {
     return result;
+  }
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.swapchain_surfaces[*swapchain] = create_info->surface;
   }
   const auto host_get_images = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
       HostDeviceProc(device, "vkGetSwapchainImagesKHR"));
@@ -1686,6 +2144,26 @@ vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
   const auto host_destroy = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
       HostDeviceProc(device, "vkDestroySwapchainKHR"));
   State().text_overlay.DestroySwapchain(device, swapchain);
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (const auto found = state.swapchain_surfaces.find(swapchain);
+        found != state.swapchain_surfaces.end()) {
+      surface = found->second;
+      state.swapchain_surfaces.erase(found);
+    }
+  }
+  if (KeepVulkanObjects() && allocator == nullptr &&
+      surface != VK_NULL_HANDLE) {
+    DestroyRetiredSwapchain();
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.retired_swapchain = swapchain;
+    state.retired_swapchain_device = device;
+    state.retired_swapchain_surface = surface;
+    return;
+  }
   if (host_destroy != nullptr) {
     host_destroy(device, swapchain, allocator);
   }
@@ -2498,10 +2976,34 @@ VKAPI_ATTR VkResult VKAPI_CALL vkUnmapMemory2(VkDevice device,
   return State().etc2.UnmapMemory2(device, info);
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(
+    VkDevice device, const VkMemoryAllocateInfo* info,
+    const VkAllocationCallbacks* allocator, VkDeviceMemory* memory) {
+  const PFN_vkAllocateMemory host = HostDispatchForDevice(device).allocate_memory;
+  if (host == nullptr) {
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  const VkResult result = host(device, info, allocator, memory);
+  if (result == VK_SUCCESS && KeepVulkanObjects()) {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    ++state.device_allocations[device];
+  }
+  return result;
+}
+
 VKAPI_ATTR void VKAPI_CALL vkFreeMemory(
     VkDevice device, VkDeviceMemory memory,
     const VkAllocationCallbacks* allocator) {
   State().etc2.FreeMemory(device, memory, allocator);
+  if (memory != VK_NULL_HANDLE && KeepVulkanObjects()) {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (const auto found = state.device_allocations.find(device);
+        found != state.device_allocations.end() && found->second > 0) {
+      --found->second;
+    }
+  }
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyBuffer(

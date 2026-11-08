@@ -1,7 +1,6 @@
 #include "blox7/graphics/android_vulkan_wsi_adapter.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
 
 namespace blox7 {
@@ -98,11 +97,6 @@ Status AndroidVulkanWsiAdapter::Initialize(
 }
 
 void AndroidVulkanWsiAdapter::Shutdown() {
-  {
-    std::lock_guard<std::mutex> lock(parked_mutex_);
-    parked_surface_ = VK_NULL_HANDLE;
-    parked_instance_ = nullptr;
-  }
   host_queue_present_ = nullptr;
   host_get_device_proc_address_ = nullptr;
   host_get_instance_proc_address_ = nullptr;
@@ -133,16 +127,6 @@ AndroidVulkanResult AndroidVulkanWsiAdapter::CreateAndroidSurface(
   if (host_wsi_ == nullptr) {
     return kAndroidVulkanErrorInitializationFailed;
   }
-  if (surface != nullptr) {
-    std::lock_guard<std::mutex> lock(parked_mutex_);
-    if (parked_surface_ != VK_NULL_HANDLE && parked_instance_ == instance) {
-      *surface = parked_surface_;
-      parked_surface_ = VK_NULL_HANDLE;
-      parked_instance_ = nullptr;
-      std::fprintf(stderr, "  [vulkan] new Android surface keeps the window's host surface\n");
-      return kAndroidVulkanSuccess;
-    }
-  }
   Status status = host_wsi_->CreateSurface(instance, allocator, surface);
   return status.ok() ? kAndroidVulkanSuccess
                      : kAndroidVulkanErrorInitializationFailed;
@@ -151,34 +135,6 @@ AndroidVulkanResult AndroidVulkanWsiAdapter::CreateAndroidSurface(
 void AndroidVulkanWsiAdapter::DestroySurface(
     VkInstance instance, VkSurfaceKHR surface,
     const VkAllocationCallbacks* allocator) const {
-  if (host_wsi_ == nullptr || surface == VK_NULL_HANDLE) {
-    return;
-  }
-  {
-    std::lock_guard<std::mutex> lock(parked_mutex_);
-    if (parked_surface_ == VK_NULL_HANDLE) {
-      parked_instance_ = instance;
-      parked_surface_ = surface;
-      parked_allocator_ = allocator;
-      return;
-    }
-  }
-  host_wsi_->DestroySurface(instance, surface, allocator);
-}
-
-void AndroidVulkanWsiAdapter::ReleaseParkedSurface(VkInstance instance) const {
-  VkSurfaceKHR surface = VK_NULL_HANDLE;
-  const VkAllocationCallbacks* allocator = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(parked_mutex_);
-    if (parked_surface_ == VK_NULL_HANDLE || parked_instance_ != instance) {
-      return;
-    }
-    surface = parked_surface_;
-    allocator = parked_allocator_;
-    parked_surface_ = VK_NULL_HANDLE;
-    parked_instance_ = nullptr;
-  }
   if (host_wsi_ != nullptr) {
     host_wsi_->DestroySurface(instance, surface, allocator);
   }
