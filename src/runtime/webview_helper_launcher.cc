@@ -38,6 +38,7 @@ extern char **environ;
 
 #ifdef BLOX7_WIN32
 extern "C" int __w32_win32_path(const char* path, char* out, size_t capacity);
+extern "C" void* blox7_native_window();
 #endif
 
 #if defined(BLOX7_WIN32) && __ANDROID_API__ < 30
@@ -1096,6 +1097,13 @@ WindowsHelperStart StartWindowsWebViewHelper(const std::filesystem::path& helper
       arguments.push_back(icon_option);
       arguments.push_back(icon_string.data());
     }
+  }
+  std::string owner_string;
+  char owner_option[] = "--owner";
+  if (void* window = blox7_native_window(); window != nullptr) {
+    owner_string = std::to_string(reinterpret_cast<uintptr_t>(window));
+    arguments.push_back(owner_option);
+    arguments.push_back(owner_string.data());
   }
   arguments.push_back(nullptr);
   posix_spawn_file_actions_t actions;

@@ -449,6 +449,7 @@ struct App {
   SOCKET control = INVALID_SOCKET;
   std::mutex send_lock;
   HWND message_window = nullptr;
+  HWND owner = nullptr;
   HICON icon = nullptr;
   std::wstring data_directory;
   ICoreWebView2Environment* environment = nullptr;
@@ -1909,19 +1910,38 @@ LRESULT CALLBACK SurfaceProc(HWND window, UINT message, WPARAM wparam, LPARAM lp
   return DefWindowProcW(window, message, wparam, lparam);
 }
 
+bool IsDesktopProfile();
+
 Surface* CreateSurfaceWindow(bool primary, HWND owner) {
   auto* surface = new Surface;
   surface->primary = primary;
   HDC screen = GetDC(nullptr);
   const int dpi = GetDeviceCaps(screen, LOGPIXELSX);
   ReleaseDC(nullptr, screen);
+  RECT game{};
+  const bool over_game = g_app.owner != nullptr && IsWindow(g_app.owner) && !IsIconic(g_app.owner) &&
+                         GetWindowRect(g_app.owner, &game) && game.right > game.left && game.bottom > game.top;
+  MONITORINFO monitor{sizeof monitor};
+  GetMonitorInfoW(MonitorFromWindow(over_game ? g_app.owner : nullptr, MONITOR_DEFAULTTOPRIMARY), &monitor);
+  const RECT& work = monitor.rcWork;
   // the SM-S908B's css viewport, 384x823 dp
   RECT rect = {0, 0, MulDiv(384, dpi, 96), MulDiv(823, dpi, 96)};
-  (void)primary;
+  if (IsDesktopProfile()) {
+    const int room_w = over_game ? game.right - game.left : work.right - work.left;
+    const int room_h = over_game ? game.bottom - game.top : work.bottom - work.top;
+    rect.right = std::max(MulDiv(960, dpi, 96), room_w * 4 / 5);
+    rect.bottom = std::max(MulDiv(640, dpi, 96), room_h * 4 / 5);
+  }
   AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-  surface->window = CreateWindowExW(0, L"Blox7WebView", L"Roblox", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                                    rect.right - rect.left, rect.bottom - rect.top, owner, nullptr,
-                                    GetModuleHandleW(nullptr), nullptr);
+  int width = std::min<int>(rect.right - rect.left, work.right - work.left);
+  int height = std::min<int>(rect.bottom - rect.top, work.bottom - work.top);
+  int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
+  if (over_game) {
+    x = std::clamp<int>((game.left + game.right - width) / 2, work.left, work.right - width);
+    y = std::clamp<int>((game.top + game.bottom - height) / 2, work.top, work.bottom - height);
+  }
+  surface->window = CreateWindowExW(0, L"Blox7WebView", L"Roblox", WS_OVERLAPPEDWINDOW, x, y, width, height, owner,
+                                    nullptr, GetModuleHandleW(nullptr), nullptr);
   if (surface->window == nullptr) {
     delete surface;
     return nullptr;
@@ -3119,6 +3139,8 @@ int wmain(int argc, wchar_t** argv) {
       g_app.data_directory = argv[i + 1];
     } else if (option == L"--icon") {
       g_app.icon = static_cast<HICON>(LoadImageW(nullptr, argv[i + 1], IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
+    } else if (option == L"--owner") {
+      g_app.owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(_wcstoui64(argv[i + 1], nullptr, 10)));
     }
   }
   if (port <= 0 || port > 65535 || token.empty() || g_app.data_directory.empty()) {
