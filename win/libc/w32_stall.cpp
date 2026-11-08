@@ -292,18 +292,36 @@ int busiest(Busy* top, int count) {
 }
 
 int sample_waiting(DWORD present, DWORD main_thread, char* out, size_t cap) {
-  int used = 0, sampled = 0;
-  out[0] = 0;
+  struct Kind {
+    DWORD id;
+    int others;
+    char stack[1400];
+  };
+  static Kind kinds[48];
   static char stack[1400];
-  for (int i = 0; i < g_mark_count && sampled < 16 && used < static_cast<int>(cap) - 1600; i++) {
+  int count = 0;
+  for (int i = 0; i < g_mark_count; i++) {
     const DWORD id = g_marks[i].id;
-    if (id == present || id == main_thread) continue;
-    const char* name = w32_thread_name_of(id);
-    if (!strstr(name, "RBX") && strcmp(name, "Main") != 0) continue;
-    if (!sample(id, stack, sizeof stack, 20)) continue;
-    used += snprintf(out + used, cap - static_cast<size_t>(used), "%s%s/%lu at %s", sampled ? " | " : "", name,
-                     static_cast<unsigned long>(id), stack);
-    sampled++;
+    if (id == present || id == main_thread || !sample(id, stack, sizeof stack, 20)) continue;
+    int k = 0;
+    while (k < count && strcmp(kinds[k].stack, stack) != 0) k++;
+    if (k < count) {
+      kinds[k].others++;
+    } else if (count < 48) {
+      kinds[count].id = id;
+      kinds[count].others = 0;
+      memcpy(kinds[count].stack, stack, sizeof stack);
+      count++;
+    }
+  }
+  int used = 0;
+  out[0] = 0;
+  for (int k = 0; k < count && used < static_cast<int>(cap) - 1600; k++) {
+    const char* name = w32_thread_name_of(kinds[k].id);
+    used += snprintf(out + used, cap - static_cast<size_t>(used), "%s%s/%lu", k ? " | " : "", name[0] ? name : "?",
+                     static_cast<unsigned long>(kinds[k].id));
+    if (kinds[k].others) used += snprintf(out + used, cap - static_cast<size_t>(used), " +%d", kinds[k].others);
+    used += snprintf(out + used, cap - static_cast<size_t>(used), " at %s", kinds[k].stack);
   }
   return used;
 }
@@ -328,7 +346,7 @@ DWORD WINAPI reporter(void*) {
   enum { kIdle, kArmed, kSampled } phase = kIdle;
   uint64_t stall_beats = 0;
   int64_t stall_from = 0, armed_at = 0;
-  static char present_at[2200], busy_at[1600], main_at[1600], waiting[24000], busy[400], line[30000];
+  static char present_at[2200], busy_at[1600], main_at[1600], waiting[64000], busy[400], line[72000];
   for (;;) {
     w32.Sleep(25);
     const int64_t now = w32_monotonic_ns();
