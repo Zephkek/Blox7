@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "w32_exception.h"
 #include "w32_kernel.h"
@@ -102,9 +103,11 @@ void name_of(uintptr_t addr, char* out, size_t cap) {
   snprintf(out, cap, "%p", reinterpret_cast<void*>(addr));
 }
 
-void look(DWORD tid, int64_t stalled_ns, int round) {
+// one look at a thread: where it is and the code addresses on its stack. the thread is only stopped for the copy
+int sample(DWORD tid, char* out, size_t cap, int frames) {
+  out[0] = 0;
   HANDLE h = w32.OpenThread(0x0002 | 0x0008 | 0x0040, 0, tid);
-  if (!h) return;
+  if (!h) return 0;
   alignas(16) static uint8_t buffer[1536];
   memset(buffer, 0, sizeof buffer);
   auto* context = reinterpret_cast<WinContext*>(buffer);
@@ -126,20 +129,25 @@ void look(DWORD tid, int64_t stalled_ns, int round) {
     w32.ResumeThread(h);
   }
   w32.CloseHandle(h);
-  if (!rip) return;
-  static char line[2048], name[160];
-  int used = snprintf(line, sizeof line, "stall: thread %lu without a frame for %.0f ms (look %d): at ",
-                      static_cast<unsigned long>(tid), static_cast<double>(stalled_ns) / 1e6, round);
+  if (!rip) return 0;
+  char name[160];
   name_of(rip, name, sizeof name);
-  used += snprintf(line + used, sizeof line - static_cast<size_t>(used), "%s; stack", name);
+  int used = snprintf(out, cap, "%s; stack", name);
   int found = 0;
-  for (size_t i = 0; i < words && found < 40 && used < static_cast<int>(sizeof line) - 80; i++) {
+  for (size_t i = 0; i < words && found < frames && used < static_cast<int>(cap) - 80; i++) {
     if (!is_code(g_stack[i])) continue;
     name_of(g_stack[i], name, sizeof name);
-    used += snprintf(line + used, sizeof line - static_cast<size_t>(used), " %s", name);
+    used += snprintf(out + used, cap - static_cast<size_t>(used), " %s", name);
     found++;
   }
-  w32_debug("%s", line);
+  return used;
+}
+
+void look(DWORD tid, int64_t stalled_ns, int round) {
+  static char where[1900];
+  if (!sample(tid, where, sizeof where, 40)) return;
+  w32_debug("stall: thread %lu without a frame for %.0f ms (look %d): at %s", static_cast<unsigned long>(tid),
+            static_cast<double>(stalled_ns) / 1e6, round, where);
 }
 
 DWORD WINAPI watchdog(void*) {
@@ -168,6 +176,164 @@ DWORD WINAPI watchdog(void*) {
   }
 }
 
+// always on: a frame gap past BLOX7_STALL_REPORT ms (default 400, 0 = off) in a game that was running smoothly gets
+// one line in the session log: who burned cpu during it, and where the presenting and the busiest thread were
+int64_t g_report_ns = 400000000;
+int g_reports;
+
+uint64_t filetime(W32_FILETIME t) { return static_cast<uint64_t>(t.hi) << 32 | t.lo; }
+
+uint64_t thread_cpu(DWORD id) {
+  HANDLE h = w32.OpenThread(0x0800 /* QUERY_LIMITED_INFORMATION */, 0, id);
+  if (!h) return 0;
+  W32_FILETIME created, exited, kernel{}, user{};
+  uint64_t t = 0;
+  if (w32.GetThreadTimes(h, &created, &exited, &kernel, &user)) t = filetime(kernel) + filetime(user);
+  w32.CloseHandle(h);
+  return t;
+}
+
+struct CpuMark {
+  DWORD id;
+  uint64_t cpu, spent;
+};
+CpuMark g_marks[512];
+int g_mark_count;
+
+void mark_threads() {
+  g_mark_count = 0;
+  HANDLE snapshot = w32.CreateToolhelp32Snapshot(4 /* TH32CS_SNAPTHREAD */, 0);
+  DWORD entry[7] = {sizeof entry};  // THREADENTRY32
+  const DWORD pid = w32.GetCurrentProcessId(), self = w32.GetCurrentThreadId();
+  for (BOOL more = w32.Thread32First(snapshot, entry); more && g_mark_count < 512;
+       more = w32.Thread32Next(snapshot, entry)) {
+    if (entry[3] != pid || entry[2] == self) continue;
+    g_marks[g_mark_count++] = CpuMark{entry[2], thread_cpu(entry[2]), 0};
+  }
+  w32.CloseHandle(snapshot);
+}
+
+struct Busy {
+  DWORD id;
+  uint64_t cpu;
+};
+
+// a thread that exits mid-stall keeps what it was seen spending
+int busiest(Busy* top, int count) {
+  for (int k = 0; k < count; k++) top[k] = Busy{};
+  for (int i = 0; i < g_mark_count; i++) {
+    const uint64_t now_cpu = thread_cpu(g_marks[i].id);
+    if (now_cpu > g_marks[i].cpu && now_cpu - g_marks[i].cpu > g_marks[i].spent) g_marks[i].spent = now_cpu - g_marks[i].cpu;
+    const uint64_t spent = g_marks[i].spent;
+    for (int k = 0; k < count; k++) {
+      if (spent <= top[k].cpu) continue;
+      for (int j = count - 1; j > k; j--) top[j] = top[j - 1];
+      top[k] = Busy{g_marks[i].id, spent};
+      break;
+    }
+  }
+  int n = 0;
+  while (n < count && top[n].cpu >= 100000 /* 10 ms */) n++;
+  return n;
+}
+
+void say(const char* text) {
+  write(2, text, strlen(text));
+  if (w32_log_wanted()) w32_debug("%s", text);
+}
+
+DWORD WINAPI reporter(void*) {
+  __w32_attach_thread();
+  w32_loader_segments(collect, nullptr);
+  uint64_t generation = w32_loader_generation();
+  struct Tick {
+    int64_t ns;
+    uint64_t beats;
+  };
+  constexpr int kTicks = 128;  // 25 ms apart, so a bit over 3 s back
+  static Tick ticks[kTicks];
+  int head = 0;
+  enum { kIdle, kArmed, kSampled } phase = kIdle;
+  uint64_t stall_beats = 0;
+  int64_t stall_from = 0, armed_at = 0;
+  static char present_at[700], busy_at[700], busy[400], line[2400];
+  for (;;) {
+    w32.Sleep(25);
+    const int64_t now = w32_monotonic_ns();
+    const uint64_t beats = __atomic_load_n(&g_beat_count, __ATOMIC_ACQUIRE);
+    const int64_t last = __atomic_load_n(&g_beat_ns, __ATOMIC_RELAXED);
+    ticks[head] = Tick{now, beats};
+    head = (head + 1) % kTicks;
+    if (beats == 0 || g_reports >= 20) continue;
+    if (phase != kIdle && beats != stall_beats) {
+      if (phase == kSampled) {
+        Busy top[4];
+        const int n = busiest(top, 4);
+        int used = 0;
+        busy[0] = 0;
+        for (int k = 0; k < n; k++) {
+          const char* name = w32_thread_name_of(top[k].id);
+          used += snprintf(busy + used, sizeof busy - static_cast<size_t>(used), "%s%s/%lu %.0f ms", k ? ", " : "",
+                           name[0] ? name : "?", static_cast<unsigned long>(top[k].id),
+                           static_cast<double>(top[k].cpu) / 1e4);
+        }
+        W32_FILETIME wall;
+        w32.GetSystemTimeAsFileTime(&wall);
+        const uint64_t ms = filetime(wall) / 10000 - static_cast<uint64_t>(w32_monotonic_ns() - stall_from) / 1000000;
+        const DWORD present = __atomic_load_n(&g_beat_thread, __ATOMIC_RELAXED);
+        const char* present_name = w32_thread_name_of(present);
+        snprintf(line, sizeof line,
+                 "  [stall] %02u:%02u:%02u.%03uZ no frame for %.0f ms; cpu since it began: %s; presenting thread "
+                 "%s/%lu at %s%s%s\n",
+                 static_cast<unsigned>(ms / 3600000 % 24), static_cast<unsigned>(ms / 60000 % 60),
+                 static_cast<unsigned>(ms / 1000 % 60), static_cast<unsigned>(ms % 1000),
+                 static_cast<double>(last - stall_from) / 1e6, busy[0] ? busy : "nobody",
+                 present_name[0] ? present_name : "?", static_cast<unsigned long>(present),
+                 present_at[0] ? present_at : "?", busy_at[0] ? "; busiest at " : "", busy_at);
+        say(line);
+        g_reports++;
+      }
+      phase = kIdle;
+      continue;
+    }
+    const int64_t since = now - last;
+    if (phase == kIdle && since >= g_report_ns / 2) {
+      // only stalls in a running game: 30+ frames in the 2 s before it, so loading screens stay quiet
+      const Tick* before = nullptr;
+      for (const Tick& t : ticks) {
+        if (t.ns && t.ns <= last - 2000000000 && (!before || t.ns > before->ns)) before = &t;
+      }
+      if (!before || beats - before->beats < 30) {
+        stall_beats = beats;
+        phase = kArmed;
+        armed_at = 0;
+        continue;
+      }
+      if (w32_loader_generation() != generation) {
+        g_elf_count = 0;
+        w32_loader_segments(collect, nullptr);
+        generation = w32_loader_generation();
+      }
+      mark_threads();
+      stall_beats = beats;
+      stall_from = last;
+      armed_at = w32_monotonic_ns();
+      phase = kArmed;
+      continue;
+    }
+    if (phase == kArmed && armed_at && since >= g_report_ns) {
+      const DWORD present = __atomic_load_n(&g_beat_thread, __ATOMIC_RELAXED);
+      sample(present, present_at, sizeof present_at, 14);
+      Busy top[1];
+      busy_at[0] = 0;
+      if (busiest(top, 1) && top[0].cpu >= 500000 /* 50 ms */ && top[0].id != present) {
+        sample(top[0].id, busy_at, sizeof busy_at, 14);
+      }
+      phase = kSampled;
+    }
+  }
+}
+
 }  // namespace
 
 DWORD g_present_thread;
@@ -177,7 +343,7 @@ DWORD w32_present_thread() { return __atomic_load_n(&g_present_thread, __ATOMIC_
 extern "C" __attribute__((visibility("default"))) void __w32_frame_beat() {
   __atomic_store_n(&g_present_thread, w32.GetCurrentThreadId(), __ATOMIC_RELAXED);
   if (g_frames_gap_ns) note_frame();
-  if (!g_stall_on) return;
+  if (!g_stall_on && !g_report_ns) return;
   __atomic_store_n(&g_beat_thread, w32.GetCurrentThreadId(), __ATOMIC_RELAXED);
   __atomic_store_n(&g_beat_ns, w32_monotonic_ns(), __ATOMIC_RELAXED);
   __atomic_fetch_add(&g_beat_count, 1, __ATOMIC_RELEASE);
@@ -188,8 +354,14 @@ void w32_stall_start() {
     const int ms = atoi(frames);
     g_frames_gap_ns = static_cast<int64_t>(ms > 0 ? ms : 25) * 1000000;
   }
+  if (const char* report = getenv("BLOX7_STALL_REPORT")) g_report_ns = static_cast<int64_t>(atoi(report)) * 1000000;
   const char* value = getenv("BLOX7_W32_STALL_DUMP");
-  if (!value) return;
+  if (!value) {
+    if (g_report_ns > 0) w32.CloseHandle(w32.CreateThread(nullptr, 0, reporter, nullptr, 0, nullptr));
+    else g_report_ns = 0;
+    return;
+  }
+  g_report_ns = 0;
   const int ms = atoi(value);
   g_stall_ns = static_cast<int64_t>(ms > 0 ? ms : 100) * 1000000;
   g_stall_on = true;
