@@ -883,7 +883,7 @@ void PumpRobloxMainThreadMessagesOnce() {
   static const bool force_early =
       IsEnabled("BLOX7_FORCE_EARLY_MAIN_THREAD_MESSAGE_PUMP");
   static const bool pump_disabled =
-      IsDisabled("BLOX7_MAIN_THREAD_MESSAGE_PUMP");
+      !IsEnabled("BLOX7_MAIN_THREAD_MESSAGE_PUMP");
   static const bool trace_pump =
       IsEnabled("BLOX7_TRACE_MAIN_THREAD_PUMP");
   static const int pump_limit =
