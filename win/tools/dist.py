@@ -39,7 +39,8 @@ put(os.path.join(deps.PREFIX, 'lib', 'libz.so'), BIN)
 put(os.path.join(MB, 'blox7'), BIN, 'blox7.so', strip=True)
 for name in ('libSDL3.so', 'libSDL3_ttf.so', 'libGLESv2.so.2'):
     put(os.path.join(OUT, name), BIN)
-put(os.path.join(deps.SRC, 'sdl3-win', 'SDL3.dll'), BIN)
+# BLOX7_SDL3_DLL: a build of the same SDL with its pdb next to it, so stall reports can name SDL's frames
+put(os.environ.get('BLOX7_SDL3_DLL') or os.path.join(deps.SRC, 'sdl3-win', 'SDL3.dll'), BIN)
 put(os.path.join(deps.SRC, 'sdl3ttf-win', 'SDL3_ttf.dll'), BIN)
 for name in ('libEGL.so', 'libGLESv2.so', 'libOpenMAXAL.so', 'libOpenSLES.so', 'libandroid.so', 'liblog.so',
              'libmediandk.so', 'libblox7_audio_sdl.so', 'libvulkan.so'):
