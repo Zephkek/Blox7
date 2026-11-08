@@ -50,8 +50,9 @@ for name in ('libEGL.so', 'libGLESv2.so', 'libOpenMAXAL.so', 'libOpenSLES.so', '
 put(os.path.join(MB, 'blox7_updater'), LIB, strip=True)
 put(os.path.join(OUT, 'blox7_webview_helper.exe'), LIB)
 put(os.path.join(OUT, 'WebView2Loader.dll'), LIB)
-for name in os.listdir(os.path.join(ROOT, 'config')):
-    put(os.path.join(ROOT, 'config', name), META)
+tracked = subprocess.run(['git', '-C', ROOT, 'ls-files', '-z', '--', 'config'], capture_output=True, check=True).stdout
+for rel in sorted(p for p in tracked.decode().split('\0') if p.count('/') == 1):
+    put(os.path.join(ROOT, rel), META)
 put(os.path.join(ROOT, 'exe', 'cacert.pem'), CERTS, 'ca-certificates.crt')
 put(f'{deps.NDK}/shader-tools/windows-x86_64/glslc.exe', BIN)
 SHADERS = os.path.join(DIST, 'share', 'blox7', 'shaders')
