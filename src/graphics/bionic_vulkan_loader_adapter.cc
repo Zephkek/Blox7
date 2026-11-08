@@ -1183,6 +1183,7 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
 
 VKAPI_ATTR void VKAPI_CALL
 vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
+  State().android_wsi.ReleaseParkedSurface(instance);
   const auto host_destroy = reinterpret_cast<PFN_vkDestroyInstance>(
       HostInstanceProc(instance, "vkDestroyInstance"));
   if (host_destroy != nullptr) {

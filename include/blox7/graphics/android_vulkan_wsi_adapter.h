@@ -2,6 +2,7 @@
 #define BLOX7_GRAPHICS_ANDROID_VULKAN_WSI_ADAPTER_H_
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,8 @@ class AndroidVulkanWsiAdapter final {
       const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) const;
   void DestroySurface(VkInstance instance, VkSurfaceKHR surface,
                       const VkAllocationCallbacks* allocator) const;
+  // the kept host surface has to go before its instance does
+  void ReleaseParkedSurface(VkInstance instance) const;
 
   VkResult EnumerateInstanceExtensionProperties(
       const char* layer_name, std::uint32_t* property_count,
@@ -67,6 +70,13 @@ class AndroidVulkanWsiAdapter final {
   PFN_vkQueuePresentKHR host_queue_present_ = nullptr;
   PresentCallback present_callback_ = nullptr;
   void* present_callback_data_ = nullptr;
+  // roblox makes a new android surface for every game it joins. a new host surface means the driver's
+  // per-surface setup again (600 ms of nvidia's capture checking signatures on the 5080), so the window
+  // keeps one and hands it back out
+  mutable std::mutex parked_mutex_;
+  mutable VkInstance parked_instance_ = nullptr;
+  mutable VkSurfaceKHR parked_surface_ = VK_NULL_HANDLE;
+  mutable const VkAllocationCallbacks* parked_allocator_ = nullptr;
 };
 
 }  // namespace graphics
