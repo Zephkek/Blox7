@@ -951,6 +951,8 @@ Status RobloxExperienceComposition::RouteWebSurfaceEvent(
     case WebViewHelperEventType::kRobloxCookie:
       return FailedPrecondition(
           "WebView cookie event requires the active composition");
+    case WebViewHelperEventType::kRobloxLaunchUri:
+      return Status::Ok();
   }
   return Status::Error(StatusCode::kUnsupported,
                        "WebView helper event type is unsupported");
@@ -986,6 +988,19 @@ Status RobloxExperienceComposition::RouteCurrentWebSurfaceEvent(
                    static_cast<long long>(request.place_id));
       return CloseWebSurface();
     }
+  }
+  if (event.type == WebViewHelperEventType::kRobloxLaunchUri) {
+    RobloxExperienceLaunchRequest request;
+    const Status parsed = ParseRobloxLaunchUri(event.payload, &request);
+    if (parsed.ok() && Dispatch(request).ok()) {
+      std::fprintf(stderr,
+                   "[experience] WebView join link queued place_id=%lld\n",
+                   static_cast<long long>(request.place_id));
+      return CloseWebSurface();
+    }
+    std::fprintf(stderr, "[experience] WebView join link ignored: %s\n",
+                 parsed.ok() ? "dispatch failed" : parsed.message().c_str());
+    return Status::Ok();
   }
   return RouteWebSurfaceEvent(route, event, web_view_bridge);
 }

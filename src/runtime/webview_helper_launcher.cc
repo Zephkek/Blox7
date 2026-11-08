@@ -773,7 +773,8 @@ bool EncodeWebViewHelperEventPacket(WebViewHelperEventType type,
                                : kMaximumWebViewHybridEventBytes) ||
       payload.find('\0') != std::string_view::npos ||
       (type != WebViewHelperEventType::kExecuteRoblox &&
-       type != WebViewHelperEventType::kRobloxWkHybrid && !ready && !cookie)) {
+       type != WebViewHelperEventType::kRobloxWkHybrid &&
+       type != WebViewHelperEventType::kRobloxLaunchUri && !ready && !cookie)) {
     return false;
   }
   packet->assign(kControlHeaderBytes, '\0');
@@ -830,7 +831,8 @@ bool DecodeWebViewHelperEventPacket(std::string_view packet,
   if (type != WebViewHelperEventType::kExecuteRoblox &&
       type != WebViewHelperEventType::kRobloxWkHybrid &&
       type != WebViewHelperEventType::kReady &&
-      type != WebViewHelperEventType::kRobloxCookie) {
+      type != WebViewHelperEventType::kRobloxCookie &&
+      type != WebViewHelperEventType::kRobloxLaunchUri) {
     return fail("webview event type is unsupported");
   }
   if (payload.empty() != (type == WebViewHelperEventType::kReady) ||

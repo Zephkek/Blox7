@@ -6,6 +6,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -401,6 +402,31 @@ template <typename Interface, typename... Args, typename Function>
 Interface* MakeHandler(Function function) {
   return new Handler<Interface, Args...>(std::function<HRESULT(Args...)>(std::move(function)));
 }
+
+struct ExternalUriArgs : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE get_Uri(LPWSTR* value) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_InitiatingOrigin(LPWSTR* value) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_IsUserInitiated(BOOL* value) = 0;
+  virtual HRESULT STDMETHODCALLTYPE get_Cancel(BOOL* value) = 0;
+  virtual HRESULT STDMETHODCALLTYPE put_Cancel(BOOL value) = 0;
+  virtual HRESULT STDMETHODCALLTYPE GetDeferral(ICoreWebView2Deferral** value) = 0;
+};
+
+struct ExternalUriHandler : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE Invoke(ICoreWebView2* sender, ExternalUriArgs* args) = 0;
+};
+
+struct WebView17 : public ICoreWebView2_16 {
+  virtual HRESULT STDMETHODCALLTYPE PostSharedBufferToScript(IUnknown* buffer, int access, LPCWSTR json) = 0;
+};
+
+struct WebView18 : public WebView17 {
+  virtual HRESULT STDMETHODCALLTYPE add_LaunchingExternalUriScheme(ExternalUriHandler* handler,
+                                                                   EventRegistrationToken* token) = 0;
+  virtual HRESULT STDMETHODCALLTYPE remove_LaunchingExternalUriScheme(EventRegistrationToken token) = 0;
+};
+
+constexpr IID kIidWebView18 = {0x7a626017, 0x28be, 0x49b2, {0xb8, 0x65, 0x3b, 0xa2, 0xb3, 0x52, 0x2d, 0x90}};
 
 template <typename T>
 void SafeRelease(T** pointer) {
@@ -2181,6 +2207,34 @@ void GuardWebViewInput(Surface* surface) {
   if (surface != nullptr && surface->window != nullptr) EnumChildWindows(surface->window, SubclassWebViewChild, 0);
 }
 
+std::string LinkScheme(const std::string& uri) {
+  std::string scheme = uri.substr(0, std::min(uri.find(':'), std::size_t{32}));
+  for (char& c : scheme) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (!std::isalnum(static_cast<unsigned char>(c)) && c != '+' && c != '-' && c != '.') c = '?';
+  }
+  return scheme;
+}
+
+bool IsRobloxLaunchLink(const std::string& uri) {
+  const std::string scheme = LinkScheme(uri);
+  return scheme == "roblox" || scheme == "roblox-player";
+}
+
+void HandleExternalUri(std::string* uri) {
+  const std::string scheme = LinkScheme(*uri);
+  if (IsRobloxLaunchLink(*uri)) {
+    if (SendEvent(WebViewHelperEventType::kRobloxLaunchUri, *uri)) {
+      Log("%s link handed to Blox7", scheme.c_str());
+    } else {
+      Log("could not hand a %s link to Blox7", scheme.c_str());
+    }
+  } else {
+    Log("external link blocked scheme=%s", scheme.c_str());
+  }
+  ClearSensitive(uri);
+}
+
 void ConfigureWebView(Surface* surface) {
   ICoreWebView2* web_view = surface->web_view;
   TraceWebView(surface);
@@ -2223,16 +2277,37 @@ void ConfigureWebView(Surface* surface) {
           [](ICoreWebView2* view, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
             LPWSTR uri = nullptr;
             args->get_Uri(&uri);
-            const auto policy = EvaluateNavigationUri(TakeString(uri).c_str());
+            std::string target = TakeString(uri);
+            const auto policy = EvaluateNavigationUri(target.c_str());
             if (!policy.allowed) {
-              Log("navigation blocked scheme=%s host=%s", policy.scheme.c_str(), policy.host.c_str());
               args->put_Cancel(TRUE);
+              if (IsRobloxLaunchLink(target)) {
+                HandleExternalUri(&target);
+              } else {
+                Log("navigation blocked scheme=%s host=%s", policy.scheme.c_str(), policy.host.c_str());
+              }
             } else if (!IsDesktopProfile()) {
               ApplyTouchEmulation(view);
             }
             return S_OK;
           }),
       &token);
+  WebView18* web_view18 = nullptr;
+  if (SUCCEEDED(web_view->QueryInterface(kIidWebView18, reinterpret_cast<void**>(&web_view18))) &&
+      web_view18 != nullptr) {
+    web_view18->add_LaunchingExternalUriScheme(
+        MakeHandler<ExternalUriHandler, ICoreWebView2*, ExternalUriArgs*>(
+            [](ICoreWebView2*, ExternalUriArgs* args) -> HRESULT {
+              LPWSTR uri = nullptr;
+              args->get_Uri(&uri);
+              std::string target = TakeString(uri);
+              args->put_Cancel(TRUE);
+              HandleExternalUri(&target);
+              return S_OK;
+            }),
+        &token);
+    web_view18->Release();
+  }
   web_view->add_NavigationCompleted(
       MakeHandler<ICoreWebView2NavigationCompletedEventHandler, ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*>(
           [surface](ICoreWebView2* view, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {

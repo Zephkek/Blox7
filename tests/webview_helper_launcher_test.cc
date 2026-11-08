@@ -220,6 +220,14 @@ TEST(WebViewHelperLauncherTest, EncodesDistinctBoundedHybridEvents) {
   ASSERT_TRUE(DecodeWebViewHelperEventPacket(packet, &event, &error)) << error;
   EXPECT_EQ(event.type, WebViewHelperEventType::kRobloxCookie);
   EXPECT_EQ(event.payload, "_|browser-session");
+
+  ASSERT_TRUE(EncodeWebViewHelperEventPacket(
+      WebViewHelperEventType::kRobloxLaunchUri,
+      "roblox://experiences/start?placeId=1818&gameInstanceId=abc", &packet));
+  ASSERT_TRUE(DecodeWebViewHelperEventPacket(packet, &event, &error)) << error;
+  EXPECT_EQ(event.type, WebViewHelperEventType::kRobloxLaunchUri);
+  EXPECT_EQ(event.payload,
+            "roblox://experiences/start?placeId=1818&gameInstanceId=abc");
 }
 
 TEST(WebViewHelperLauncherTest, WaitsForExplicitSurfaceReadiness) {
