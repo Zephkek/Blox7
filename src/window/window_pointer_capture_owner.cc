@@ -208,7 +208,6 @@ std::optional<PointerPosition> WindowPointerCaptureOwner::TakeWarp() {
 
 bool WindowPointerCaptureOwner::Apply(bool capture, bool cursor_visible,
                                       bool restore_position, bool center) {
-  // a right-drag that turns into a center lock moves to the center once, then stays there till release
   const bool recenter = capture && center && !centered_;
   if (state_valid_ && capture == captured_ && cursor_visible == cursor_visible_ && !recenter) {
     return true;
@@ -275,7 +274,6 @@ bool SdlPointerCaptureBackend::Apply(const PointerCaptureRequest& request) {
     SDL_WarpMouseInWindow(window, center_x, center_y);
     warp_ = PointerPosition{center_x, center_y};
   }
-  // the window may have been resized while locked, the center is where the lock icon is now
   if (!request.relative_mode && relative_mode_ && capture_centered_ &&
       WindowCenter(window, &center_x, &center_y)) {
     capture_anchor_x_ = center_x;

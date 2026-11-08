@@ -107,7 +107,6 @@ target_link_libraries(stub_glesv2 PRIVATE dl)
 if(BLOX7_WIN32)
   # windows: vulkan comes through libSDL3.so's bridge and the text box is its own layer, so no libplacebo
   set(BLOX7_VULKAN_TEXT_OVERLAY ${CMAKE_SOURCE_DIR}/win/runtime/vulkan_text_overlay_compositor_win.cc)
-  # VkFoo x{VK_STRUCTURE_TYPE_FOO} leaves the rest zeroed on purpose
   set_property(SOURCE ${BLOX7_VULKAN_TEXT_OVERLAY} APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
 else()
   set(BLOX7_VULKAN_TEXT_OVERLAY ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_text_overlay_compositor.cc)

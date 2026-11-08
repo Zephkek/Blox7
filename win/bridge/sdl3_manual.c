@@ -175,7 +175,6 @@ BRIDGE_EXPORT SDL_FunctionPointer SDL_EGL_GetProcAddress(const char* name) {
   return NULL;
 }
 
-// three callbacks, one userdata: sdl keeps a single set, so we do too
 static struct {
   SDL_EGLAttribArrayCallback platform;
   SDL_EGLIntArrayCallback surface, context;

@@ -103,7 +103,6 @@ void name_of(uintptr_t addr, char* out, size_t cap) {
   snprintf(out, cap, "%p", reinterpret_cast<void*>(addr));
 }
 
-// one look at a thread: where it is and the code addresses on its stack. the thread is only stopped for the copy
 int sample(DWORD tid, char* out, size_t cap, int frames) {
   out[0] = 0;
   HANDLE h = w32.OpenThread(0x0002 | 0x0008 | 0x0040, 0, tid);
@@ -176,9 +175,6 @@ DWORD WINAPI watchdog(void*) {
   }
 }
 
-// always on: a frame gap past BLOX7_STALL_REPORT ms (default 400, 0 = off) in a game that was running smoothly gets
-// one line in the session log: who burned cpu during it, and where the presenting and the busiest thread were.
-// at most 200 a session
 int64_t g_report_ns = 400000000;
 int g_reports;
 
@@ -219,7 +215,6 @@ struct Busy {
   uint64_t cpu;
 };
 
-// a thread that exits mid-stall keeps what it was seen spending
 int busiest(Busy* top, int count) {
   for (int k = 0; k < count; k++) top[k] = Busy{};
   for (int i = 0; i < g_mark_count; i++) {
@@ -299,7 +294,6 @@ DWORD WINAPI reporter(void*) {
     }
     const int64_t since = now - last;
     if (phase == kIdle && since >= g_report_ns / 2) {
-      // only stalls in a running game: 30+ frames in the 2 s before it, so loading screens stay quiet
       const Tick* before = nullptr;
       for (const Tick& t : ticks) {
         if (t.ns && t.ns <= last - 2000000000 && (!before || t.ns > before->ns)) before = &t;

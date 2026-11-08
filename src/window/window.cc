@@ -2434,7 +2434,6 @@ static void EmitSmoothWheel() {
   g_platform_event_observer.Notify(event);
 }
 
-// sdl flushes the motion of its own warps when relative mode flips, so roblox hears where the pointer went from us
 static void NotifyPointerWarp() {
   if (g_pointer_capture_owner == nullptr) return;
   const std::optional<PointerPosition> warp = g_pointer_capture_owner->TakeWarp();

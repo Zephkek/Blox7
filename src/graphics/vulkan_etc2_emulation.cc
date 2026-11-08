@@ -122,8 +122,6 @@ std::uint32_t SmallTextureUpscale(const char* value) {
 
 namespace {
 
-// roblox writes its uploads into write-combined staging memory, and plain loads from there crawl: a big etc2
-// texture took ~790 ms on the render thread. movntdqa streams it out, and acts like a normal load elsewhere
 __attribute__((target("sse4.1"))) void CopyFromMapped(std::uint8_t* destination, const std::uint8_t* source,
                                                       std::size_t size) {
   while (size != 0 && (reinterpret_cast<std::uintptr_t>(source) & 15) != 0) {

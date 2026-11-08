@@ -1,4 +1,4 @@
-// clocks and sleeping on windows, these replace bionic's vdso.cpp
+// clocks and sleeping on Windows these replace bionic's vdso.cpp
 
 
 #include <cpuid.h>
@@ -82,7 +82,7 @@ void init_tsc_clock() {
   const char* choice = getenv("BLOX7_W32_CLOCK");
   if (choice && strcmp(choice, "qpc") == 0) return;
   const uint64_t hz = tsc_hz();
-  if (hz < 100000000) return;  // 0 = no invariant tsc, and under 100 MHz cpuid is lying: stay on qpc
+  if (hz < 100000000) return;  // ?
   unsigned a, b, c, d;
   __cpuid(0x80000001, a, b, c, d);
   g_rdtscp = (d >> 27) & 1;
@@ -310,7 +310,7 @@ void w32_init_timezone() {
     add(",M%u.%u.%u/%u:%02u:%02u", date.month, date.day, date.day_of_week, date.hour, date.minute, date.second);
   };
   add_zone(zone.bias + zone.standard_bias);
-  // year 0 is a yearly dst rule, the only kind TZ can spell
+  // windows retardation
   if (zone.daylight_date.month != 0 && zone.daylight_date.year == 0 && zone.standard_date.month != 0) {
     add_zone(zone.bias + zone.daylight_bias);
     add_date(zone.daylight_date);

@@ -21,7 +21,6 @@ struct PointerCaptureRequest {
   bool cursor_visible = true;
   std::optional<PointerPosition> anchor;
   bool restore_position = true;
-  // roblox's LockCenter: the pointer sits at the window center like the windows client, not where it was
   bool center = false;
 };
 
@@ -29,7 +28,6 @@ class PointerCaptureBackend {
  public:
   virtual ~PointerCaptureBackend() = default;
   virtual bool Apply(const PointerCaptureRequest& request) = 0;
-  // where the last Apply put the pointer, so roblox can be told (sdl drops that motion itself)
   virtual std::optional<PointerPosition> TakeWarp() { return std::nullopt; }
 };
 

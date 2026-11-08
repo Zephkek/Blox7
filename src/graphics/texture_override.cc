@@ -154,8 +154,6 @@ std::string EnvironmentString(const char* name) {
 
 }  // namespace
 
-// the default folder is set for everyone, and hashing every upload on the render thread for pngs that aren't
-// there cost 800 ms stalls after game joins. no png in it at start, no overrides
 static bool HasPng(const std::string& dir) {
   std::error_code error;
   for (std::filesystem::directory_iterator it(dir, error), end; !error && it != end; it.increment(error)) {
