@@ -2434,6 +2434,17 @@ static void EmitSmoothWheel() {
   g_platform_event_observer.Notify(event);
 }
 
+// sdl flushes the motion of its own warps when relative mode flips, so roblox hears where the pointer went from us
+static void NotifyPointerWarp() {
+  if (g_pointer_capture_owner == nullptr) return;
+  const std::optional<PointerPosition> warp = g_pointer_capture_owner->TakeWarp();
+  if (!warp) return;
+  platform::PlatformEvent event;
+  event.timestamp_ns = SDL_GetTicksNS();
+  event.payload = platform::MouseMotionEvent{warp->x, warp->y, 0.0f, 0.0f, SDL_GetMouseState(nullptr, nullptr), false};
+  g_platform_event_observer.Notify(event);
+}
+
 bool PumpEvents() {
 #ifdef BLOX7_WIN32
   g_pump_thread_id.store(SDL_GetCurrentThreadID(), std::memory_order_release);
@@ -2458,6 +2469,7 @@ bool PumpEvents() {
                                      g_text_input_owner->active())) {
     fprintf(stderr, "  [input] SDL pointer capture state update failed\n");
   }
+  NotifyPointerWarp();
   platform::PlatformEvent pending_motion{};
   bool has_pending_motion = false;
 
@@ -2522,6 +2534,7 @@ bool PumpEvents() {
             g_text_input_owner != nullptr && g_text_input_owner->active())) {
       fprintf(stderr, "  [input] failed to restore pointer after focus gain\n");
     }
+    NotifyPointerWarp();
 
     const bool geometry_changed = event.type == SDL_EVENT_WINDOW_MOVED ||
                                   event.type == SDL_EVENT_WINDOW_RESIZED ||
@@ -2648,6 +2661,7 @@ bool PumpEvents() {
       fprintf(stderr,
               "  [input] SDL shift-lock pointer capture update failed\n");
     }
+    NotifyPointerWarp();
     if ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
          event.type == SDL_EVENT_MOUSE_BUTTON_UP) &&
         event.button.button == SDL_BUTTON_RIGHT &&
@@ -2660,6 +2674,7 @@ bool PumpEvents() {
       fprintf(stderr,
               "  [input] SDL right-button pointer capture update failed\n");
     }
+    NotifyPointerWarp();
   }
   flush_motion();
   EmitSmoothWheel();

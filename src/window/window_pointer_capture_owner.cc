@@ -15,6 +15,17 @@ namespace {
 
 thread_local WindowPointerCaptureOwner* t_pointer_query_owner = nullptr;
 
+bool WindowCenter(SDL_Window* window, float* x, float* y) {
+  int width = 0;
+  int height = 0;
+  if (!SDL_GetWindowSize(window, &width, &height) || width <= 0 || height <= 0) {
+    return false;
+  }
+  *x = std::floor(static_cast<float>(width) * 0.5f);
+  *y = std::floor(static_cast<float>(height) * 0.5f);
+  return true;
+}
+
 // sdl only puts the pointer back when it thinks it has focus, so we check
 void RestoreAnchor(SDL_Window* window, float anchor_x, float anchor_y) {
   int width = 0;
@@ -131,7 +142,7 @@ bool WindowPointerCaptureOwner::Pump(bool text_input_active) {
   const bool capture_requested =
       native_capture_active || (right_drag_active && !text_input_active);
   const bool cursor_visible = !client_active && !capture_requested;
-  return Apply(capture_requested, cursor_visible);
+  return Apply(capture_requested, cursor_visible, true, native_capture_active);
 }
 
 bool WindowPointerCaptureOwner::OnRightButton(
@@ -191,9 +202,15 @@ bool WindowPointerCaptureOwner::Shutdown() {
   return Apply(false, true, false);
 }
 
+std::optional<PointerPosition> WindowPointerCaptureOwner::TakeWarp() {
+  return backend_ != nullptr ? backend_->TakeWarp() : std::nullopt;
+}
+
 bool WindowPointerCaptureOwner::Apply(bool capture, bool cursor_visible,
-                                      bool restore_position) {
-  if (state_valid_ && capture == captured_ && cursor_visible == cursor_visible_) {
+                                      bool restore_position, bool center) {
+  // a right-drag that turns into a center lock moves to the center once, then stays there till release
+  const bool recenter = capture && center && !centered_;
+  if (state_valid_ && capture == captured_ && cursor_visible == cursor_visible_ && !recenter) {
     return true;
   }
   if (backend_ == nullptr) {
@@ -201,12 +218,13 @@ bool WindowPointerCaptureOwner::Apply(bool capture, bool cursor_visible,
     cursor_visible_ = true;
     return !capture && cursor_visible;
   }
-  if (backend_->Apply(
-          {capture, cursor_visible, right_drag_anchor_, restore_position})) {
+  if (backend_->Apply({capture, cursor_visible, right_drag_anchor_,
+                       restore_position, capture && center})) {
     state_valid_ = true;
     const bool capture_changed = capture != captured_;
     const bool cursor_changed = cursor_visible != cursor_visible_;
     captured_ = capture;
+    centered_ = capture && (center || centered_);
     cursor_visible_ = cursor_visible;
     if (capture_changed && capture) {
       std::fprintf(stderr, "  [input] SDL relative pointer capture enabled\n");
@@ -221,6 +239,7 @@ bool WindowPointerCaptureOwner::Apply(bool capture, bool cursor_visible,
   }
   state_valid_ = backend_->Apply({false, true, std::nullopt, false});
   captured_ = false;
+  centered_ = false;
   cursor_visible_ = true;
   return false;
 }
@@ -245,14 +264,33 @@ bool SdlPointerCaptureBackend::Apply(const PointerCaptureRequest& request) {
       return false;
     }
   }
+  float center_x = 0.0f;
+  float center_y = 0.0f;
+  if (request.relative_mode && request.center && !capture_centered_ &&
+      WindowCenter(window, &center_x, &center_y)) {
+    capture_anchor_x_ = center_x;
+    capture_anchor_y_ = center_y;
+    capture_anchor_valid_ = true;
+    capture_centered_ = true;
+    SDL_WarpMouseInWindow(window, center_x, center_y);
+    warp_ = PointerPosition{center_x, center_y};
+  }
+  // the window may have been resized while locked, the center is where the lock icon is now
+  if (!request.relative_mode && relative_mode_ && capture_centered_ &&
+      WindowCenter(window, &center_x, &center_y)) {
+    capture_anchor_x_ = center_x;
+    capture_anchor_y_ = center_y;
+  }
   if (!request.relative_mode && relative_mode_ && request.restore_position &&
-      capture_anchor_valid_ && SDL_GetKeyboardFocus() == window) {
+      capture_anchor_valid_) {
     int width = 0;
     int height = 0;
     if (SDL_GetWindowSize(window, &width, &height) && width > 0 && height > 0) {
-      SDL_WarpMouseInWindow(
-          window, std::clamp(capture_anchor_x_, 0.0f, static_cast<float>(width - 1)),
-          std::clamp(capture_anchor_y_, 0.0f, static_cast<float>(height - 1)));
+      capture_anchor_x_ = std::clamp(capture_anchor_x_, 0.0f, static_cast<float>(width - 1));
+      capture_anchor_y_ = std::clamp(capture_anchor_y_, 0.0f, static_cast<float>(height - 1));
+      if (SDL_GetKeyboardFocus() == window) {
+        SDL_WarpMouseInWindow(window, capture_anchor_x_, capture_anchor_y_);
+      }
     }
   }
   const bool restoring = !request.relative_mode && relative_mode_ &&
@@ -261,6 +299,7 @@ bool SdlPointerCaptureBackend::Apply(const PointerCaptureRequest& request) {
       !SDL_SetWindowRelativeMouseMode(window, request.relative_mode)) {
     if (request.relative_mode) {
       capture_anchor_valid_ = false;
+      capture_centered_ = false;
       SDL_SetWindowMouseGrab(window, false);
     }
     return false;
@@ -273,13 +312,21 @@ bool SdlPointerCaptureBackend::Apply(const PointerCaptureRequest& request) {
   }
   if (restoring) {
     RestoreAnchor(window, capture_anchor_x_, capture_anchor_y_);
+    warp_ = PointerPosition{capture_anchor_x_, capture_anchor_y_};
   }
   relative_mode_ = request.relative_mode;
   if (!relative_mode_) {
     capture_anchor_valid_ = false;
+    capture_centered_ = false;
   }
   if (!request.relative_mode && !SDL_SetWindowMouseGrab(window, false)) return false;
   return request.cursor_visible ? SDL_ShowCursor() : SDL_HideCursor();
+}
+
+std::optional<PointerPosition> SdlPointerCaptureBackend::TakeWarp() {
+  std::optional<PointerPosition> warp = warp_;
+  warp_.reset();
+  return warp;
 }
 
 }  // namespace window

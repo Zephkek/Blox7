@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace blox7 {
@@ -15,10 +16,16 @@ class FakeBackend final : public PointerCaptureBackend {
     calls.push_back(request);
     return succeeds;
   }
+  std::optional<PointerPosition> TakeWarp() override {
+    std::optional<PointerPosition> taken = warp;
+    warp.reset();
+    return taken;
+  }
 
   using Call = PointerCaptureRequest;
   std::vector<Call> calls;
   bool succeeds = true;
+  std::optional<PointerPosition> warp;
 };
 
 struct QueryState {
@@ -343,6 +350,71 @@ TEST(WindowPointerCaptureOwnerTest, FocusGainHidesTheSystemCursorImmediately) {
   EXPECT_TRUE(owner.OnFocusGained(true));
   EXPECT_FALSE(owner.captured());
   EXPECT_FALSE(owner.cursor_visible());
+}
+
+TEST(WindowPointerCaptureOwnerTest, NativeLockAsksForTheCenter) {
+  FakeBackend backend;
+  QueryState query{true, true};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.Pump(false));
+  ASSERT_TRUE(owner.captured());
+  EXPECT_TRUE(backend.calls.back().relative_mode);
+  EXPECT_TRUE(backend.calls.back().center);
+
+  const std::size_t calls = backend.calls.size();
+  ASSERT_TRUE(owner.Pump(false));
+  EXPECT_EQ(backend.calls.size(), calls);
+
+  query.locked_center = false;
+  ASSERT_TRUE(owner.Pump(false));
+  EXPECT_FALSE(backend.calls.back().relative_mode);
+  EXPECT_FALSE(backend.calls.back().center);
+  EXPECT_TRUE(backend.calls.back().restore_position);
+}
+
+TEST(WindowPointerCaptureOwnerTest, RightDragKeepsItsPressPosition) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.OnRightButton(true, false, PointerPosition{25.0f, 40.0f}));
+  ASSERT_TRUE(owner.captured());
+  EXPECT_FALSE(backend.calls.back().center);
+  ASSERT_TRUE(backend.calls.back().anchor.has_value());
+  EXPECT_FLOAT_EQ(backend.calls.back().anchor->x, 25.0f);
+}
+
+TEST(WindowPointerCaptureOwnerTest, ShiftLockDuringRightDragMovesToTheCenterOnce) {
+  FakeBackend backend;
+  QueryState query{true, false};
+  WindowPointerCaptureOwner owner(&backend);
+  ASSERT_TRUE(owner.RegisterQuery(Query, &query));
+  ASSERT_TRUE(owner.OnRightButton(true, false, PointerPosition{25.0f, 40.0f}));
+  EXPECT_FALSE(backend.calls.back().center);
+
+  query.locked_center = true;
+  ASSERT_TRUE(owner.Pump(false));
+  EXPECT_TRUE(backend.calls.back().relative_mode);
+  EXPECT_TRUE(backend.calls.back().center);
+
+  const std::size_t calls = backend.calls.size();
+  ASSERT_TRUE(owner.OnRightButton(false, false));
+  ASSERT_TRUE(owner.Pump(false));
+  EXPECT_EQ(backend.calls.size(), calls);
+  EXPECT_TRUE(owner.captured());
+}
+
+TEST(WindowPointerCaptureOwnerTest, WarpsComeFromTheBackendOnce) {
+  FakeBackend backend;
+  WindowPointerCaptureOwner owner(&backend);
+  EXPECT_FALSE(owner.TakeWarp().has_value());
+  backend.warp = PointerPosition{640.0f, 360.0f};
+  const std::optional<PointerPosition> warp = owner.TakeWarp();
+  ASSERT_TRUE(warp.has_value());
+  EXPECT_FLOAT_EQ(warp->x, 640.0f);
+  EXPECT_FLOAT_EQ(warp->y, 360.0f);
+  EXPECT_FALSE(owner.TakeWarp().has_value());
 }
 
 TEST(WindowPointerCaptureOwnerTest, TextInputWithoutNativeCursorShowsSystemCursor) {
