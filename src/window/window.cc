@@ -2481,17 +2481,12 @@ bool PumpEvents() {
   };
 
   SDL_Event event;
-  constexpr uint64_t kUnthrottledPumpIntervalNs = 4000000ULL;
-  static uint64_t last_os_pump_ns = 0;
-  const uint64_t now_ns = SDL_GetTicksNS();
   bool pump_os_events = true;
 #ifdef BLOX7_WIN32
   pump_os_events = !g_in_live_resize_tick;
 #endif
-  if (pump_os_events && (!UnthrottledPresentationRequested() || last_os_pump_ns == 0 ||
-                         now_ns - last_os_pump_ns >= kUnthrottledPumpIntervalNs)) {
+  if (pump_os_events) {
     SDL_PumpEvents();
-    last_os_pump_ns = now_ns;
   }
   while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_FIRST,
                         SDL_EVENT_LAST) > 0) {
@@ -2712,9 +2707,6 @@ bool UnthrottledPresentationRequested() {
 
 uint64_t PaceInputPump() {
   if (!g_state.initialised) {
-    return 0;
-  }
-  if (UnthrottledPresentationRequested()) {
     return 0;
   }
   if (__builtin_expect(SDL_HasEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST), 0)) {
