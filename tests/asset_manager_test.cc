@@ -136,13 +136,13 @@ TEST_F(AssetManagerTest, OpenReadSeekAndBufferUseConfiguredAssetRoot) {
   AAsset* asset = AAssetManager_open(manager, "config.json", 0);
   ASSERT_NE(asset, nullptr);
 
-  EXPECT_EQ(AAsset_getLength(asset), 15);
+  EXPECT_EQ(AAsset_getLength(asset), 12);
   char first[5] = {};
   EXPECT_EQ(AAsset_read(asset, first, 4), 4);
-  EXPECT_STREQ(first, "mock");
-  EXPECT_EQ(AAsset_getRemainingLength(asset), 11);
+  EXPECT_STREQ(first, "blox");
+  EXPECT_EQ(AAsset_getRemainingLength(asset), 8);
 
-  EXPECT_EQ(AAsset_seek(asset, 9, SEEK_SET), 9);
+  EXPECT_EQ(AAsset_seek(asset, 6, SEEK_SET), 6);
   char second[7] = {};
   EXPECT_EQ(AAsset_read(asset, second, 6), 6);
   EXPECT_STREQ(second, "assets");
