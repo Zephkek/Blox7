@@ -291,6 +291,23 @@ int busiest(Busy* top, int count) {
   return n;
 }
 
+int sample_waiting(DWORD present, DWORD main_thread, char* out, size_t cap) {
+  int used = 0, sampled = 0;
+  out[0] = 0;
+  static char stack[1400];
+  for (int i = 0; i < g_mark_count && sampled < 8 && used < static_cast<int>(cap) - 1600; i++) {
+    const DWORD id = g_marks[i].id;
+    if (id == present || id == main_thread) continue;
+    const char* name = w32_thread_name_of(id);
+    if (!strstr(name, "RBX") && strcmp(name, "Main") != 0) continue;
+    if (!sample(id, stack, sizeof stack, 20)) continue;
+    used += snprintf(out + used, cap - static_cast<size_t>(used), "%s%s/%lu at %s", sampled ? " | " : "", name,
+                     static_cast<unsigned long>(id), stack);
+    sampled++;
+  }
+  return used;
+}
+
 void say(const char* text) {
   write(2, text, strlen(text));
   if (w32_log_wanted()) w32_debug("%s", text);
@@ -311,7 +328,7 @@ DWORD WINAPI reporter(void*) {
   enum { kIdle, kArmed, kSampled } phase = kIdle;
   uint64_t stall_beats = 0;
   int64_t stall_from = 0, armed_at = 0;
-  static char present_at[2200], busy_at[1600], busy[400], line[4400];
+  static char present_at[2200], busy_at[1600], main_at[1600], waiting[12000], busy[400], line[18000];
   for (;;) {
     w32.Sleep(25);
     const int64_t now = w32_monotonic_ns();
@@ -339,12 +356,13 @@ DWORD WINAPI reporter(void*) {
         const char* present_name = w32_thread_name_of(present);
         snprintf(line, sizeof line,
                  "  [stall] %02u:%02u:%02u.%03uZ no frame for %.0f ms; cpu since it began: %s; presenting thread "
-                 "%s/%lu at %s%s%s\n",
+                 "%s/%lu at %s%s%s%s%s%s%s\n",
                  static_cast<unsigned>(ms / 3600000 % 24), static_cast<unsigned>(ms / 60000 % 60),
                  static_cast<unsigned>(ms / 1000 % 60), static_cast<unsigned>(ms % 1000),
                  static_cast<double>(last - stall_from) / 1e6, busy[0] ? busy : "nobody",
                  present_name[0] ? present_name : "?", static_cast<unsigned long>(present),
-                 present_at[0] ? present_at : "?", busy_at[0] ? "; busiest at " : "", busy_at);
+                 present_at[0] ? present_at : "?", busy_at[0] ? "; busiest at " : "", busy_at,
+                 main_at[0] ? "; main thread at " : "", main_at, waiting[0] ? "; waiting " : "", waiting);
         say(line);
         g_reports++;
       }
@@ -380,9 +398,17 @@ DWORD WINAPI reporter(void*) {
       sample(present, present_at, sizeof present_at, 48);
       Busy top[1];
       busy_at[0] = 0;
-      if (busiest(top, 1) && top[0].cpu >= 500000 /* 50 ms */ && top[0].id != present) {
+      const bool busy_found = busiest(top, 1) && top[0].cpu >= 500000 /* 50 ms */;
+      if (busy_found && top[0].id != present) {
         sample(top[0].id, busy_at, sizeof busy_at, 32);
       }
+      const DWORD main_thread = w32_main_thread_id();
+      main_at[0] = 0;
+      if (main_thread && main_thread != present && (!busy_found || main_thread != top[0].id)) {
+        sample(main_thread, main_at, sizeof main_at, 24);
+      }
+      waiting[0] = 0;
+      if (!busy_found) sample_waiting(present, main_thread, waiting, sizeof waiting);
       phase = kSampled;
     }
   }

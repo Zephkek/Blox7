@@ -146,6 +146,7 @@ void w32_mem_forget_runs(uintptr_t start, uintptr_t end);
 void w32_mem_note_run(uintptr_t start, uintptr_t end, uintptr_t allocation, DWORD protect);
 bool w32_mem_run_at(uintptr_t a, uintptr_t* end, DWORD* protect, DWORD* state);
 DWORD w32_present_thread();
+DWORD w32_main_thread_id();
 void w32_note_thread_name(const char* comm);
 const char* w32_thread_name_of(DWORD id);
 const char* w32_process_comm();
