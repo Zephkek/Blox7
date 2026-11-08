@@ -103,6 +103,53 @@ void name_of(uintptr_t addr, char* out, size_t cap) {
   snprintf(out, cap, "%p", reinterpret_cast<void*>(addr));
 }
 
+using LookupFn = void*(WINAPI*)(uint64_t, uint64_t*, void*);
+using UnwindFn = void*(WINAPI*)(DWORD, uint64_t, uint64_t, void*, void*, void**, uint64_t*, void*);
+LookupFn g_lookup;
+UnwindFn g_unwind;
+
+void find_unwinder() {
+  void* ntdll = w32_boot->GetModuleHandleW(reinterpret_cast<const uint16_t*>(u"ntdll.dll"));
+  if (!ntdll) return;
+  g_unwind = reinterpret_cast<UnwindFn>(w32_boot->GetProcAddress(ntdll, "RtlVirtualUnwind"));
+  if (g_unwind) g_lookup = reinterpret_cast<LookupFn>(w32_boot->GetProcAddress(ntdll, "RtlLookupFunctionEntry"));
+}
+
+bool in_elf(uintptr_t v) {
+  for (int i = 0; i < g_elf_count; i++) {
+    if (v >= g_elf_code[i].start && v < g_elf_code[i].end) return true;
+  }
+  return false;
+}
+
+int unwind(WinContext* c, uintptr_t lo, uintptr_t hi, uintptr_t* pcs, int max) {
+  int n = 0;
+  while (n < max && c->rip >= 0x10000 && c->rsp >= lo && c->rsp < hi) {
+    pcs[n++] = c->rip;
+    uint64_t image = 0;
+    void* entry = in_elf(c->rip) || !g_lookup ? nullptr : g_lookup(c->rip, &image, nullptr);
+    const uintptr_t sp = c->rsp;
+    if (entry) {
+      void* data = nullptr;
+      uint64_t frame = 0;
+      g_unwind(0, image, c->rip, entry, c, &data, &frame, nullptr);
+    } else if (in_elf(c->rip)) {
+      const uintptr_t bp = c->rbp;
+      if (bp < sp || bp + 16 > hi || (bp & 7)) break;
+      c->rip = reinterpret_cast<const uintptr_t*>(bp)[1];
+      c->rbp = reinterpret_cast<const uintptr_t*>(bp)[0];
+      c->rsp = bp + 16;
+    } else if (is_code(c->rip)) {
+      c->rip = *reinterpret_cast<const uintptr_t*>(sp);
+      c->rsp = sp + 8;
+    } else {
+      break;
+    }
+    if (c->rsp <= sp) break;
+  }
+  return n;
+}
+
 int sample(DWORD tid, char* out, size_t cap, int frames) {
   out[0] = 0;
   HANDLE h = w32.OpenThread(0x0002 | 0x0008 | 0x0040, 0, tid);
@@ -110,19 +157,23 @@ int sample(DWORD tid, char* out, size_t cap, int frames) {
   alignas(16) static uint8_t buffer[1536];
   memset(buffer, 0, sizeof buffer);
   auto* context = reinterpret_cast<WinContext*>(buffer);
-  context->context_flags = kContextControl;
+  context->context_flags = kContextControl | 0x00100002;
   size_t words = 0;
-  uintptr_t rip = 0, rsp = 0;
+  uintptr_t rip = 0;
+  static uintptr_t pcs[64];
+  int exact = 0;
+  if (frames > 64) frames = 64;
   if (w32.SuspendThread(h) != static_cast<DWORD>(-1)) {
     if (w32.GetThreadContext(h, context)) {
       rip = context->rip;
-      rsp = context->rsp;
+      const uintptr_t rsp = context->rsp;
       W32_MEMORY_BASIC_INFORMATION m;
       if (rsp && w32.VirtualQuery(reinterpret_cast<void*>(rsp), &m, sizeof m)) {
         const uintptr_t end = reinterpret_cast<uintptr_t>(m.base) + m.region_size;
         words = (end - rsp) / sizeof(uintptr_t);
         if (words > kStackWords) words = kStackWords;
         memcpy(g_stack, reinterpret_cast<const void*>(rsp), words * sizeof(uintptr_t));
+        exact = unwind(context, rsp, end, pcs, frames);
       }
     }
     w32.ResumeThread(h);
@@ -132,6 +183,12 @@ int sample(DWORD tid, char* out, size_t cap, int frames) {
   char name[160];
   name_of(rip, name, sizeof name);
   int used = snprintf(out, cap, "%s; stack", name);
+  for (int i = 1; i < exact && used < static_cast<int>(cap) - 80; i++) {
+    name_of(pcs[i], name, sizeof name);
+    used += snprintf(out + used, cap - static_cast<size_t>(used), " %s", name);
+  }
+  if (exact >= 8) return used;
+  used += snprintf(out + used, cap - static_cast<size_t>(used), " ~");
   int found = 0;
   for (size_t i = 0; i < words && found < frames && used < static_cast<int>(cap) - 80; i++) {
     if (!is_code(g_stack[i])) continue;
@@ -152,6 +209,7 @@ void look(DWORD tid, int64_t stalled_ns, int round) {
 DWORD WINAPI watchdog(void*) {
   w32.Sleep(2000);
   __w32_attach_thread();
+  find_unwinder();
   w32.timeBeginPeriod(1);
   w32_loader_segments(collect, nullptr);
   uint64_t generation = w32_loader_generation();
@@ -240,6 +298,7 @@ void say(const char* text) {
 
 DWORD WINAPI reporter(void*) {
   __w32_attach_thread();
+  find_unwinder();
   w32_loader_segments(collect, nullptr);
   uint64_t generation = w32_loader_generation();
   struct Tick {
