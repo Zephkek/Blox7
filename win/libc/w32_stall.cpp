@@ -295,7 +295,7 @@ int sample_waiting(DWORD present, DWORD main_thread, char* out, size_t cap) {
   int used = 0, sampled = 0;
   out[0] = 0;
   static char stack[1400];
-  for (int i = 0; i < g_mark_count && sampled < 8 && used < static_cast<int>(cap) - 1600; i++) {
+  for (int i = 0; i < g_mark_count && sampled < 16 && used < static_cast<int>(cap) - 1600; i++) {
     const DWORD id = g_marks[i].id;
     if (id == present || id == main_thread) continue;
     const char* name = w32_thread_name_of(id);
@@ -328,7 +328,7 @@ DWORD WINAPI reporter(void*) {
   enum { kIdle, kArmed, kSampled } phase = kIdle;
   uint64_t stall_beats = 0;
   int64_t stall_from = 0, armed_at = 0;
-  static char present_at[2200], busy_at[1600], main_at[1600], waiting[12000], busy[400], line[18000];
+  static char present_at[2200], busy_at[1600], main_at[1600], waiting[24000], busy[400], line[30000];
   for (;;) {
     w32.Sleep(25);
     const int64_t now = w32_monotonic_ns();
