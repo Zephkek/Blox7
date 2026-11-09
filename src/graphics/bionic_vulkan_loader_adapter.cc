@@ -1103,7 +1103,7 @@ void ReleaseEtc2PoolCommandBuffers(VkDevice device,
   }
 }
 
-void PrepareEtc2Submit2(std::uint32_t submit_count,
+void PrepareEtc2Submit2(VkQueue queue, std::uint32_t submit_count,
                         const VkSubmitInfo2* submits) {
   if (submits == nullptr || !State().etc2.HasPendingUploads()) {
     return;
@@ -1116,7 +1116,7 @@ void PrepareEtc2Submit2(std::uint32_t submit_count,
           submits[index].pCommandBufferInfos[info].commandBuffer);
     }
   }
-  State().etc2.PrepareSubmit(command_buffers.data(),
+  State().etc2.PrepareSubmit(queue, command_buffers.data(),
                              static_cast<std::uint32_t>(command_buffers.size()));
 }
 
@@ -1825,8 +1825,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
       host_memory_properties != nullptr) {
     host_memory_properties(physical_device, &memory_properties);
   }
-  State().etc2.RegisterDevice(*device, physical_device, etc2_emulated,
-                              memory_properties, host_get_device_proc_addr);
 
   std::uint32_t queue_family_count = 0;
   const auto host_get_queue_families =
@@ -1842,6 +1840,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
                             queue_families.data());
     queue_families.resize(queue_family_count);
   }
+  State().etc2.RegisterDevice(
+      *device, physical_device, etc2_emulated, memory_properties,
+      host_get_device_proc_addr,
+      host_get_properties != nullptr ? &properties.limits : nullptr,
+      queue_families.data(),
+      static_cast<std::uint32_t>(queue_families.size()));
   std::uint32_t graphics_family = UINT32_MAX;
   std::uint32_t graphics_count = 0;
   for (std::uint32_t index = 0; index < create_info->queueCreateInfoCount;
@@ -1948,6 +1952,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(VkDevice device,
   host_get_queue(device, queue_family_index, queue_index, queue);
   if (*queue != VK_NULL_HANDLE) {
     RegisterHostQueueBinding(device, *queue);
+    State().etc2.RegisterQueue(device, *queue, queue_family_index);
     (void)State().text_overlay.RegisterQueue(device, *queue, queue_family_index,
                                              queue_index);
   }
@@ -1963,6 +1968,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
   host_get_queue(device, queue_info, queue);
   if (*queue != VK_NULL_HANDLE) {
     RegisterHostQueueBinding(device, *queue);
+    State().etc2.RegisterQueue(device, *queue, queue_info->queueFamilyIndex);
     (void)State().text_overlay.RegisterQueue(
         device, *queue, queue_info->queueFamilyIndex, queue_info->queueIndex);
   }
@@ -2419,7 +2425,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
   }
   if (submits != nullptr && State().etc2.HasPendingUploads()) {
     if (submit_count == 1) {
-      State().etc2.PrepareSubmit(submits->pCommandBuffers,
+      State().etc2.PrepareSubmit(queue, submits->pCommandBuffers,
                                  submits->commandBufferCount);
     } else {
       std::vector<VkCommandBuffer> command_buffers;
@@ -2432,7 +2438,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
         }
       }
       State().etc2.PrepareSubmit(
-          command_buffers.data(),
+          queue, command_buffers.data(),
           static_cast<std::uint32_t>(command_buffers.size()));
     }
   }
@@ -2452,7 +2458,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  PrepareEtc2Submit2(submit_count, submits);
+  PrepareEtc2Submit2(queue, submit_count, submits);
   const VkResult result = State().text_overlay.QueueSubmit2(
       queue, submit_count, submits, fence, host_submit);
   observation.SetResult(result);
@@ -2469,7 +2475,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2KHR(
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  PrepareEtc2Submit2(submit_count, submits);
+  PrepareEtc2Submit2(queue, submit_count, submits);
   const VkResult result = State().text_overlay.QueueSubmit2(
       queue, submit_count, submits, fence,
       reinterpret_cast<PFN_vkQueueSubmit2>(host_submit));

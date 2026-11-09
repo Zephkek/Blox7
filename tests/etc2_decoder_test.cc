@@ -115,6 +115,71 @@ TEST(EtcDecoderTest, InvalidJobsDoNotPreventValidJobsFromCompleting) {
   DecodeEtcJobs(jobs.data(), 0, 8);
 }
 
+std::vector<std::uint8_t> SplitMixBlocks(std::size_t bytes,
+                                         std::uint64_t seed) {
+  std::vector<std::uint8_t> blocks(bytes);
+  std::uint64_t state = seed;
+  std::uint64_t value = 0;
+  for (std::size_t index = 0; index < bytes; ++index) {
+    if (index % 8 == 0) {
+      state += 0x9e3779b97f4a7c15ULL;
+      value = state;
+      value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+      value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+      value ^= value >> 31;
+    }
+    blocks[index] = static_cast<std::uint8_t>(value >> (8 * (index % 8)));
+  }
+  return blocks;
+}
+
+TEST(EtcDecoderTest, MatchesEtcpackReferenceDecodes) {
+  struct Golden {
+    EtcFormat format;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint64_t hash;
+  };
+  const Golden goldens[] = {
+      {EtcFormat::kEtc2Rgb8, 512, 512, 0x1378e4e000bdff18ULL},
+      {EtcFormat::kEtc2Rgb8, 61, 37, 0x0216931d4f595b92ULL},
+      {EtcFormat::kEtc2Rgb8A1, 512, 512, 0x15178aa3a9e8cd07ULL},
+      {EtcFormat::kEtc2Rgb8A1, 61, 37, 0x40e83884261637e7ULL},
+      {EtcFormat::kEtc2Rgba8, 512, 512, 0x1cc30770d3efef92ULL},
+      {EtcFormat::kEtc2Rgba8, 61, 37, 0xc4e12960a0d6f3fcULL},
+      {EtcFormat::kEacR11, 512, 512, 0x813ac7dad0049a5aULL},
+      {EtcFormat::kEacR11, 61, 37, 0x893ca2f91eb421e8ULL},
+      {EtcFormat::kEacR11Signed, 512, 512, 0xd1cbee6b382d40beULL},
+      {EtcFormat::kEacR11Signed, 61, 37, 0x1a13f60f65aa3a52ULL},
+      {EtcFormat::kEacRg11, 512, 512, 0xbcd08d8ce18ff1d1ULL},
+      {EtcFormat::kEacRg11, 61, 37, 0x24df216efc128c7dULL},
+      {EtcFormat::kEacRg11Signed, 512, 512, 0xd974154dfb89bcddULL},
+      {EtcFormat::kEacRg11Signed, 61, 37, 0x50178929c5297eb7ULL},
+  };
+  for (const Golden& golden : goldens) {
+    SCOPED_TRACE(static_cast<int>(golden.format));
+    SCOPED_TRACE(golden.width);
+    const std::size_t blocks =
+        ((golden.width + 3) / 4) * ((golden.height + 3) / 4);
+    const std::vector<std::uint8_t> source = SplitMixBlocks(
+        blocks * EtcBlockBytes(golden.format),
+        0x0b1053eedULL + static_cast<std::uint64_t>(golden.format) * 1000 +
+            golden.width);
+    std::vector<std::uint8_t> decoded(static_cast<std::size_t>(golden.width) *
+                                      golden.height *
+                                      EtcDecodedTexelBytes(golden.format));
+    ASSERT_TRUE(DecodeEtcImage(golden.format, source.data(), source.size(),
+                               golden.width, golden.height, decoded.data(),
+                               decoded.size()));
+    std::uint64_t hash = 0xcbf29ce484222325ULL;
+    for (std::uint8_t byte : decoded) {
+      hash ^= byte;
+      hash *= 0x100000001b3ULL;
+    }
+    EXPECT_EQ(hash, golden.hash);
+  }
+}
+
 TEST(EtcDecoderTest, SmallBatchesDoNotCreateThreads) {
   const unsigned created = thread_creations.load();
   ImageFixture image(EtcFormat::kEtc2Rgb8, 37, 33);

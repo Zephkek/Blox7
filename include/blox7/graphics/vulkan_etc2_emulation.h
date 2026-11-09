@@ -43,7 +43,12 @@ class VulkanEtc2Emulation final {
   void RegisterDevice(VkDevice device, VkPhysicalDevice physical_device,
                       bool emulated,
                       const VkPhysicalDeviceMemoryProperties& memory,
-                      PFN_vkGetDeviceProcAddr get_device_proc_addr);
+                      PFN_vkGetDeviceProcAddr get_device_proc_addr,
+                      const VkPhysicalDeviceLimits* limits = nullptr,
+                      const VkQueueFamilyProperties* queue_families = nullptr,
+                      std::uint32_t queue_family_count = 0);
+  void RegisterQueue(VkDevice device, VkQueue queue,
+                     std::uint32_t queue_family);
   void DestroyDevice(VkDevice device);
 
   VkResult CreateImage(VkDevice device, const VkImageCreateInfo* create_info,
@@ -86,7 +91,7 @@ class VulkanEtc2Emulation final {
                           const VkCommandBuffer* secondaries);
 
   bool HasPendingUploads() const;
-  void PrepareSubmit(const VkCommandBuffer* command_buffers,
+  void PrepareSubmit(VkQueue queue, const VkCommandBuffer* command_buffers,
                      std::uint32_t count);
   void ReleaseCommandBuffer(VkCommandBuffer command_buffer);
 

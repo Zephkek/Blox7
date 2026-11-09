@@ -168,6 +168,7 @@ blox7_apply_compile_options(etc2_decoder_test)
 add_executable(vulkan_etc2_emulation_test
   vulkan_etc2_emulation_test.cc
   ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_etc2_emulation.cc
+  ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_etc2_gpu_decoder.cc
   ${CMAKE_SOURCE_DIR}/src/graphics/etc2_decoder.cc
   ${CMAKE_SOURCE_DIR}/src/graphics/texture_override.cc
 )

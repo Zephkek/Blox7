@@ -1,0 +1,279 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Blocks {
+  uint words[];
+} blocks;
+
+layout(std430, set = 0, binding = 1) writeonly buffer Texels {
+  uint words[];
+} texels;
+
+layout(push_constant) uniform Job {
+  uint format;
+  uint width;
+  uint height;
+  uint blocks_wide;
+  uint blocks_high;
+  uint source_word;
+  uint source_row_words;
+  uint source_layer_words;
+  uint target_word;
+  uint target_row_words;
+  uint target_layer_words;
+} job;
+
+const uint kRgb8 = 0u;
+const uint kRgb8A1 = 1u;
+const uint kRgba8 = 2u;
+const uint kR11 = 3u;
+const uint kR11Signed = 4u;
+const uint kRg11 = 5u;
+const uint kRg11Signed = 6u;
+
+const int kDelta[8] = int[8](0, 1, 2, 3, -4, -3, -2, -1);
+const int kDistance[8] = int[8](3, 6, 11, 16, 23, 32, 41, 64);
+const int kEtc1Modifiers[32] = int[32](
+    2, 8, -2, -8, 5, 17, -5, -17, 9, 29, -9, -29, 13, 42, -13, -42,
+    18, 60, -18, -60, 24, 80, -24, -80, 33, 106, -33, -106, 47, 183, -47, -183);
+const int kEacModifiers[128] = int[128](
+    -3, -6, -9, -15, 2, 5, 8, 14, -3, -7, -10, -13, 2, 6, 9, 12,
+    -2, -5, -8, -13, 1, 4, 7, 12, -2, -4, -6, -13, 1, 3, 5, 12,
+    -3, -6, -8, -12, 2, 5, 7, 11, -3, -7, -9, -11, 2, 6, 8, 10,
+    -4, -7, -8, -11, 3, 6, 7, 10, -3, -5, -8, -11, 2, 4, 7, 10,
+    -2, -6, -8, -10, 1, 5, 7, 9, -2, -5, -8, -10, 1, 4, 7, 9,
+    -2, -4, -8, -10, 1, 3, 7, 9, -2, -5, -7, -10, 1, 4, 6, 9,
+    -3, -4, -7, -10, 2, 3, 6, 9, -1, -2, -3, -10, 0, 1, 2, 9,
+    -4, -6, -8, -9, 3, 5, 7, 8, -3, -5, -7, -9, 2, 4, 6, 8);
+
+int Expand4(int v) { return (v << 4) | v; }
+int Expand5(int v) { return (v << 3) | (v >> 2); }
+int Expand6(int v) { return (v << 2) | (v >> 4); }
+int Expand7(int v) { return (v << 1) | (v >> 6); }
+
+uint Pack(int r, int g, int b, int a) {
+  return uint(clamp(r, 0, 255)) | (uint(clamp(g, 0, 255)) << 8) |
+         (uint(clamp(b, 0, 255)) << 16) | (uint(a) << 24);
+}
+
+void Bytes(uint w0, uint w1, out uint b[8]) {
+  b[0] = w0 & 255u;
+  b[1] = (w0 >> 8) & 255u;
+  b[2] = (w0 >> 16) & 255u;
+  b[3] = w0 >> 24;
+  b[4] = w1 & 255u;
+  b[5] = (w1 >> 8) & 255u;
+  b[6] = (w1 >> 16) & 255u;
+  b[7] = w1 >> 24;
+}
+
+void DecodeRgb(uint b[8], bool punchthrough, out uint rgba[16]) {
+  const bool diff_or_opaque = (b[3] & 2u) != 0u;
+  const bool opaque = !punchthrough || diff_or_opaque;
+  const int msb = int((b[4] << 8) | b[5]);
+  const int lsb = int((b[6] << 8) | b[7]);
+  const int r_sum = int(b[0] >> 3) + kDelta[b[0] & 7u];
+  const int g_sum = int(b[1] >> 3) + kDelta[b[1] & 7u];
+  const int b_sum = int(b[2] >> 3) + kDelta[b[2] & 7u];
+  const bool individual = !punchthrough && !diff_or_opaque;
+
+  if (!individual && (r_sum < 0 || r_sum > 31 || g_sum < 0 || g_sum > 31)) {
+    ivec3 paint[4];
+    if (r_sum < 0 || r_sum > 31) {
+      const ivec3 c1 = ivec3(Expand4(int((((b[0] >> 3) & 3u) << 2) | (b[0] & 3u))),
+                             Expand4(int(b[1] >> 4)), Expand4(int(b[1] & 15u)));
+      const ivec3 c2 = ivec3(Expand4(int(b[2] >> 4)), Expand4(int(b[2] & 15u)),
+                             Expand4(int(b[3] >> 4)));
+      const int d = kDistance[(((b[3] >> 2) & 3u) << 1) | (b[3] & 1u)];
+      paint[0] = c1;
+      paint[1] = c2 + d;
+      paint[2] = c2;
+      paint[3] = c2 - d;
+    } else {
+      const ivec3 c1 = ivec3(Expand4(int((b[0] >> 3) & 15u)),
+                             Expand4(int(((b[0] & 7u) << 1) | ((b[1] >> 4) & 1u))),
+                             Expand4(int((b[1] & 8u) | ((b[1] & 3u) << 1) | (b[2] >> 7))));
+      const ivec3 c2 = ivec3(Expand4(int((b[2] >> 3) & 15u)),
+                             Expand4(int(((b[2] & 7u) << 1) | (b[3] >> 7))),
+                             Expand4(int((b[3] >> 3) & 15u)));
+      const int v1 = (c1.x << 16) | (c1.y << 8) | c1.z;
+      const int v2 = (c2.x << 16) | (c2.y << 8) | c2.z;
+      const int d = kDistance[(b[3] & 4u) | ((b[3] & 1u) << 1) | (v1 >= v2 ? 1u : 0u)];
+      paint[0] = c1 + d;
+      paint[1] = c1 - d;
+      paint[2] = c2 + d;
+      paint[3] = c2 - d;
+    }
+    for (int texel = 0; texel < 16; ++texel) {
+      const int index = (((msb >> texel) & 1) << 1) | ((lsb >> texel) & 1);
+      rgba[texel] = (!opaque && index == 2)
+                        ? 0u
+                        : Pack(paint[index].x, paint[index].y, paint[index].z, 255);
+    }
+    return;
+  }
+
+  if (!individual && (b_sum < 0 || b_sum > 31)) {
+    const int ro = Expand6(int((b[0] >> 1) & 63u));
+    const int go = Expand7(int(((b[0] & 1u) << 6) | ((b[1] >> 1) & 63u)));
+    const int bo = Expand6(int(((b[1] & 1u) << 5) | (b[2] & 24u) | ((b[2] & 3u) << 1) | (b[3] >> 7)));
+    const int rh = Expand6(int(((b[3] & 124u) >> 1) | (b[3] & 1u)));
+    const int gh = Expand7(int(b[4] >> 1));
+    const int bh = Expand6(int(((b[4] & 1u) << 5) | (b[5] >> 3)));
+    const int rv = Expand6(int(((b[5] & 7u) << 3) | (b[6] >> 5)));
+    const int gv = Expand7(int(((b[6] & 31u) << 2) | (b[7] >> 6)));
+    const int bv = Expand6(int(b[7] & 63u));
+    for (int x = 0; x < 4; ++x) {
+      for (int y = 0; y < 4; ++y) {
+        rgba[x * 4 + y] = Pack((x * (rh - ro) + y * (rv - ro) + 4 * ro + 2) >> 2,
+                               (x * (gh - go) + y * (gv - go) + 4 * go + 2) >> 2,
+                               (x * (bh - bo) + y * (bv - bo) + 4 * bo + 2) >> 2, 255);
+      }
+    }
+    return;
+  }
+
+  ivec3 base[2];
+  if (individual) {
+    base[0] = ivec3(Expand4(int(b[0] >> 4)), Expand4(int(b[1] >> 4)), Expand4(int(b[2] >> 4)));
+    base[1] = ivec3(Expand4(int(b[0] & 15u)), Expand4(int(b[1] & 15u)), Expand4(int(b[2] & 15u)));
+  } else {
+    base[0] = ivec3(Expand5(int(b[0] >> 3)), Expand5(int(b[1] >> 3)), Expand5(int(b[2] >> 3)));
+    base[1] = ivec3(Expand5(r_sum), Expand5(g_sum), Expand5(b_sum));
+  }
+  const int tables[2] = int[2](int(b[3] >> 5), int((b[3] >> 2) & 7u));
+  const bool flipped = (b[3] & 1u) != 0u;
+  for (int x = 0; x < 4; ++x) {
+    for (int y = 0; y < 4; ++y) {
+      const int texel = x * 4 + y;
+      const int index = (((msb >> texel) & 1) << 1) | ((lsb >> texel) & 1);
+      if (!opaque && index == 2) {
+        rgba[texel] = 0u;
+        continue;
+      }
+      const int sub = flipped ? (y >= 2 ? 1 : 0) : (x >= 2 ? 1 : 0);
+      const int modifier = (!opaque && index == 0) ? 0 : kEtc1Modifiers[tables[sub] * 4 + index];
+      rgba[texel] = Pack(base[sub].x + modifier, base[sub].y + modifier, base[sub].z + modifier, 255);
+    }
+  }
+}
+
+uint EacIndex(uint b[8], int texel) {
+  const uint high = (b[2] << 8) | b[3];
+  const uint low = (b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7];
+  const int shift = 45 - texel * 3;
+  uint bits;
+  if (shift >= 32) {
+    bits = high >> uint(shift - 32);
+  } else if (shift == 0) {
+    bits = low;
+  } else {
+    bits = (low >> uint(shift)) | (high << uint(32 - shift));
+  }
+  return bits & 7u;
+}
+
+int EacModifier(uint b[8], int texel) {
+  return kEacModifiers[(b[1] & 15u) * 8u + EacIndex(b, texel)];
+}
+
+uint DecodeR11(uint b[8], int texel, bool is_signed) {
+  const int multiplier = int(b[1] >> 4);
+  const int modifier = EacModifier(b, texel);
+  const int scaled = multiplier != 0 ? modifier * multiplier * 8 : modifier;
+  if (!is_signed) {
+    const int value = clamp(int(b[0]) * 8 + 4 + scaled, 0, 2047);
+    return uint((value << 5) | (value >> 6));
+  }
+  const int base = max(-127, int(b[0]) - ((b[0] & 128u) != 0u ? 256 : 0));
+  const int value = clamp(base * 8 + scaled, -1023, 1023);
+  const int magnitude = abs(value);
+  const int expanded = (magnitude << 5) | (magnitude >> 5);
+  return uint(value < 0 ? -expanded : expanded) & 65535u;
+}
+
+void main() {
+  const uint bx = gl_GlobalInvocationID.x;
+  const uint by = gl_GlobalInvocationID.y;
+  const uint layer = gl_GlobalInvocationID.z;
+  if (bx >= job.blocks_wide || by >= job.blocks_high) {
+    return;
+  }
+  const bool wide = job.format == kRgba8 || job.format == kRg11 || job.format == kRg11Signed;
+  const uint block_words = wide ? 4u : 2u;
+  const uint source = job.source_word + layer * job.source_layer_words +
+                      by * job.source_row_words + bx * block_words;
+  uint first[8];
+  uint second[8];
+  Bytes(blocks.words[source], blocks.words[source + 1u], first);
+  if (wide) {
+    Bytes(blocks.words[source + 2u], blocks.words[source + 3u], second);
+  }
+  const uint target = job.target_word + layer * job.target_layer_words;
+
+  if (job.format == kRgb8 || job.format == kRgb8A1 || job.format == kRgba8) {
+    uint rgba[16];
+    if (job.format == kRgba8) {
+      DecodeRgb(second, false, rgba);
+    } else {
+      DecodeRgb(first, job.format == kRgb8A1, rgba);
+    }
+    for (uint y = 0u; y < 4u; ++y) {
+      const uint py = by * 4u + y;
+      if (py >= job.height) {
+        break;
+      }
+      for (uint x = 0u; x < 4u; ++x) {
+        const uint px = bx * 4u + x;
+        if (px >= job.width) {
+          break;
+        }
+        const int texel = int(x * 4u + y);
+        uint value = rgba[texel];
+        if (job.format == kRgba8) {
+          const int alpha = clamp(int(first[0]) + EacModifier(first, texel) * int(first[1] >> 4), 0, 255);
+          value = (value & 0x00ffffffu) | (uint(alpha) << 24);
+        }
+        texels.words[target + py * job.target_row_words + px] = value;
+      }
+    }
+    return;
+  }
+
+  const bool is_signed = job.format == kR11Signed || job.format == kRg11Signed;
+  if (job.format == kR11 || job.format == kR11Signed) {
+    for (uint y = 0u; y < 4u; ++y) {
+      const uint py = by * 4u + y;
+      if (py >= job.height) {
+        break;
+      }
+      for (uint pair = 0u; pair < 2u; ++pair) {
+        const uint px = bx * 4u + pair * 2u;
+        if (px >= job.width) {
+          break;
+        }
+        const uint low = DecodeR11(first, int(pair * 8u + y), is_signed);
+        const uint high = DecodeR11(first, int(pair * 8u + 4u + y), is_signed);
+        texels.words[target + py * job.target_row_words + px / 2u] = low | (high << 16);
+      }
+    }
+    return;
+  }
+
+  for (uint y = 0u; y < 4u; ++y) {
+    const uint py = by * 4u + y;
+    if (py >= job.height) {
+      break;
+    }
+    for (uint x = 0u; x < 4u; ++x) {
+      const uint px = bx * 4u + x;
+      if (px >= job.width) {
+        break;
+      }
+      const int texel = int(x * 4u + y);
+      texels.words[target + py * job.target_row_words + px] =
+          DecodeR11(first, texel, is_signed) | (DecodeR11(second, texel, is_signed) << 16);
+    }
+  }
+}
