@@ -178,11 +178,6 @@ bool MergePerformanceClientSettingsOverrides(const PerformancePolicy& policy,
     }
     return false;
   }
-  if (!policy.multithreaded_rendering &&
-      policy.physics_worker_mode == PhysicsWorkerMode::kAuto) {
-    *merged_json = overrides.dump();
-    return true;
-  }
   const auto apply_settings = [&overrides,
                                error](const auto& settings) -> bool {
     for (const ClientSetting& setting : settings) {
@@ -192,6 +187,17 @@ bool MergePerformanceClientSettingsOverrides(const PerformancePolicy& policy,
     }
     return true;
   };
+  const std::array<ClientSetting, 1> startup_scan_settings = {{
+      {"DFIntCLI65755e", "0"},
+  }};
+  if (!apply_settings(startup_scan_settings)) {
+    return false;
+  }
+  if (!policy.multithreaded_rendering &&
+      policy.physics_worker_mode == PhysicsWorkerMode::kAuto) {
+    *merged_json = overrides.dump();
+    return true;
+  }
   const bool throughput_mode =
       policy.physics_worker_mode == PhysicsWorkerMode::kThroughput;
   if (policy.physics_worker_mode == PhysicsWorkerMode::kLatency) {

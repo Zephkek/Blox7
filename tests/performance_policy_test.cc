@@ -97,6 +97,44 @@ TEST(PerformancePolicyTest, DisabledPolicyPreservesUnrelatedOverrides) {
       parsed.contains("FIntTaskSchedulerAsyncTasksMinimumThreadCount"));
 }
 
+TEST(PerformancePolicyTest, StartupScanRunsWithoutPausesInEveryMode) {
+  for (const char* mode : {"auto", "latency", "throughput"}) {
+    for (const bool multithreaded : {false, true}) {
+      PerformancePolicy policy;
+      policy.multithreaded_rendering = multithreaded;
+      policy.physical_core_count = 8;
+      ASSERT_TRUE(ParsePhysicsWorkerMode(mode, &policy.physics_worker_mode));
+      std::string merged;
+      std::string error;
+      ASSERT_TRUE(
+          MergePerformanceClientSettingsOverrides(policy, "{}", &merged, &error))
+          << mode << ' ' << multithreaded << ": " << error;
+      const nlohmann::json parsed =
+          nlohmann::json::parse(merged, nullptr, false, true);
+      ASSERT_TRUE(parsed.is_object());
+      EXPECT_EQ(parsed.at("DFIntCLI65755e"), "0") << mode << ' ' << multithreaded;
+    }
+  }
+}
+
+TEST(PerformancePolicyTest, StartupScanPacingSurvivesTheComposedPolicy) {
+  std::string merged;
+  std::string error;
+  ASSERT_TRUE(MergeRuntimeClientSettingsOverrides(
+      ParseFrameRatePolicy("144"), {true, 8}, R"({"DFIntCLI65755e":"0"})",
+      &merged, &error))
+      << error;
+  const nlohmann::json parsed =
+      nlohmann::json::parse(merged, nullptr, false, true);
+  ASSERT_TRUE(parsed.is_object());
+  EXPECT_EQ(parsed.at("DFIntCLI65755e"), "0");
+
+  std::string conflicting;
+  EXPECT_FALSE(MergeRuntimeClientSettingsOverrides(
+      ParseFrameRatePolicy("144"), {true, 8}, R"({"DFIntCLI65755e":"100"})",
+      &conflicting, &error));
+}
+
 TEST(PerformancePolicyTest, SizesFullMultithreadingFromPhysicalCoreCount) {
   std::string merged;
   std::string error;
