@@ -7091,6 +7091,14 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
                   << std::flush;
       }
     }
+    if (lifecycle_shutdown_completed) {
+      using ReleaseKeptVulkanObjectsFn = void (*)();
+      if (const auto release_kept_vulkan_objects =
+              reinterpret_cast<ReleaseKeptVulkanObjectsFn>(::dlsym(
+                  RTLD_DEFAULT, "blox7_vulkan_release_kept_objects"))) {
+        release_kept_vulkan_objects();
+      }
+    }
     const blox7::Status resize_stop_status =
         lifecycle_shutdown_completed
             ? blox7::window::StopResizeReadiness()

@@ -1377,9 +1377,49 @@ void ReleaseKeptObjects() {
   }
 }
 
+void ShutdownIdleAdapterLocked(AdapterState& state) {
+  if (state.active_instance_count != 0 || !state.initialized ||
+      state.kept_instance != VK_NULL_HANDLE) {
+    return;
+  }
+  state.android_wsi.Shutdown();
+  state.host_wsi.Shutdown();
+  state.host_get_instance_proc_addr = nullptr;
+  state.host_get_device_proc_addr.store(nullptr, std::memory_order_release);
+  state.device_dispatches.clear();
+  state.queue_bindings.clear();
+  state.command_buffer_bindings.clear();
+  state.device_keys.clear();
+  state.device_allocations.clear();
+  state.swapchain_surfaces.clear();
+  InvalidateFastDispatchCaches();
+  state.host_surface_capabilities = nullptr;
+  state.host_surface_present_modes = nullptr;
+  state.latest_instance = VK_NULL_HANDLE;
+  state.note_present.store(nullptr, std::memory_order_release);
+  state.note_host_present_begin.store(nullptr, std::memory_order_release);
+  state.note_host_present_end.store(nullptr, std::memory_order_release);
+  state.note_vulkan_call_begin.store(nullptr, std::memory_order_release);
+  state.note_vulkan_call_end.store(nullptr, std::memory_order_release);
+  g_vulkan_call_observation_active.store(false, std::memory_order_release);
+  state.note_surface_out_of_date.store(nullptr, std::memory_order_release);
+  state.extent_translation_logged = false;
+  state.present_policy_logged = false;
+  state.initialized = false;
+  std::fprintf(stderr, "  [vulkan] SDL WSI adapter shut down\n");
+}
+
 }  // namespace
 
 extern "C" {
+
+__attribute__((visibility("default"))) void
+blox7_vulkan_release_kept_objects() {
+  ReleaseKeptObjects();
+  AdapterState& state = State();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  ShutdownIdleAdapterLocked(state);
+}
 
 VKAPI_ATTR VkResult VKAPI_CALL
 vkCreateInstance(const VkInstanceCreateInfo* create_info,
@@ -1510,33 +1550,7 @@ vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
   if (state.active_instance_count != 0) {
     --state.active_instance_count;
   }
-  if (state.active_instance_count == 0 && state.initialized) {
-    state.android_wsi.Shutdown();
-    state.host_wsi.Shutdown();
-    state.host_get_instance_proc_addr = nullptr;
-    state.host_get_device_proc_addr.store(nullptr, std::memory_order_release);
-    state.device_dispatches.clear();
-    state.queue_bindings.clear();
-    state.command_buffer_bindings.clear();
-    state.device_keys.clear();
-    state.device_allocations.clear();
-    state.swapchain_surfaces.clear();
-    InvalidateFastDispatchCaches();
-    state.host_surface_capabilities = nullptr;
-    state.host_surface_present_modes = nullptr;
-    state.latest_instance = VK_NULL_HANDLE;
-    state.note_present.store(nullptr, std::memory_order_release);
-    state.note_host_present_begin.store(nullptr, std::memory_order_release);
-    state.note_host_present_end.store(nullptr, std::memory_order_release);
-    state.note_vulkan_call_begin.store(nullptr, std::memory_order_release);
-    state.note_vulkan_call_end.store(nullptr, std::memory_order_release);
-    g_vulkan_call_observation_active.store(false, std::memory_order_release);
-    state.note_surface_out_of_date.store(nullptr, std::memory_order_release);
-    state.extent_translation_logged = false;
-    state.present_policy_logged = false;
-    state.initialized = false;
-    std::fprintf(stderr, "  [vulkan] SDL WSI adapter shut down\n");
-  }
+  ShutdownIdleAdapterLocked(state);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
