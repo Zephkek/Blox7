@@ -22,7 +22,7 @@ Roblox again.
 
 <p align="center">
   <img src="docs/bedwars.jpg" width="32%" alt="BedWars">
-  <img src="docs/shooter.jpg" width="32%" alt="A tactical shooter">
+  <img src="docs/shooter.png" width="32%" alt="yahu tactical shooter">
   <img src="docs/lobby.jpg" width="32%" alt="A murder mystery lobby">
 </p>
 
