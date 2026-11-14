@@ -141,10 +141,24 @@ using NoteVulkanCallEndFn = void (*)(std::uint64_t, std::int32_t);
 using NoteSurfaceOutOfDateFn = void (*)();
 using WindowDimensionFn = int (*)();
 
+#if defined(BLOX7_WIN32)
+constexpr char kFullScreenExclusiveExtension[] = "VK_EXT_full_screen_exclusive";
+constexpr std::int32_t kFullScreenExclusiveDisallowed = 2;
+
+struct SurfaceFullScreenExclusiveInfo {
+  VkStructureType sType;
+  const void* pNext;
+  std::int32_t fullScreenExclusive;
+};
+static_assert(sizeof(SurfaceFullScreenExclusiveInfo) == 24,
+              "VkSurfaceFullScreenExclusiveInfoEXT");
+#endif
+
 struct AdapterState {
   struct DeviceDispatch {
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;
+    bool full_screen_exclusive = false;
     PFN_vkQueuePresentKHR queue_present = nullptr;
     PFN_vkQueueSubmit queue_submit = nullptr;
     PFN_vkQueueSubmit2 queue_submit2 = nullptr;
@@ -193,6 +207,7 @@ struct AdapterState {
   PFN_vkGetPhysicalDeviceSurfacePresentModesKHR host_surface_present_modes =
       nullptr;
   VkInstance latest_instance = VK_NULL_HANDLE;
+  bool surface_capabilities2 = false;
   size_t active_instance_count = 0;
   VkInstance kept_instance = VK_NULL_HANDLE;
   std::string kept_instance_key;
@@ -459,13 +474,15 @@ const AdapterState::DeviceDispatch& HostDispatchForCommandBuffer(
 
 void RegisterHostDeviceDispatch(VkDevice device,
                                 VkPhysicalDevice physical_device,
-                                PFN_vkGetDeviceProcAddr get_device_proc_addr) {
+                                PFN_vkGetDeviceProcAddr get_device_proc_addr,
+                                bool full_screen_exclusive) {
   if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr) {
     return;
   }
   AdapterState::DeviceDispatch dispatch;
   dispatch.device = device;
   dispatch.physical_device = physical_device;
+  dispatch.full_screen_exclusive = full_screen_exclusive;
   dispatch.queue_present = reinterpret_cast<PFN_vkQueuePresentKHR>(
       get_device_proc_addr(device, "vkQueuePresentKHR"));
   dispatch.queue_submit = reinterpret_cast<PFN_vkQueueSubmit>(
@@ -706,6 +723,36 @@ std::vector<VkExtensionProperties> AndroidVisibleExtensions(
   *result = VK_SUCCESS;
   return output;
 }
+
+#if defined(BLOX7_WIN32)
+bool ListsExtension(const std::vector<VkExtensionProperties>& extensions,
+                    const char* name) {
+  return std::any_of(extensions.begin(), extensions.end(),
+                     [name](const VkExtensionProperties& extension) {
+                       return std::strcmp(extension.extensionName, name) == 0;
+                     });
+}
+
+bool HostDeviceExtension(VkInstance instance, VkPhysicalDevice physical_device,
+                         const char* name) {
+  const auto enumerate =
+      reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(
+          HostInstanceProc(instance, "vkEnumerateDeviceExtensionProperties"));
+  std::uint32_t count = 0;
+  if (enumerate == nullptr ||
+      enumerate(physical_device, nullptr, &count, nullptr) != VK_SUCCESS) {
+    return false;
+  }
+  std::vector<VkExtensionProperties> extensions(count);
+  const VkResult result =
+      enumerate(physical_device, nullptr, &count, extensions.data());
+  if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+    return false;
+  }
+  extensions.resize(count);
+  return ListsExtension(extensions, name);
+}
+#endif
 
 PFN_vkVoidFunction AdapterProc(const char* name) {
   if (name == nullptr) {
@@ -1396,6 +1443,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.host_surface_capabilities = nullptr;
   state.host_surface_present_modes = nullptr;
   state.latest_instance = VK_NULL_HANDLE;
+  state.surface_capabilities2 = false;
   state.note_present.store(nullptr, std::memory_order_release);
   state.note_host_present_begin.store(nullptr, std::memory_order_release);
   state.note_host_present_end.store(nullptr, std::memory_order_release);
@@ -1445,6 +1493,19 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
                  status.message().c_str());
     return VK_ERROR_EXTENSION_NOT_PRESENT;
   }
+  bool surface_capabilities2 = false;
+#if defined(BLOX7_WIN32)
+  VkResult listed = VK_SUCCESS;
+  surface_capabilities2 =
+      ListsExtension(AndroidVisibleExtensions(nullptr, &listed),
+                     VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+  if (surface_capabilities2 &&
+      std::find(translated.begin(), translated.end(),
+                VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) ==
+          translated.end()) {
+    translated.emplace_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+  }
+#endif
   std::vector<const char*> translated_names;
   translated_names.reserve(translated.size());
   for (const std::string& extension : translated) {
@@ -1486,6 +1547,7 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
         state.instance_keys[*instance] = key;
         ++state.active_instance_count;
         state.latest_instance = *instance;
+        state.surface_capabilities2 = surface_capabilities2;
         std::fprintf(stderr, "  [vulkan] host VkInstance reused\n");
         return VK_SUCCESS;
       }
@@ -1504,6 +1566,7 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
     std::lock_guard<std::mutex> lock(state.mutex);
     ++state.active_instance_count;
     state.latest_instance = *instance;
+    state.surface_capabilities2 = surface_capabilities2;
     state.instance_keys[*instance] = key;
     state.host_get_device_proc_addr.store(
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
@@ -1728,6 +1791,32 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
   }
 
   VkDeviceCreateInfo host_info = *create_info;
+  bool full_screen_exclusive = false;
+#if defined(BLOX7_WIN32)
+  bool surface_capabilities2 = false;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    surface_capabilities2 = state.surface_capabilities2;
+  }
+  std::vector<const char*> host_extensions(
+      create_info->ppEnabledExtensionNames,
+      create_info->ppEnabledExtensionNames + create_info->enabledExtensionCount);
+  full_screen_exclusive =
+      std::any_of(host_extensions.begin(), host_extensions.end(),
+                  [](const char* name) {
+                    return std::strcmp(name, kFullScreenExclusiveExtension) == 0;
+                  });
+  if (!full_screen_exclusive && surface_capabilities2 &&
+      HostDeviceExtension(instance, physical_device,
+                          kFullScreenExclusiveExtension)) {
+    host_extensions.push_back(kFullScreenExclusiveExtension);
+    host_info.enabledExtensionCount =
+        static_cast<std::uint32_t>(host_extensions.size());
+    host_info.ppEnabledExtensionNames = host_extensions.data();
+    full_screen_exclusive = true;
+  }
+#endif
   EnabledDeviceFeatures enabled = InspectEnabledFeatures(*create_info);
   const bool etc2_emulated = State().etc2.PhysicalDeviceNeedsEmulation(
       physical_device, reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
@@ -1830,7 +1919,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     std::fprintf(stderr, "  [vulkan] host VkDevice reused\n");
   }
   RegisterHostDeviceDispatch(*device, physical_device,
-                             host_get_device_proc_addr);
+                             host_get_device_proc_addr, full_screen_exclusive);
   VkPhysicalDeviceMemoryProperties memory_properties{};
   if (const auto host_memory_properties =
           reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
@@ -2096,6 +2185,21 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
             VK_SUCCESS &&
         (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0) {
       host_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+  }
+  SurfaceFullScreenExclusiveInfo composited{
+      VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT, host_info.pNext,
+      kFullScreenExclusiveDisallowed};
+  if (HostDispatchForDevice(device).full_screen_exclusive &&
+      FindFeature(host_info.pNext,
+                  VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT) ==
+          nullptr) {
+    host_info.pNext = &composited;
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true, std::memory_order_relaxed)) {
+      std::fprintf(stderr,
+                   "  [vulkan] fullscreen stays composited, exclusive mode "
+                   "disallowed\n");
     }
   }
 #endif
