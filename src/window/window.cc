@@ -242,6 +242,33 @@ void ApplyWindowIcon(SDL_Window* window) {
   }
 }
 
+#ifdef BLOX7_WIN32
+void RedrawWholeClientOnResize(SDL_Window* window) {
+  using GetClassLongPtrFn = uintptr_t(__attribute__((ms_abi)) *)(void*, int32_t);
+  using SetClassLongPtrFn =
+      uintptr_t(__attribute__((ms_abi)) *)(void*, int32_t, uintptr_t);
+  static void* const user32 = __w32_pe_open("user32.dll");
+  static const auto get_class_long = reinterpret_cast<GetClassLongPtrFn>(
+      user32 != nullptr ? __w32_pe_symbol(user32, "GetClassLongPtrW")
+                        : nullptr);
+  static const auto set_class_long = reinterpret_cast<SetClassLongPtrFn>(
+      user32 != nullptr ? __w32_pe_symbol(user32, "SetClassLongPtrW")
+                        : nullptr);
+  void* hwnd =
+      SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                             SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+  if (get_class_long == nullptr || set_class_long == nullptr ||
+      hwnd == nullptr) {
+    return;
+  }
+  constexpr int32_t kGclStyle = -26;
+  constexpr uintptr_t kCsVRedraw = 0x0001;
+  constexpr uintptr_t kCsHRedraw = 0x0002;
+  set_class_long(hwnd, kGclStyle,
+                 get_class_long(hwnd, kGclStyle) | kCsVRedraw | kCsHRedraw);
+}
+#endif
+
 // borderless just inherits the desktop rate, so ask for exclusive fullscreen
 void ApplyFullscreenRefreshMode(SDL_Window* window) {
   const char* value = std::getenv("BLOX7_FULLSCREEN_REFRESH");
@@ -1210,6 +1237,9 @@ bool Init(int width, int height, const char* title) {
     if (!ShouldShowWindowImmediately()) {
       window_flags |= SDL_WINDOW_HIDDEN;
     }
+#ifdef BLOX7_WIN32
+    SDL_SetHint(SDL_HINT_WINDOWS_ERASE_BACKGROUND_MODE, "0");
+#endif
     g_state.sdl_window = SDL_CreateWindow(title ? title : "Roblox",
                                           width, height, window_flags);
     if (g_state.sdl_window == nullptr) {
@@ -1229,6 +1259,10 @@ bool Init(int width, int height, const char* title) {
     if (g_state.native_window == nullptr) {
       g_state.native_window = g_state.sdl_window;
     }
+#ifdef BLOX7_WIN32
+    RedrawWholeClientOnResize(g_state.sdl_window);
+    ShowWindowAccordingToStartupMode();
+#else
     if (!SDL_ShowWindow(g_state.sdl_window)) {
       fprintf(stderr, "  [window] SDL_ShowWindow failed: %s\n", SDL_GetError());
       SDL_DestroyWindow(g_state.sdl_window);
@@ -1260,6 +1294,7 @@ bool Init(int width, int height, const char* title) {
             "  [window] direct Vulkan window mapped for WSI configure "
             "(%dx%d pixels)\n",
             pixel_width, pixel_height);
+#endif
     fprintf(stderr, "  [window] SDL3 direct Vulkan window created (%dx%d)\n",
             width, height);
     if (!g_present_lifecycle.Activate()) {
