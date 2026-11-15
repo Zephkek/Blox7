@@ -8,9 +8,10 @@ namespace blox7::media {
 enum class CodecKind { kAvc, kHevc, kAac };
 
 bool KindForMime(const char* mime, CodecKind* kind);
-bool KindForName(const char* name, CodecKind* kind);
+bool KindForName(const char* name, CodecKind* kind, bool* encoder);
 const char* CodecMime(CodecKind kind);
 std::string CodecName(CodecKind kind);
+std::string EncoderName(CodecKind kind);
 
 }  // namespace blox7::media
 

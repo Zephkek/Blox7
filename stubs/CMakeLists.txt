@@ -91,21 +91,31 @@ add_library(stub_mediandk SHARED
   libmediandk_stub.cc
   ${CMAKE_SOURCE_DIR}/src/media/codec_names.cc
   ${CMAKE_SOURCE_DIR}/src/media/ffmpeg_decoder.cc
+  ${CMAKE_SOURCE_DIR}/src/media/ffmpeg_encoder.cc
+  ${CMAKE_SOURCE_DIR}/src/media/h264_encoder.cc
+  ${CMAKE_SOURCE_DIR}/src/media/input_surface.cc
   ${CMAKE_SOURCE_DIR}/src/media/media_codec.cc
   ${CMAKE_SOURCE_DIR}/src/media/media_format.cc
   ${CMAKE_SOURCE_DIR}/src/media/mediandk.cc
 )
 configure_stub(stub_mediandk "libmediandk.so")
 find_path(BLOX7_AVCODEC_INCLUDE_DIR libavcodec/avcodec.h REQUIRED)
+find_path(BLOX7_OPENH264_INCLUDE_DIR wels/codec_api.h REQUIRED)
 find_library(BLOX7_AVCODEC_LIBRARY avcodec REQUIRED)
 find_library(BLOX7_AVUTIL_LIBRARY avutil REQUIRED)
+find_library(BLOX7_SWSCALE_LIBRARY swscale REQUIRED)
+find_library(BLOX7_OPENH264_LIBRARY libopenh264.a REQUIRED)
 target_include_directories(stub_mediandk PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_SOURCE_DIR}/src
   ${BLOX7_AVCODEC_INCLUDE_DIR}
+  ${BLOX7_OPENH264_INCLUDE_DIR}
 )
 target_compile_options(stub_mediandk PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
 target_link_libraries(stub_mediandk PRIVATE
+  ${BLOX7_OPENH264_LIBRARY}
   ${BLOX7_AVCODEC_LIBRARY}
+  ${BLOX7_SWSCALE_LIBRARY}
   ${BLOX7_AVUTIL_LIBRARY}
   Threads::Threads
 )
@@ -116,6 +126,7 @@ configure_stub(stub_openmax "libOpenMAXAL.so")
 # Fake EGL handles require BLOX7_ENABLE_TEST_GRAPHICS_STUBS=1.
 add_library(stub_egl SHARED libegl_stub.cc)
 configure_stub(stub_egl "libEGL.so")
+target_include_directories(stub_egl PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(stub_egl PRIVATE dl)
 
 # Production uses ANGLE or the system GLES library.
@@ -133,6 +144,7 @@ else()
 endif()
 add_library(stub_vulkan SHARED
   ${CMAKE_SOURCE_DIR}/src/graphics/bionic_vulkan_loader_adapter.cc
+  ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_capture_swapchain.cc
   ${BLOX7_VULKAN_TEXT_OVERLAY}
   ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_etc2_emulation.cc
   ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_etc2_gpu_decoder.cc
@@ -140,6 +152,8 @@ add_library(stub_vulkan SHARED
   ${CMAKE_SOURCE_DIR}/src/graphics/texture_override.cc
 )
 configure_stub(stub_vulkan "libvulkan.so")
+set_property(SOURCE ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_capture_swapchain.cc APPEND PROPERTY COMPILE_OPTIONS
+  -Wno-missing-field-initializers)
 # GetProcAddr lookups stay on our wrappers even if the real loader got in first
 target_link_options(stub_vulkan PRIVATE "LINKER:-Bsymbolic-functions")
 target_include_directories(stub_vulkan PRIVATE ${CMAKE_SOURCE_DIR}/include)

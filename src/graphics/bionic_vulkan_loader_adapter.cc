@@ -16,6 +16,7 @@
 
 #include "blox7/graphics/android_vulkan_wsi_adapter.h"
 #include "blox7/graphics/present_mode_policy.h"
+#include "blox7/graphics/vulkan_capture_swapchain.h"
 #include "blox7/graphics/vulkan_etc2_emulation.h"
 #include "blox7/graphics/vulkan_text_overlay_compositor.h"
 #include "blox7/platform/platform_runtime.h"
@@ -121,6 +122,30 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
     VkPhysicalDevice physical_device, VkSurfaceKHR surface,
     std::uint32_t* present_mode_count, VkPresentModeKHR* present_modes);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
+    VkPhysicalDevice physical_device, std::uint32_t queue_family_index,
+    VkSurfaceKHR surface, VkBool32* supported);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
+    VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+    std::uint32_t* format_count, VkSurfaceFormatKHR* formats);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
+    VkPhysicalDevice physical_device,
+    const VkPhysicalDeviceSurfaceInfo2KHR* surface_info,
+    std::uint32_t* format_count, VkSurfaceFormat2KHR* formats);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
+    VkPhysicalDevice physical_device,
+    const VkPhysicalDeviceSurfaceInfo2KHR* surface_info,
+    VkSurfaceCapabilities2KHR* capabilities);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
+    VkDevice device, VkSwapchainKHR swapchain, std::uint32_t* image_count,
+    VkImage* images);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetRefreshCycleDurationGOOGLE(
+    VkDevice device, VkSwapchainKHR swapchain,
+    VkRefreshCycleDurationGOOGLE* display_timing_properties);
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPastPresentationTimingGOOGLE(
+    VkDevice device, VkSwapchainKHR swapchain,
+    std::uint32_t* presentation_timing_count,
+    VkPastPresentationTimingGOOGLE* presentation_timings);
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
     VkInstance instance, std::uint32_t* device_count,
     VkPhysicalDevice* devices);
@@ -183,6 +208,10 @@ struct AdapterState {
     PFN_vkEndCommandBuffer end_command_buffer = nullptr;
     PFN_vkResetCommandBuffer reset_command_buffer = nullptr;
     PFN_vkAllocateMemory allocate_memory = nullptr;
+    PFN_vkGetSwapchainImagesKHR get_swapchain_images = nullptr;
+    PFN_vkGetRefreshCycleDurationGOOGLE get_refresh_cycle_duration = nullptr;
+    PFN_vkGetPastPresentationTimingGOOGLE get_past_presentation_timing =
+        nullptr;
   };
 
   struct QueueBinding {
@@ -208,6 +237,11 @@ struct AdapterState {
       nullptr;
   PFN_vkGetPhysicalDeviceSurfacePresentModesKHR host_surface_present_modes =
       nullptr;
+  PFN_vkGetPhysicalDeviceSurfaceSupportKHR host_surface_support = nullptr;
+  PFN_vkGetPhysicalDeviceSurfaceFormatsKHR host_surface_formats = nullptr;
+  PFN_vkGetPhysicalDeviceSurfaceFormats2KHR host_surface_formats2 = nullptr;
+  PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR host_surface_capabilities2 =
+      nullptr;
   VkInstance latest_instance = VK_NULL_HANDLE;
   bool surface_capabilities2 = false;
   size_t active_instance_count = 0;
@@ -231,6 +265,7 @@ struct AdapterState {
   VkSurfaceKHR shown_surface = VK_NULL_HANDLE;
   VkSurfaceCapabilitiesKHR shown_capabilities{};
   blox7::graphics::VulkanTextOverlayCompositor text_overlay;
+  blox7::graphics::VulkanCaptureSwapchains capture;
   blox7::graphics::VulkanEtc2Emulation etc2;
   std::atomic<NotePresentFn> note_present{nullptr};
   std::atomic<NoteHostPresentBeginFn> note_host_present_begin{nullptr};
@@ -561,6 +596,14 @@ void RegisterHostDeviceDispatch(VkDevice device,
       get_device_proc_addr(device, "vkResetCommandBuffer"));
   dispatch.allocate_memory = reinterpret_cast<PFN_vkAllocateMemory>(
       get_device_proc_addr(device, "vkAllocateMemory"));
+  dispatch.get_swapchain_images = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
+      get_device_proc_addr(device, "vkGetSwapchainImagesKHR"));
+  dispatch.get_refresh_cycle_duration =
+      reinterpret_cast<PFN_vkGetRefreshCycleDurationGOOGLE>(
+          get_device_proc_addr(device, "vkGetRefreshCycleDurationGOOGLE"));
+  dispatch.get_past_presentation_timing =
+      reinterpret_cast<PFN_vkGetPastPresentationTimingGOOGLE>(
+          get_device_proc_addr(device, "vkGetPastPresentationTimingGOOGLE"));
 
   AdapterState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
@@ -906,6 +949,9 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
   BLOX7_VK_PROC(vkGetDeviceQueue2)
   BLOX7_VK_PROC(vkCreateSwapchainKHR)
   BLOX7_VK_PROC(vkDestroySwapchainKHR)
+  BLOX7_VK_PROC(vkGetSwapchainImagesKHR)
+  BLOX7_VK_PROC(vkGetRefreshCycleDurationGOOGLE)
+  BLOX7_VK_PROC(vkGetPastPresentationTimingGOOGLE)
   BLOX7_VK_PROC(vkAcquireNextImageKHR)
   BLOX7_VK_PROC(vkAcquireNextImage2KHR)
   BLOX7_VK_PROC(vkWaitForFences)
@@ -1020,6 +1066,9 @@ bool IsDeviceAdapterProc(const char* name) {
                              std::strcmp(name, "vkGetDeviceQueue2") == 0 ||
                              std::strcmp(name, "vkCreateSwapchainKHR") == 0 ||
                              std::strcmp(name, "vkDestroySwapchainKHR") == 0 ||
+                             std::strcmp(name, "vkGetSwapchainImagesKHR") == 0 ||
+                             std::strcmp(name, "vkGetRefreshCycleDurationGOOGLE") == 0 ||
+                             std::strcmp(name, "vkGetPastPresentationTimingGOOGLE") == 0 ||
                              std::strcmp(name, "vkAcquireNextImageKHR") == 0 ||
                              std::strcmp(name, "vkAcquireNextImage2KHR") == 0 ||
                              std::strcmp(name, "vkWaitForFences") == 0 ||
@@ -1754,6 +1803,10 @@ vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
     VkInstance instance, const void* create_info,
     const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.CreateSurface(create_info, surface, &captured)) {
+    return captured;
+  }
   if (!EnsureInitialized()) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -1780,6 +1833,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
 VKAPI_ATTR void VKAPI_CALL
 vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
                     const VkAllocationCallbacks* allocator) {
+  if (State().capture.DestroySurface(surface)) {
+    return;
+  }
   if (!EnsureInitialized()) {
     return;
   }
@@ -1869,6 +1925,24 @@ vkGetInstanceProcAddr(VkInstance instance, const char* name) {
                                  vkGetPhysicalDeviceSurfacePresentModesKHR)
                            : nullptr;
   }
+#define BLOX7_SURFACE_QUERY(function, field)                                \
+  if (name != nullptr && std::strcmp(name, #function) == 0) {               \
+    const PFN_vkVoidFunction host = HostInstanceProc(instance, name);       \
+    AdapterState& state = State();                                          \
+    std::lock_guard<std::mutex> lock(state.mutex);                          \
+    state.field = reinterpret_cast<PFN_##function>(host);                   \
+    return host != nullptr ? reinterpret_cast<PFN_vkVoidFunction>(function) \
+                           : nullptr;                                       \
+  }
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceSupportKHR,
+                      host_surface_support)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceFormatsKHR,
+                      host_surface_formats)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceFormats2KHR,
+                      host_surface_formats2)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceCapabilities2KHR,
+                      host_surface_capabilities2)
+#undef BLOX7_SURFACE_QUERY
   if (const PFN_vkVoidFunction adapter = AdapterProc(name);
       adapter != nullptr) {
     if ((IsDeviceAdapterProc(name) || IsEtc2PhysicalDeviceProc(name)) &&
@@ -2121,6 +2195,10 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
   RegisterHostDeviceDispatch(*device, physical_device,
                              host_get_device_proc_addr, full_screen_exclusive,
                              spare_queue);
+  State().capture.RegisterDevice(instance, physical_device, *device,
+                                 host_get_instance_proc_addr,
+                                 host_get_device_proc_addr, spare_queue,
+                                 &State().spare_queue_mutex);
   VkPhysicalDeviceMemoryProperties memory_properties{};
   if (const auto host_memory_properties =
           reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
@@ -2183,6 +2261,7 @@ vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
   const auto host_destroy = reinterpret_cast<PFN_vkDestroyDevice>(
       HostDeviceProc(device, "vkDestroyDevice"));
   State().text_overlay.DestroyDevice(device);
+  State().capture.DestroyDevice(device);
   State().etc2.DestroyDevice(device);
   std::string key;
   std::int64_t allocations = 0;
@@ -2242,6 +2321,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(VkDevice device,
   host_get_queue(device, queue_family_index, queue_index, queue);
   if (*queue != VK_NULL_HANDLE) {
     RegisterHostQueueBinding(device, *queue);
+    State().capture.RegisterQueue(device, *queue, queue_family_index);
     State().etc2.RegisterQueue(device, *queue, queue_family_index);
     (void)State().text_overlay.RegisterQueue(device, *queue, queue_family_index,
                                              queue_index);
@@ -2258,6 +2338,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
   host_get_queue(device, queue_info, queue);
   if (*queue != VK_NULL_HANDLE) {
     RegisterHostQueueBinding(device, *queue);
+    State().capture.RegisterQueue(device, *queue, queue_info->queueFamilyIndex);
     State().etc2.RegisterQueue(device, *queue, queue_info->queueFamilyIndex);
     (void)State().text_overlay.RegisterQueue(
         device, *queue, queue_info->queueFamilyIndex, queue_info->queueIndex);
@@ -2267,6 +2348,11 @@ VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     VkDevice device, const VkSwapchainCreateInfoKHR* create_info,
     const VkAllocationCallbacks* allocator, VkSwapchainKHR* swapchain) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.CreateSwapchain(device, create_info, swapchain,
+                                      &captured)) {
+    return captured;
+  }
   const auto host_create = reinterpret_cast<PFN_vkCreateSwapchainKHR>(
       HostDeviceProc(device, "vkCreateSwapchainKHR"));
   if (host_create == nullptr || create_info == nullptr ||
@@ -2452,6 +2538,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
 VKAPI_ATTR void VKAPI_CALL
 vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
                       const VkAllocationCallbacks* allocator) {
+  if (State().capture.DestroySwapchain(device, swapchain)) {
+    return;
+  }
   const auto host_destroy = reinterpret_cast<PFN_vkDestroySwapchainKHR>(
       HostDeviceProc(device, "vkDestroySwapchainKHR"));
   State().text_overlay.DestroySwapchain(device, swapchain);
@@ -2490,6 +2579,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
     VkDevice device, VkSwapchainKHR swapchain, std::uint64_t timeout,
     VkSemaphore semaphore, VkFence fence, std::uint32_t* image_index) {
   VulkanCallObservation observation("vkAcquireNextImageKHR");
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.AcquireImage(device, swapchain, timeout, semaphore, fence,
+                                   image_index, &captured)) {
+    observation.SetResult(captured);
+    return captured;
+  }
   VkResult kept = VK_SUCCESS;
   if (TakeHiddenImage(device, swapchain, semaphore, fence, image_index,
                       &kept)) {
@@ -2520,6 +2615,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
     VkDevice device, const VkAcquireNextImageInfoKHR* acquire_info,
     std::uint32_t* image_index) {
   VulkanCallObservation observation("vkAcquireNextImage2KHR");
+  VkResult captured = VK_SUCCESS;
+  if (acquire_info != nullptr &&
+      State().capture.AcquireImage(device, acquire_info->swapchain,
+                                   acquire_info->timeout,
+                                   acquire_info->semaphore, acquire_info->fence,
+                                   image_index, &captured)) {
+    observation.SetResult(captured);
+    return captured;
+  }
   const PFN_vkAcquireNextImage2KHR host_acquire =
       HostDispatchForDevice(device).acquire_next_image2;
   if (host_acquire == nullptr || acquire_info == nullptr) {
@@ -2746,6 +2850,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
+  if (const VkResult signaled =
+          State().capture.BeforeSubmit(queue, submit_count, submits);
+      signaled != VK_SUCCESS) {
+    observation.SetResult(signaled);
+    return signaled;
+  }
   if (submits != nullptr && State().etc2.HasPendingUploads()) {
     if (submit_count == 1) {
       State().etc2.PrepareSubmit(queue, submits->pCommandBuffers,
@@ -2781,6 +2891,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
+  if (const VkResult signaled =
+          State().capture.BeforeSubmit2(queue, submit_count, submits);
+      signaled != VK_SUCCESS) {
+    observation.SetResult(signaled);
+    return signaled;
+  }
   PrepareEtc2Submit2(queue, submit_count, submits);
   const VkResult result = State().text_overlay.QueueSubmit2(
       queue, submit_count, submits, fence, host_submit);
@@ -2797,6 +2913,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2KHR(
   if (host_submit == nullptr) {
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  if (const VkResult signaled =
+          State().capture.BeforeSubmit2(queue, submit_count, submits);
+      signaled != VK_SUCCESS) {
+    observation.SetResult(signaled);
+    return signaled;
   }
   PrepareEtc2Submit2(queue, submit_count, submits);
   const VkResult result = State().text_overlay.QueueSubmit2(
@@ -2815,6 +2937,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(
   if (host_bind == nullptr) {
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  if (const VkResult signaled =
+          State().capture.BeforeBindSparse(queue, bind_info_count, bind_info);
+      signaled != VK_SUCCESS) {
+    observation.SetResult(signaled);
+    return signaled;
   }
   const VkResult result = State().text_overlay.QueueBindSparse(
       queue, bind_info_count, bind_info, fence, host_bind);
@@ -2869,6 +2997,10 @@ void RememberShownCapabilities(VkSurfaceKHR surface, VkResult result,
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
     VkPhysicalDevice physical_device, VkSurfaceKHR surface,
     VkSurfaceCapabilitiesKHR* capabilities) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.SurfaceCapabilities(surface, capabilities, &captured)) {
+    return captured;
+  }
   const WindowHoldsPresentsFn hides =
       State().window_hides_presents.load(std::memory_order_acquire);
   if (hides != nullptr && capabilities != nullptr && hides()) {
@@ -2928,6 +3060,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
     VkPhysicalDevice physical_device, VkSurfaceKHR surface,
     std::uint32_t* present_mode_count, VkPresentModeKHR* present_modes) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.PresentModes(surface, present_mode_count, present_modes,
+                                   &captured)) {
+    return captured;
+  }
   if (present_mode_count == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -2979,8 +3116,138 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
   return copied < visible.size() ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
+    VkPhysicalDevice physical_device, std::uint32_t queue_family_index,
+    VkSurfaceKHR surface, VkBool32* supported) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.SurfaceSupport(physical_device, queue_family_index,
+                                     surface, supported, &captured)) {
+    return captured;
+  }
+  PFN_vkGetPhysicalDeviceSurfaceSupportKHR host_query = nullptr;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    host_query = state.host_surface_support;
+  }
+  return host_query != nullptr ? host_query(physical_device, queue_family_index,
+                                            surface, supported)
+                               : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
+    VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+    std::uint32_t* format_count, VkSurfaceFormatKHR* formats) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.SurfaceFormats(surface, format_count, formats,
+                                     &captured)) {
+    return captured;
+  }
+  PFN_vkGetPhysicalDeviceSurfaceFormatsKHR host_query = nullptr;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    host_query = state.host_surface_formats;
+  }
+  return host_query != nullptr
+             ? host_query(physical_device, surface, format_count, formats)
+             : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
+    VkPhysicalDevice physical_device,
+    const VkPhysicalDeviceSurfaceInfo2KHR* surface_info,
+    std::uint32_t* format_count, VkSurfaceFormat2KHR* formats) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.SurfaceFormats2(surface_info, format_count, formats,
+                                      &captured)) {
+    return captured;
+  }
+  PFN_vkGetPhysicalDeviceSurfaceFormats2KHR host_query = nullptr;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    host_query = state.host_surface_formats2;
+  }
+  return host_query != nullptr
+             ? host_query(physical_device, surface_info, format_count, formats)
+             : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
+    VkPhysicalDevice physical_device,
+    const VkPhysicalDeviceSurfaceInfo2KHR* surface_info,
+    VkSurfaceCapabilities2KHR* capabilities) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.SurfaceCapabilities2(surface_info, capabilities,
+                                           &captured)) {
+    return captured;
+  }
+  PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR host_query = nullptr;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    host_query = state.host_surface_capabilities2;
+  }
+  return host_query != nullptr
+             ? host_query(physical_device, surface_info, capabilities)
+             : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
+    VkDevice device, VkSwapchainKHR swapchain, std::uint32_t* image_count,
+    VkImage* images) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.SwapchainImages(device, swapchain, image_count, images,
+                                      &captured)) {
+    return captured;
+  }
+  const PFN_vkGetSwapchainImagesKHR host_get =
+      HostDispatchForDevice(device).get_swapchain_images;
+  return host_get != nullptr ? host_get(device, swapchain, image_count, images)
+                             : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetRefreshCycleDurationGOOGLE(
+    VkDevice device, VkSwapchainKHR swapchain,
+    VkRefreshCycleDurationGOOGLE* display_timing_properties) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.RefreshCycle(device, swapchain, display_timing_properties,
+                                   &captured)) {
+    return captured;
+  }
+  const PFN_vkGetRefreshCycleDurationGOOGLE host_get =
+      HostDispatchForDevice(device).get_refresh_cycle_duration;
+  return host_get != nullptr
+             ? host_get(device, swapchain, display_timing_properties)
+             : VK_ERROR_INITIALIZATION_FAILED;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPastPresentationTimingGOOGLE(
+    VkDevice device, VkSwapchainKHR swapchain,
+    std::uint32_t* presentation_timing_count,
+    VkPastPresentationTimingGOOGLE* presentation_timings) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.PastPresentationTiming(device, swapchain,
+                                             presentation_timing_count,
+                                             presentation_timings, &captured)) {
+    return captured;
+  }
+  const PFN_vkGetPastPresentationTimingGOOGLE host_get =
+      HostDispatchForDevice(device).get_past_presentation_timing;
+  return host_get != nullptr
+             ? host_get(device, swapchain, presentation_timing_count,
+                        presentation_timings)
+             : VK_ERROR_INITIALIZATION_FAILED;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL
 vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* present_info) {
+  VkResult captured = VK_SUCCESS;
+  if (State().capture.QueuePresent(queue, present_info, vkQueuePresentKHR,
+                                   &captured)) {
+    return captured;
+  }
   VkResult kept = VK_SUCCESS;
   if (KeepHiddenPresent(queue, present_info, &kept)) {
     return kept;

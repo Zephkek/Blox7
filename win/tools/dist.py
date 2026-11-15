@@ -47,7 +47,7 @@ for name in ('libEGL.so', 'libGLESv2.so', 'libOpenMAXAL.so', 'libOpenSLES.so', '
         put(os.path.join(MB, name), LIB, strip=True)
         if name in ('libblox7_audio_sdl.so', 'libEGL.so', 'liblog.so'):
             put(os.path.join(MB, name), BIN, strip=True)
-for name in ('libavcodec.so', 'libavutil.so'):
+for name in ('libavcodec.so', 'libavutil.so', 'libswscale.so'):
     put(os.path.join(deps.PREFIX, 'lib', name), LIB, strip=True)
 put(os.path.join(MB, 'blox7_updater'), LIB, strip=True)
 put(os.path.join(OUT, 'blox7_webview_helper.exe'), LIB)

@@ -19,8 +19,8 @@ struct AMediaFormat {
 };
 
 struct AMediaCodec {
-  AMediaCodec(CodecKind kind, std::string name)
-      : codec(kind, std::move(name)) {}
+  AMediaCodec(CodecKind kind, std::string name, bool encoder)
+      : codec(kind, std::move(name), encoder) {}
   blox7::media::MediaCodec codec;
 };
 
@@ -108,10 +108,11 @@ void AMediaFormat_setBuffer(AMediaFormat* format, const char* name,
 
 AMediaCodec* AMediaCodec_createCodecByName(const char* name) {
   CodecKind kind;
-  if (name == nullptr || !blox7::media::KindForName(name, &kind)) {
+  bool encoder = false;
+  if (name == nullptr || !blox7::media::KindForName(name, &kind, &encoder)) {
     return nullptr;
   }
-  return new (std::nothrow) AMediaCodec(kind, name);
+  return new (std::nothrow) AMediaCodec(kind, name, encoder);
 }
 
 AMediaCodec* AMediaCodec_createDecoderByType(const char* mime_type) {
@@ -119,10 +120,19 @@ AMediaCodec* AMediaCodec_createDecoderByType(const char* mime_type) {
   if (mime_type == nullptr || !blox7::media::KindForMime(mime_type, &kind)) {
     return nullptr;
   }
-  return new (std::nothrow) AMediaCodec(kind, blox7::media::CodecName(kind));
+  return new (std::nothrow)
+      AMediaCodec(kind, blox7::media::CodecName(kind), false);
 }
 
-AMediaCodec* AMediaCodec_createEncoderByType(const char*) { return nullptr; }
+AMediaCodec* AMediaCodec_createEncoderByType(const char* mime_type) {
+  CodecKind kind;
+  if (mime_type == nullptr || !blox7::media::KindForMime(mime_type, &kind) ||
+      kind == CodecKind::kHevc) {
+    return nullptr;
+  }
+  return new (std::nothrow)
+      AMediaCodec(kind, blox7::media::EncoderName(kind), true);
+}
 
 media_status_t AMediaCodec_delete(AMediaCodec* codec) {
   delete codec;
@@ -152,6 +162,19 @@ media_status_t AMediaCodec_stop(AMediaCodec* codec) {
 
 media_status_t AMediaCodec_flush(AMediaCodec* codec) {
   return codec != nullptr ? codec->codec.Flush()
+                          : AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+media_status_t AMediaCodec_createInputSurface(AMediaCodec* codec,
+                                              ANativeWindow** surface) {
+  if (codec == nullptr || surface == nullptr) {
+    return AMEDIA_ERROR_INVALID_PARAMETER;
+  }
+  return codec->codec.CreateInputSurface(surface);
+}
+
+media_status_t AMediaCodec_signalEndOfInputStream(AMediaCodec* codec) {
+  return codec != nullptr ? codec->codec.SignalEndOfInputStream()
                           : AMEDIA_ERROR_INVALID_OBJECT;
 }
 

@@ -14,19 +14,26 @@ struct Family {
   const char* markers[4];
   const char* avc;
   const char* hevc;
+  const char* avc_encoder;
 };
 
 const Family kFamilies[] = {
     {{"snapdragon", "qualcomm", "qcom", nullptr},
      "c2.qti.avc.decoder",
-     "c2.qti.hevc.decoder"},
+     "c2.qti.hevc.decoder",
+     "c2.qti.avc.encoder"},
     {{"mediatek", "helio", "dimensity", nullptr},
      "c2.mtk.avc.decoder",
-     "c2.mtk.hevc.decoder"},
-    {{nullptr}, "c2.exynos.h264.decoder", "c2.exynos.hevc.decoder"},
+     "c2.mtk.hevc.decoder",
+     "c2.mtk.avc.encoder"},
+    {{nullptr},
+     "c2.exynos.h264.decoder",
+     "c2.exynos.hevc.decoder",
+     "c2.exynos.h264.encoder"},
 };
 
 constexpr const char* kAacName = "c2.android.aac.decoder";
+constexpr const char* kAacEncoderName = "c2.android.aac.encoder";
 
 const Family& DeviceFamily() {
   const char* value = std::getenv("BLOX7_DEVICE_SOC_MODEL");
@@ -59,7 +66,8 @@ bool KindForMime(const char* mime, CodecKind* kind) {
   return true;
 }
 
-bool KindForName(const char* name, CodecKind* kind) {
+bool KindForName(const char* name, CodecKind* kind, bool* encoder) {
+  *encoder = false;
   for (const Family& family : kFamilies) {
     if (std::strcmp(name, family.avc) == 0) {
       *kind = CodecKind::kAvc;
@@ -69,9 +77,19 @@ bool KindForName(const char* name, CodecKind* kind) {
       *kind = CodecKind::kHevc;
       return true;
     }
+    if (std::strcmp(name, family.avc_encoder) == 0) {
+      *kind = CodecKind::kAvc;
+      *encoder = true;
+      return true;
+    }
   }
   if (std::strcmp(name, kAacName) == 0) {
     *kind = CodecKind::kAac;
+    return true;
+  }
+  if (std::strcmp(name, kAacEncoderName) == 0) {
+    *kind = CodecKind::kAac;
+    *encoder = true;
     return true;
   }
   return false;
@@ -97,6 +115,18 @@ std::string CodecName(CodecKind kind) {
       return DeviceFamily().hevc;
     case CodecKind::kAac:
       return kAacName;
+  }
+  return "";
+}
+
+std::string EncoderName(CodecKind kind) {
+  switch (kind) {
+    case CodecKind::kAvc:
+      return DeviceFamily().avc_encoder;
+    case CodecKind::kHevc:
+      return "";
+    case CodecKind::kAac:
+      return kAacEncoderName;
   }
   return "";
 }

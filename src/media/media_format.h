@@ -17,6 +17,7 @@ class MediaFormat {
 
   void Set(const char* key, Value value);
   bool GetInt32(const char* key, std::int32_t* out) const;
+  bool GetFloat(const char* key, float* out) const;
   const Buffer* GetBuffer(const char* key) const;
   std::string ToString() const;
 

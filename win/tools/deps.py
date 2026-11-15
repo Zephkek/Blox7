@@ -14,6 +14,8 @@ NASM = os.environ.get('BLOX7_NASM', 'D:/toolchains/nasm-3.02/nasm.exe')
 BASH = os.environ.get('BLOX7_BASH', 'C:/Program Files/Git/bin/bash.exe')
 MINGW = os.environ.get('BLOX7_MINGW', 'D:/toolchains/llvm-mingw-20261020-msvcrt-x86_64')
 FFMPEG_BUILD = os.environ.get('BLOX7_FFMPEG_BUILD', 'D:/toolchains/build/ffmpeg')
+MESON = os.environ.get('BLOX7_MESON', 'D:/toolchains/meson-venv/Scripts/meson.exe')
+OPENH264_BUILD = os.environ.get('BLOX7_OPENH264_BUILD', 'D:/toolchains/build/openh264')
 
 COMMON = [
     '-G', 'Ninja', f'-DCMAKE_MAKE_PROGRAM={NINJA}',
@@ -49,13 +51,13 @@ DEPS = [
 
 FFMPEG = ['--target-os=android', '--arch=x86_64', '--enable-cross-compile', '--enable-pic', '--enable-shared',
           '--disable-static', '--disable-programs', '--disable-doc', '--disable-network', '--disable-autodetect',
-          '--disable-everything', '--enable-decoder=h264,hevc,aac', '--disable-avdevice', '--disable-avformat',
-          '--disable-avfilter', '--disable-swscale', '--disable-swresample', '--disable-stripping']
+          '--disable-everything', '--enable-decoder=h264,hevc,aac', '--enable-encoder=aac', '--disable-avdevice',
+          '--disable-avformat', '--disable-avfilter', '--disable-swresample', '--disable-stripping']
 
 
-def run(cmd, cwd=None):
+def run(cmd, cwd=None, env=None):
     print('>', ' '.join(cmd[:4]), '...', flush=True)
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
     if p.returncode:
         print(p.stdout[-4000:])
         print(p.stderr[-4000:])
@@ -106,15 +108,38 @@ def build_ffmpeg():
                           f'{shlex.quote(make)} -j{os.cpu_count()}', f'{shlex.quote(make)} install'])
     run([BASH, '-c', script], cwd=FFMPEG_BUILD)
     shutil.copytree(f'{stage}/include', f'{PREFIX}/include', dirs_exist_ok=True)
-    for lib in ('libavcodec.so', 'libavutil.so'):
+    for lib in ('libavcodec.so', 'libavutil.so', 'libswscale.so'):
         shutil.copy2(f'{stage}/lib/{lib}', f'{PREFIX}/lib/{lib}')
     print('ffmpeg: installed')
 
 
+def build_openh264():
+    tc = f'{NDK}/toolchains/llvm/prebuilt/windows-x86_64/bin'
+    target = "'--target=x86_64-none-linux-android28'"
+    os.makedirs(OPENH264_BUILD, exist_ok=True)
+    cross = f'{OPENH264_BUILD}/cross.ini'
+    with open(cross, 'w', encoding='utf-8') as f:
+        f.write(f"[binaries]\nc = '{tc}/clang.exe'\ncpp = '{tc}/clang++.exe'\nar = '{tc}/llvm-ar.exe'\n"
+                f"strip = '{tc}/llvm-strip.exe'\nnasm = '{NASM}'\n\n[built-in options]\n"
+                f"c_args = [{target}]\ncpp_args = [{target}]\nc_link_args = [{target}]\ncpp_link_args = [{target}]\n\n"
+                "[host_machine]\nsystem = 'android'\ncpu_family = 'x86_64'\ncpu = 'x86_64'\nendian = 'little'\n")
+    out = f'{OPENH264_BUILD}/out'
+    env = {**os.environ, 'NINJA': NINJA}
+    if not os.path.exists(f'{out}/build.ninja'):
+        run([MESON, 'setup', out, f'{SRC}/openh264', '--cross-file', cross, '--buildtype', 'release',
+             '-Ddefault_library=static', '-Dtests=disabled'], env=env)
+    run([MESON, 'compile', '-C', out], env=env)
+    shutil.copytree(f'{SRC}/openh264/codec/api/wels', f'{PREFIX}/include/wels', dirs_exist_ok=True)
+    shutil.copy2(f'{out}/libopenh264.a', f'{PREFIX}/lib/libopenh264.a')
+    print('openh264: installed')
+
+
 if __name__ == '__main__':
-    wanted = sys.argv[1:] or [d[0] for d in DEPS] + ['ffmpeg']
+    wanted = sys.argv[1:] or [d[0] for d in DEPS] + ['openh264', 'ffmpeg']
     for name, src, extra in DEPS:
         if name in wanted:
             build(name, src, extra)
+    if 'openh264' in wanted:
+        build_openh264()
     if 'ffmpeg' in wanted:
         build_ffmpeg()

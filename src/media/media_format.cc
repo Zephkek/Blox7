@@ -33,6 +33,23 @@ bool MediaFormat::GetInt32(const char* key, std::int32_t* out) const {
   return true;
 }
 
+bool MediaFormat::GetFloat(const char* key, float* out) const {
+  const Value* value = Find(key);
+  if (value == nullptr) {
+    return false;
+  }
+  if (const auto* f = std::get_if<float>(value)) {
+    *out = *f;
+  } else if (const auto* i32 = std::get_if<std::int32_t>(value)) {
+    *out = static_cast<float>(*i32);
+  } else if (const auto* i64 = std::get_if<std::int64_t>(value)) {
+    *out = static_cast<float>(*i64);
+  } else {
+    return false;
+  }
+  return true;
+}
+
 const MediaFormat::Buffer* MediaFormat::GetBuffer(const char* key) const {
   const Value* value = Find(key);
   return value != nullptr ? std::get_if<Buffer>(value) : nullptr;

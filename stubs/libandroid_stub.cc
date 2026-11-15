@@ -29,6 +29,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "blox7/media/encoder_surface.h"
+
 struct AAssetManager {};
 struct AAsset {
   std::string path;
@@ -301,6 +303,13 @@ int Blox7WindowHeight() {
   static Fn cached_fn = nullptr;
   Fn fn = ResolveCached(&cached_fn, "blox7_window_height");
   return fn != nullptr ? fn() : 720;
+}
+
+const Blox7EncoderSurface* EncoderSurface(const void* window) {
+  static Blox7EncoderSurfaceLookup cached_fn = nullptr;
+  const Blox7EncoderSurfaceLookup fn =
+      ResolveCached(&cached_fn, BLOX7_ENCODER_SURFACE_SYMBOL);
+  return fn != nullptr && window != nullptr ? fn(window) : nullptr;
 }
 
 bool Blox7UsesDirectVulkan() {
@@ -1009,8 +1018,17 @@ struct ANativeWindow {
   char unused;
 };
 
-void ANativeWindow_acquire(ANativeWindow*) {}
-void ANativeWindow_release(ANativeWindow*) {}
+void ANativeWindow_acquire(ANativeWindow* window) {
+  if (const Blox7EncoderSurface* surface = EncoderSurface(window)) {
+    surface->acquire(window);
+  }
+}
+
+void ANativeWindow_release(ANativeWindow* window) {
+  if (const Blox7EncoderSurface* surface = EncoderSurface(window)) {
+    surface->release(window);
+  }
+}
 
 struct AHardwareBuffer;
 
@@ -1048,6 +1066,11 @@ ANativeWindow* ANativeWindow_fromSurface(void* env, void* surface) {
 }
 
 int32_t ANativeWindow_getWidth(ANativeWindow* window) {
+  if (const Blox7EncoderSurface* surface = EncoderSurface(window)) {
+    int32_t width = 0;
+    surface->size(window, &width, nullptr);
+    return width;
+  }
   int width = Blox7WindowWidth();
   if (TraceEnabled()) {
     std::fprintf(stderr,
@@ -1058,6 +1081,11 @@ int32_t ANativeWindow_getWidth(ANativeWindow* window) {
 }
 
 int32_t ANativeWindow_getHeight(ANativeWindow* window) {
+  if (const Blox7EncoderSurface* surface = EncoderSurface(window)) {
+    int32_t height = 0;
+    surface->size(window, nullptr, &height);
+    return height;
+  }
   int height = Blox7WindowHeight();
   if (TraceEnabled()) {
     std::fprintf(stderr,

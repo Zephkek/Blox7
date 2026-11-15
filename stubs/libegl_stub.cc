@@ -5,6 +5,8 @@
 #include <cstring>
 #include <dlfcn.h>
 
+#include "blox7/media/encoder_surface.h"
+
 using EGLBoolean = uint32_t;
 using EGLint = int32_t;
 using EGLenum = uint32_t;
@@ -25,6 +27,7 @@ constexpr EGLint kEglNotInitialized = 0x3001;
 constexpr EGLint kEglBadDisplay = 0x3008;
 constexpr EGLint kEglBadAttribute = 0x3004;
 constexpr EGLint kEglBadMatch = 0x3009;
+constexpr EGLint kEglBadNativeWindow = 0x300B;
 constexpr EGLint kEglConfigId = 0x3028;
 constexpr EGLint kEglRedSize = 0x3024;
 constexpr EGLint kEglGreenSize = 0x3023;
@@ -302,6 +305,20 @@ EGLSurface eglCreateWindowSurface(EGLDisplay display, EGLConfig config,
   if (!IsActiveDisplay(display) || config == nullptr ||
       config != ActiveConfig()) {
     SetError(kEglBadDisplay);
+    return nullptr;
+  }
+  static Blox7EncoderSurfaceLookup encoder_surface = nullptr;
+  const Blox7EncoderSurfaceLookup lookup =
+      ResolveCached(&encoder_surface, BLOX7_ENCODER_SURFACE_SYMBOL);
+  if (lookup != nullptr && native_window != nullptr &&
+      lookup(native_window) != nullptr) {
+    if (TraceEnabled()) {
+      fprintf(stderr,
+              "[eglstub] eglCreateWindowSurface native_window=%p is an "
+              "encoder surface, refused\n",
+              native_window);
+    }
+    SetError(kEglBadNativeWindow);
     return nullptr;
   }
   EGLSurface surface = ActiveSurface();
