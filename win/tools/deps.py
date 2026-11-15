@@ -1,6 +1,6 @@
 """builds the third-party libs for android x86_64 api 28 with the ndk
 usage: deps.py [name ...]"""
-import os, subprocess, sys
+import os, shlex, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WIN = os.path.dirname(HERE)
@@ -10,6 +10,10 @@ NINJA = os.environ.get('BLOX7_NINJA',
                        'C:/Program Files/Microsoft Visual Studio/18/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe')
 PREFIX = os.path.join(WIN, 'out', 'deps').replace('\\', '/')
 BUILD = os.path.join(WIN, 'out', 'deps-build')
+NASM = os.environ.get('BLOX7_NASM', 'D:/toolchains/nasm-3.02/nasm.exe')
+BASH = os.environ.get('BLOX7_BASH', 'C:/Program Files/Git/bin/bash.exe')
+MINGW = os.environ.get('BLOX7_MINGW', 'D:/toolchains/llvm-mingw-20261020-msvcrt-x86_64')
+FFMPEG_BUILD = os.environ.get('BLOX7_FFMPEG_BUILD', 'D:/toolchains/build/ffmpeg')
 
 COMMON = [
     '-G', 'Ninja', f'-DCMAKE_MAKE_PROGRAM={NINJA}',
@@ -42,6 +46,11 @@ DEPS = [
                           '-DPNG_FRAMEWORK=OFF', f'-DZLIB_ROOT={PREFIX}']),
     ('extra', os.path.join(WIN, 'cmake', 'extra-deps'), [f'-DZLIB_SOURCE_DIR={SRC}/zlib']),
 ]
+
+FFMPEG = ['--target-os=android', '--arch=x86_64', '--enable-cross-compile', '--enable-pic', '--enable-shared',
+          '--disable-static', '--disable-programs', '--disable-doc', '--disable-network', '--disable-autodetect',
+          '--disable-everything', '--enable-decoder=h264,hevc,aac', '--disable-avdevice', '--disable-avformat',
+          '--disable-avfilter', '--disable-swscale', '--disable-swresample', '--disable-stripping']
 
 
 def run(cmd, cwd=None):
@@ -81,8 +90,31 @@ def build(name, src, extra):
     print(f'{name}: installed')
 
 
+def build_ffmpeg():
+    tc = f'{NDK}/toolchains/llvm/prebuilt/windows-x86_64/bin'
+    make = f'{NDK}/prebuilt/windows-x86_64/bin/make.exe'
+    stage = f'{FFMPEG_BUILD}/stage'
+    os.makedirs(stage, exist_ok=True)
+    if not os.path.exists(f'{FFMPEG_BUILD}/src'):
+        run(['cmd', '/c', 'mklink', '/J', os.path.normpath(f'{FFMPEG_BUILD}/src'), os.path.normpath(f'{SRC}/ffmpeg')])
+    target = '--target=x86_64-none-linux-android28'
+    args = [f'--prefix={stage}', f'--cc={tc}/clang.exe', f'--ld={tc}/clang.exe', f'--ar={tc}/llvm-ar.exe',
+            f'--nm={tc}/llvm-nm.exe', f'--ranlib={tc}/llvm-ranlib.exe', f'--strip={tc}/llvm-strip.exe',
+            f'--x86asmexe={NASM}', f'--host-cc={MINGW}/bin/clang.exe', f'--extra-cflags={target}',
+            f'--extra-ldflags={target} -Wl,--pack-dyn-relocs=relr'] + FFMPEG
+    script = ' && '.join([shlex.join(['src/configure'] + args),
+                          f'{shlex.quote(make)} -j{os.cpu_count()}', f'{shlex.quote(make)} install'])
+    run([BASH, '-c', script], cwd=FFMPEG_BUILD)
+    shutil.copytree(f'{stage}/include', f'{PREFIX}/include', dirs_exist_ok=True)
+    for lib in ('libavcodec.so', 'libavutil.so'):
+        shutil.copy2(f'{stage}/lib/{lib}', f'{PREFIX}/lib/{lib}')
+    print('ffmpeg: installed')
+
+
 if __name__ == '__main__':
-    wanted = sys.argv[1:] or [d[0] for d in DEPS]
+    wanted = sys.argv[1:] or [d[0] for d in DEPS] + ['ffmpeg']
     for name, src, extra in DEPS:
         if name in wanted:
             build(name, src, extra)
+    if 'ffmpeg' in wanted:
+        build_ffmpeg()

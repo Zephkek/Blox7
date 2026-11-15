@@ -41,6 +41,11 @@ PARTS = [
     ('HarfBuzz', 'https://harfbuzz.github.io', 'Text shaping, inside SDL3_ttf.dll.', [f'{LIC}/harfbuzz.txt']),
     ('JSON for Modern C++', 'https://github.com/nlohmann/json', 'JSON parsing.', [f'{SRC}/json/LICENSE.MIT']),
     ('libpng', 'http://www.libpng.org/pub/png/libpng.html', 'PNG images.', [f'{SRC}/libpng/LICENSE']),
+    ('FFmpeg', 'https://ffmpeg.org', 'H.264, HEVC and AAC decoding for Roblox videos (libavcodec.so and '
+     'libavutil.so). FFmpeg 8.1.3, unmodified, built as shared libraries with only those three decoders and no '
+     'GPL parts, under the LGPL 2.1 or later. Its source is at https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz '
+     'and the build options are in Blox7\'s win/tools/deps.py.',
+     [f'{SRC}/ffmpeg/LICENSE.md', f'{SRC}/ffmpeg/COPYING.LGPLv2.1']),
     ('SDL3', 'https://libsdl.org', 'Windows, input, audio and graphics setup (SDL3.dll).',
      [f'{SRC}/sdl3-win/LICENSE.txt']),
     ('SDL3_ttf', 'https://github.com/libsdl-org/SDL_ttf', 'Text rendering (SDL3_ttf.dll).',

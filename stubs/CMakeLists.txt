@@ -87,8 +87,28 @@ add_library(stub_log SHARED liblog_stub.cc)
 configure_stub(stub_log "liblog.so")
 target_include_directories(stub_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
-add_library(stub_mediandk SHARED libmediandk_stub.cc)
+add_library(stub_mediandk SHARED
+  libmediandk_stub.cc
+  ${CMAKE_SOURCE_DIR}/src/media/codec_names.cc
+  ${CMAKE_SOURCE_DIR}/src/media/ffmpeg_decoder.cc
+  ${CMAKE_SOURCE_DIR}/src/media/media_codec.cc
+  ${CMAKE_SOURCE_DIR}/src/media/media_format.cc
+  ${CMAKE_SOURCE_DIR}/src/media/mediandk.cc
+)
 configure_stub(stub_mediandk "libmediandk.so")
+find_path(BLOX7_AVCODEC_INCLUDE_DIR libavcodec/avcodec.h REQUIRED)
+find_library(BLOX7_AVCODEC_LIBRARY avcodec REQUIRED)
+find_library(BLOX7_AVUTIL_LIBRARY avutil REQUIRED)
+target_include_directories(stub_mediandk PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${BLOX7_AVCODEC_INCLUDE_DIR}
+)
+target_compile_options(stub_mediandk PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+target_link_libraries(stub_mediandk PRIVATE
+  ${BLOX7_AVCODEC_LIBRARY}
+  ${BLOX7_AVUTIL_LIBRARY}
+  Threads::Threads
+)
 
 add_library(stub_openmax SHARED libopensl_stub.cc)
 configure_stub(stub_openmax "libOpenMAXAL.so")
