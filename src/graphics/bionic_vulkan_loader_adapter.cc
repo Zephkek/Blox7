@@ -139,6 +139,7 @@ using NoteHostPresentEndFn = void (*)(std::int32_t);
 using NoteVulkanCallBeginFn = std::uint64_t (*)(const char*);
 using NoteVulkanCallEndFn = void (*)(std::uint64_t, std::int32_t);
 using NoteSurfaceOutOfDateFn = void (*)();
+using WindowHoldsPresentsFn = bool (*)();
 using WindowDimensionFn = int (*)();
 
 #if defined(BLOX7_WIN32)
@@ -159,6 +160,7 @@ struct AdapterState {
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;
     bool full_screen_exclusive = false;
+    VkQueue spare_queue = VK_NULL_HANDLE;
     PFN_vkQueuePresentKHR queue_present = nullptr;
     PFN_vkQueueSubmit queue_submit = nullptr;
     PFN_vkQueueSubmit2 queue_submit2 = nullptr;
@@ -222,6 +224,12 @@ struct AdapterState {
   std::unordered_map<VkDevice, std::string> device_keys;
   std::unordered_map<VkDevice, std::int64_t> device_allocations;
   std::unordered_map<VkSwapchainKHR, VkSurfaceKHR> swapchain_surfaces;
+  std::unordered_map<VkSwapchainKHR, std::vector<std::uint32_t>>
+      hidden_images;
+  std::atomic<std::size_t> hidden_image_count{0};
+  std::mutex spare_queue_mutex;
+  VkSurfaceKHR shown_surface = VK_NULL_HANDLE;
+  VkSurfaceCapabilitiesKHR shown_capabilities{};
   blox7::graphics::VulkanTextOverlayCompositor text_overlay;
   blox7::graphics::VulkanEtc2Emulation etc2;
   std::atomic<NotePresentFn> note_present{nullptr};
@@ -230,6 +238,8 @@ struct AdapterState {
   std::atomic<NoteVulkanCallBeginFn> note_vulkan_call_begin{nullptr};
   std::atomic<NoteVulkanCallEndFn> note_vulkan_call_end{nullptr};
   std::atomic<NoteSurfaceOutOfDateFn> note_surface_out_of_date{nullptr};
+  std::atomic<WindowHoldsPresentsFn> window_holds_presents{nullptr};
+  std::atomic<WindowHoldsPresentsFn> window_hides_presents{nullptr};
   bool extent_translation_logged = false;
   bool present_policy_logged = false;
   bool initialized = false;
@@ -245,6 +255,18 @@ AdapterState& State() {
 template <typename Function>
 Function ResolveProcessFunction(const char* name) {
   return reinterpret_cast<Function>(dlsym(RTLD_DEFAULT, name));
+}
+
+void WaitWhileWindowHoldsPresents() {
+  const WindowHoldsPresentsFn holds =
+      State().window_holds_presents.load(std::memory_order_acquire);
+  if (holds == nullptr) {
+    return;
+  }
+  const timespec pause{0, 1000000};
+  while (holds()) {
+    nanosleep(&pause, nullptr);
+  }
 }
 
 bool EnsureInitialized() {
@@ -281,6 +303,14 @@ bool EnsureInitialized() {
   state.note_surface_out_of_date.store(
       ResolveProcessFunction<NoteSurfaceOutOfDateFn>(
           "blox7_window_note_vulkan_surface_out_of_date"),
+      std::memory_order_release);
+  state.window_holds_presents.store(
+      ResolveProcessFunction<WindowHoldsPresentsFn>(
+          "blox7_window_holds_presents"),
+      std::memory_order_release);
+  state.window_hides_presents.store(
+      ResolveProcessFunction<WindowHoldsPresentsFn>(
+          "blox7_window_hides_presents"),
       std::memory_order_release);
   if (backend_window == nullptr || uses_direct_vulkan == nullptr ||
       !uses_direct_vulkan() || backend_window() == nullptr) {
@@ -475,7 +505,8 @@ const AdapterState::DeviceDispatch& HostDispatchForCommandBuffer(
 void RegisterHostDeviceDispatch(VkDevice device,
                                 VkPhysicalDevice physical_device,
                                 PFN_vkGetDeviceProcAddr get_device_proc_addr,
-                                bool full_screen_exclusive) {
+                                bool full_screen_exclusive,
+                                VkQueue spare_queue) {
   if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr) {
     return;
   }
@@ -483,6 +514,7 @@ void RegisterHostDeviceDispatch(VkDevice device,
   dispatch.device = device;
   dispatch.physical_device = physical_device;
   dispatch.full_screen_exclusive = full_screen_exclusive;
+  dispatch.spare_queue = spare_queue;
   dispatch.queue_present = reinterpret_cast<PFN_vkQueuePresentKHR>(
       get_device_proc_addr(device, "vkQueuePresentKHR"));
   dispatch.queue_submit = reinterpret_cast<PFN_vkQueueSubmit>(
@@ -543,6 +575,104 @@ void RegisterHostDeviceDispatch(VkDevice device,
     state.device_dispatches.push_back(dispatch);
   }
   InvalidateFastDispatchCaches();
+}
+
+void PaceHiddenPresents() {
+  static std::atomic<std::uint64_t> next_ns{0};
+  constexpr std::uint64_t kFrameNs = 16666667;
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  const std::uint64_t now_ns =
+      static_cast<std::uint64_t>(now.tv_sec) * 1000000000ULL +
+      static_cast<std::uint64_t>(now.tv_nsec);
+  const std::uint64_t due = next_ns.load(std::memory_order_relaxed);
+  if (due > now_ns && due - now_ns <= kFrameNs) {
+    const timespec pause{0, static_cast<long>(due - now_ns)};
+    nanosleep(&pause, nullptr);
+    next_ns.store(due + kFrameNs, std::memory_order_relaxed);
+    return;
+  }
+  next_ns.store(now_ns + kFrameNs, std::memory_order_relaxed);
+}
+
+bool KeepHiddenPresent(VkQueue queue, const VkPresentInfoKHR* present_info,
+                       VkResult* result) {
+  const WindowHoldsPresentsFn hides =
+      State().window_hides_presents.load(std::memory_order_acquire);
+  if (hides == nullptr || present_info == nullptr || !hides()) {
+    return false;
+  }
+  const AdapterState::DeviceDispatch& dispatch = HostDispatchForQueue(queue);
+  const PFN_vkQueueSubmit host_submit = dispatch.queue_submit;
+  if (dispatch.spare_queue == VK_NULL_HANDLE || host_submit == nullptr) {
+    return false;
+  }
+  if (present_info->waitSemaphoreCount != 0) {
+    const std::vector<VkPipelineStageFlags> stages(
+        present_info->waitSemaphoreCount, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.waitSemaphoreCount = present_info->waitSemaphoreCount;
+    submit.pWaitSemaphores = present_info->pWaitSemaphores;
+    submit.pWaitDstStageMask = stages.data();
+    const VkResult status = host_submit(queue, 1, &submit, VK_NULL_HANDLE);
+    if (status != VK_SUCCESS) {
+      *result = status;
+      return true;
+    }
+  }
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    for (std::uint32_t index = 0; index < present_info->swapchainCount;
+         ++index) {
+      state.hidden_images[present_info->pSwapchains[index]].push_back(
+          present_info->pImageIndices[index]);
+    }
+    state.hidden_image_count.fetch_add(present_info->swapchainCount,
+                                       std::memory_order_release);
+  }
+  if (present_info->pResults != nullptr) {
+    std::fill(present_info->pResults,
+              present_info->pResults + present_info->swapchainCount,
+              VK_SUCCESS);
+  }
+  PaceHiddenPresents();
+  *result = VK_SUCCESS;
+  return true;
+}
+
+bool TakeHiddenImage(VkDevice device, VkSwapchainKHR swapchain,
+                     VkSemaphore semaphore, VkFence fence,
+                     std::uint32_t* image_index, VkResult* result) {
+  AdapterState& state = State();
+  if (state.hidden_image_count.load(std::memory_order_acquire) == 0) {
+    return false;
+  }
+  const AdapterState::DeviceDispatch& dispatch = HostDispatchForDevice(device);
+  const VkQueue spare_queue = dispatch.spare_queue;
+  const PFN_vkQueueSubmit host_submit = dispatch.queue_submit;
+  if (spare_queue == VK_NULL_HANDLE || host_submit == nullptr ||
+      image_index == nullptr) {
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    const auto found = state.hidden_images.find(swapchain);
+    if (found == state.hidden_images.end() || found->second.empty()) {
+      return false;
+    }
+    *image_index = found->second.front();
+    found->second.erase(found->second.begin());
+    state.hidden_image_count.fetch_sub(1, std::memory_order_release);
+  }
+  VkSubmitInfo submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.signalSemaphoreCount = semaphore != VK_NULL_HANDLE ? 1 : 0;
+  submit.pSignalSemaphores = &semaphore;
+  std::lock_guard<std::mutex> lock(state.spare_queue_mutex);
+  *result = host_submit(spare_queue, 1, &submit, fence);
+  return true;
 }
 
 void RegisterHostQueueBinding(VkDevice device, VkQueue queue) {
@@ -1439,6 +1569,9 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.device_keys.clear();
   state.device_allocations.clear();
   state.swapchain_surfaces.clear();
+  state.hidden_images.clear();
+  state.hidden_image_count.store(0, std::memory_order_release);
+  state.shown_surface = VK_NULL_HANDLE;
   InvalidateFastDispatchCaches();
   state.host_surface_capabilities = nullptr;
   state.host_surface_present_modes = nullptr;
@@ -1451,6 +1584,8 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.note_vulkan_call_end.store(nullptr, std::memory_order_release);
   g_vulkan_call_observation_active.store(false, std::memory_order_release);
   state.note_surface_out_of_date.store(nullptr, std::memory_order_release);
+  state.window_holds_presents.store(nullptr, std::memory_order_release);
+  state.window_hides_presents.store(nullptr, std::memory_order_release);
   state.extent_translation_logged = false;
   state.present_policy_logged = false;
   state.initialized = false;
@@ -1661,6 +1796,9 @@ vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
       return;
     }
     retired_uses_surface = state.retired_swapchain_surface == surface;
+    if (state.shown_surface == surface) {
+      state.shown_surface = VK_NULL_HANDLE;
+    }
   }
   if (retired_uses_surface) {
     DestroyRetiredSwapchain();
@@ -1817,6 +1955,61 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     full_screen_exclusive = true;
   }
 #endif
+  std::uint32_t queue_family_count = 0;
+  const auto host_get_queue_families =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+          HostInstanceProc(instance,
+                           "vkGetPhysicalDeviceQueueFamilyProperties"));
+  if (host_get_queue_families != nullptr) {
+    host_get_queue_families(physical_device, &queue_family_count, nullptr);
+  }
+  std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+  if (host_get_queue_families != nullptr && queue_family_count != 0) {
+    host_get_queue_families(physical_device, &queue_family_count,
+                            queue_families.data());
+    queue_families.resize(queue_family_count);
+  }
+  std::vector<VkDeviceQueueCreateInfo> host_queues(
+      create_info->pQueueCreateInfos,
+      create_info->pQueueCreateInfos + create_info->queueCreateInfoCount);
+  std::vector<float> spare_priorities;
+  std::uint32_t spare_family = UINT32_MAX;
+  std::uint32_t spare_index = 0;
+  for (std::uint32_t family = 0;
+       family < queue_families.size() && spare_family == UINT32_MAX;
+       ++family) {
+    const auto requested =
+        std::find_if(host_queues.begin(), host_queues.end(),
+                     [family](const VkDeviceQueueCreateInfo& queue) {
+                       return queue.queueFamilyIndex == family;
+                     });
+    const std::uint32_t used =
+        requested != host_queues.end() ? requested->queueCount : 0;
+    if (queue_families[family].queueCount <= used ||
+        (requested != host_queues.end() && requested->flags != 0)) {
+      continue;
+    }
+    spare_family = family;
+    spare_index = used;
+    if (requested != host_queues.end()) {
+      spare_priorities.assign(requested->pQueuePriorities,
+                              requested->pQueuePriorities + used);
+      spare_priorities.push_back(spare_priorities.front());
+      requested->queueCount = used + 1;
+      requested->pQueuePriorities = spare_priorities.data();
+    } else {
+      spare_priorities.push_back(1.0f);
+      VkDeviceQueueCreateInfo spare{};
+      spare.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      spare.queueFamilyIndex = family;
+      spare.queueCount = 1;
+      spare.pQueuePriorities = spare_priorities.data();
+      host_queues.push_back(spare);
+    }
+    host_info.queueCreateInfoCount =
+        static_cast<std::uint32_t>(host_queues.size());
+    host_info.pQueueCreateInfos = host_queues.data();
+  }
   EnabledDeviceFeatures enabled = InspectEnabledFeatures(*create_info);
   const bool etc2_emulated = State().etc2.PhysicalDeviceNeedsEmulation(
       physical_device, reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
@@ -1918,8 +2111,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
   if (reused) {
     std::fprintf(stderr, "  [vulkan] host VkDevice reused\n");
   }
+  VkQueue spare_queue = VK_NULL_HANDLE;
+  if (spare_family != UINT32_MAX) {
+    if (const auto host_get_queue = reinterpret_cast<PFN_vkGetDeviceQueue>(
+            host_get_device_proc_addr(*device, "vkGetDeviceQueue"))) {
+      host_get_queue(*device, spare_family, spare_index, &spare_queue);
+    }
+  }
   RegisterHostDeviceDispatch(*device, physical_device,
-                             host_get_device_proc_addr, full_screen_exclusive);
+                             host_get_device_proc_addr, full_screen_exclusive,
+                             spare_queue);
   VkPhysicalDeviceMemoryProperties memory_properties{};
   if (const auto host_memory_properties =
           reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
@@ -1929,20 +2130,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     host_memory_properties(physical_device, &memory_properties);
   }
 
-  std::uint32_t queue_family_count = 0;
-  const auto host_get_queue_families =
-      reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
-          HostInstanceProc(instance,
-                           "vkGetPhysicalDeviceQueueFamilyProperties"));
-  if (host_get_queue_families != nullptr) {
-    host_get_queue_families(physical_device, &queue_family_count, nullptr);
-  }
-  std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
-  if (host_get_queue_families != nullptr && queue_family_count != 0) {
-    host_get_queue_families(physical_device, &queue_family_count,
-                            queue_families.data());
-    queue_families.resize(queue_family_count);
-  }
   State().etc2.RegisterDevice(
       *device, physical_device, etc2_emulated, memory_properties,
       host_get_device_proc_addr,
@@ -2272,6 +2459,12 @@ vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
+    if (const auto hidden = state.hidden_images.find(swapchain);
+        hidden != state.hidden_images.end()) {
+      state.hidden_image_count.fetch_sub(hidden->second.size(),
+                                         std::memory_order_release);
+      state.hidden_images.erase(hidden);
+    }
     if (const auto found = state.swapchain_surfaces.find(swapchain);
         found != state.swapchain_surfaces.end()) {
       surface = found->second;
@@ -2297,6 +2490,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
     VkDevice device, VkSwapchainKHR swapchain, std::uint64_t timeout,
     VkSemaphore semaphore, VkFence fence, std::uint32_t* image_index) {
   VulkanCallObservation observation("vkAcquireNextImageKHR");
+  VkResult kept = VK_SUCCESS;
+  if (TakeHiddenImage(device, swapchain, semaphore, fence, image_index,
+                      &kept)) {
+    observation.SetResult(kept);
+    return kept;
+  }
   const PFN_vkAcquireNextImageKHR host_acquire =
       HostDispatchForDevice(device).acquire_next_image;
   if (host_acquire == nullptr) {
@@ -2326,6 +2525,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
   if (host_acquire == nullptr || acquire_info == nullptr) {
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  VkResult kept = VK_SUCCESS;
+  if (TakeHiddenImage(device, acquire_info->swapchain, acquire_info->semaphore,
+                      acquire_info->fence, image_index, &kept)) {
+    observation.SetResult(kept);
+    return kept;
   }
   const VkResult host_result =
       host_acquire(device, acquire_info, image_index);
@@ -2645,9 +2850,36 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
   return result;
 }
 
+namespace {
+
+void RememberShownCapabilities(VkSurfaceKHR surface, VkResult result,
+                               const VkSurfaceCapabilitiesKHR& capabilities) {
+  if (result != VK_SUCCESS || capabilities.currentExtent.width == 0 ||
+      capabilities.currentExtent.height == 0) {
+    return;
+  }
+  AdapterState& state = State();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  state.shown_surface = surface;
+  state.shown_capabilities = capabilities;
+}
+
+}  // namespace
+
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
     VkPhysicalDevice physical_device, VkSurfaceKHR surface,
     VkSurfaceCapabilitiesKHR* capabilities) {
+  const WindowHoldsPresentsFn hides =
+      State().window_hides_presents.load(std::memory_order_acquire);
+  if (hides != nullptr && capabilities != nullptr && hides()) {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.shown_surface == surface) {
+      *capabilities = state.shown_capabilities;
+      return VK_SUCCESS;
+    }
+  }
+  WaitWhileWindowHoldsPresents();
   PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_capabilities = nullptr;
   {
     AdapterState& state = State();
@@ -2662,6 +2894,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
   if (result != VK_SUCCESS ||
       (capabilities->currentExtent.width != UINT32_MAX &&
        capabilities->currentExtent.height != UINT32_MAX)) {
+    RememberShownCapabilities(surface, result, *capabilities);
     return result;
   }
 
@@ -2680,6 +2913,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
       static_cast<std::uint32_t>(window_height()),
       capabilities->minImageExtent.height, capabilities->maxImageExtent.height);
 
+  RememberShownCapabilities(surface, result, *capabilities);
   AdapterState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
   if (!state.extent_translation_logged) {
@@ -2747,6 +2981,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
 
 VKAPI_ATTR VkResult VKAPI_CALL
 vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* present_info) {
+  VkResult kept = VK_SUCCESS;
+  if (KeepHiddenPresent(queue, present_info, &kept)) {
+    return kept;
+  }
+  WaitWhileWindowHoldsPresents();
   VulkanCallObservation observation("vkQueuePresentKHR(adapter)");
   AdapterState& state = State();
   const PFN_vkQueuePresentKHR host_present =

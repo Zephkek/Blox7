@@ -78,6 +78,59 @@ TEST(VulkanSurfaceRecoveryGateTest,
   EXPECT_FALSE(request.retry);
 }
 
+TEST(VulkanSurfaceRecoveryGateTest, ResizeLeavesOutOfDateToTheNewSwapchain) {
+  VulkanSurfaceRecoveryGate gate;
+  ASSERT_TRUE(gate.Activate());
+  gate.NotifyPresent();
+  gate.NotifyOutOfDate();
+  gate.NotifyResize(1000);
+
+  VulkanSurfaceRecoveryRequest request;
+  EXPECT_FALSE(gate.TakeRebindRequest(1001, &request));
+  gate.NotifyPresent();
+  EXPECT_FALSE(gate.TakeRebindRequest(1002, &request));
+
+  gate.NotifyOutOfDate();
+  ASSERT_TRUE(gate.TakeRebindRequest(1003, &request));
+  EXPECT_EQ(request.observed_error_count, 2u);
+  EXPECT_EQ(request.coalesced_error_count, 1u);
+  EXPECT_FALSE(request.retry);
+}
+
+TEST(VulkanSurfaceRecoveryGateTest, PresentBeforeTheOutOfDateKeepsWaiting) {
+  VulkanSurfaceRecoveryGate gate;
+  ASSERT_TRUE(gate.Activate());
+  gate.NotifyResize(1000);
+  gate.NotifyPresent();
+  gate.NotifyOutOfDate();
+
+  VulkanSurfaceRecoveryRequest request;
+  EXPECT_FALSE(gate.TakeRebindRequest(1001, &request));
+  gate.NotifyPresent();
+  EXPECT_FALSE(gate.TakeRebindRequest(1002, &request));
+  EXPECT_FALSE(gate.TakeRebindRequest(
+      1000 + VulkanSurfaceRecoveryGate::kRetryIntervalNs, &request));
+}
+
+TEST(VulkanSurfaceRecoveryGateTest, ResizeWithoutAPresentFallsBackToRebind) {
+  VulkanSurfaceRecoveryGate gate;
+  ASSERT_TRUE(gate.Activate());
+  gate.NotifyOutOfDate();
+  constexpr uint64_t kResizeTicks = 1000;
+  gate.NotifyResize(kResizeTicks);
+
+  VulkanSurfaceRecoveryRequest request;
+  EXPECT_FALSE(gate.TakeRebindRequest(
+      kResizeTicks + VulkanSurfaceRecoveryGate::kRetryIntervalNs - 1,
+      &request));
+  gate.NotifyOutOfDate();
+  ASSERT_TRUE(gate.TakeRebindRequest(
+      kResizeTicks + VulkanSurfaceRecoveryGate::kRetryIntervalNs, &request));
+  EXPECT_EQ(request.observed_error_count, 2u);
+  EXPECT_EQ(request.coalesced_error_count, 2u);
+  EXPECT_FALSE(request.retry);
+}
+
 TEST(VulkanSurfaceRecoveryGateTest, AcceptsConcurrentRenderThreadEvidence) {
   VulkanSurfaceRecoveryGate gate;
   ASSERT_TRUE(gate.Activate());

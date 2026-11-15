@@ -30,9 +30,11 @@ class VulkanSurfaceRecoveryGate final {
     }
     out_of_date_count_.store(0, std::memory_order_relaxed);
     present_count_.store(0, std::memory_order_relaxed);
+    present_count_at_out_of_date_.store(0, std::memory_order_relaxed);
     handled_out_of_date_count_ = 0;
     present_count_at_last_rebind_ = 0;
     last_rebind_ticks_ns_ = 0;
+    resize_ticks_ns_ = 0;
     active_.store(true, std::memory_order_release);
     return true;
   }
@@ -42,15 +44,28 @@ class VulkanSurfaceRecoveryGate final {
     std::lock_guard<std::mutex> lock(mutex_);
     out_of_date_count_.store(0, std::memory_order_relaxed);
     present_count_.store(0, std::memory_order_relaxed);
+    present_count_at_out_of_date_.store(0, std::memory_order_relaxed);
     handled_out_of_date_count_ = 0;
     present_count_at_last_rebind_ = 0;
     last_rebind_ticks_ns_ = 0;
+    resize_ticks_ns_ = 0;
   }
 
   void NotifyOutOfDate() {
     if (active_.load(std::memory_order_acquire)) {
-      out_of_date_count_.fetch_add(1, std::memory_order_relaxed);
+      present_count_at_out_of_date_.store(
+          present_count_.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
+      out_of_date_count_.fetch_add(1, std::memory_order_release);
     }
+  }
+
+  void NotifyResize(uint64_t now_ticks_ns) {
+    if (!active_.load(std::memory_order_acquire)) {
+      return;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    resize_ticks_ns_ = now_ticks_ns != 0 ? now_ticks_ns : 1;
   }
 
   void NotifyPresent() {
@@ -76,6 +91,19 @@ class VulkanSurfaceRecoveryGate final {
     }
     const uint64_t present_count =
         present_count_.load(std::memory_order_acquire);
+    if (resize_ticks_ns_ != 0) {
+      if (present_count !=
+          present_count_at_out_of_date_.load(std::memory_order_relaxed)) {
+        handled_out_of_date_count_ = out_of_date_count;
+        resize_ticks_ns_ = 0;
+        return false;
+      }
+      if (now_ticks_ns >= resize_ticks_ns_ &&
+          now_ticks_ns - resize_ticks_ns_ < kRetryIntervalNs) {
+        return false;
+      }
+      resize_ticks_ns_ = 0;
+    }
     const bool presented_since_last_rebind =
         present_count != present_count_at_last_rebind_;
     const bool retry_due =
@@ -99,10 +127,12 @@ class VulkanSurfaceRecoveryGate final {
   std::atomic<bool> active_{false};
   std::atomic<uint64_t> out_of_date_count_{0};
   std::atomic<uint64_t> present_count_{0};
+  std::atomic<uint64_t> present_count_at_out_of_date_{0};
   std::mutex mutex_;
   uint64_t handled_out_of_date_count_ = 0;
   uint64_t present_count_at_last_rebind_ = 0;
   uint64_t last_rebind_ticks_ns_ = 0;
+  uint64_t resize_ticks_ns_ = 0;
 };
 
 }  // namespace window

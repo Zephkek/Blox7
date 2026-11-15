@@ -153,6 +153,7 @@ struct WindowState {
 static WindowState g_state;
 static std::atomic<int> g_real_swap_count{0};
 static std::atomic<uint64_t> g_first_present_ticks_ns{0};
+static std::atomic<bool> g_fullscreen_switching{false};
 #ifdef BLOX7_WIN32
 static std::atomic<SDL_ThreadID> g_pump_thread_id{0};
 static std::atomic<bool> g_show_requested{false};
@@ -251,10 +252,20 @@ void ApplyFullscreenRefreshMode(SDL_Window* window) {
   const SDL_DisplayID display = SDL_GetDisplayForWindow(window);
   const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(display);
   SDL_DisplayMode mode{};
-  if (desktop == nullptr ||
-      !SDL_GetClosestFullscreenDisplayMode(display, desktop->w, desktop->h,
-                                           refresh, false, &mode) ||
-      !SDL_SetWindowFullscreenMode(window, &mode)) {
+  const bool found =
+      desktop != nullptr &&
+      SDL_GetClosestFullscreenDisplayMode(display, desktop->w, desktop->h,
+                                          refresh, false, &mode);
+  if (found && mode.w == desktop->w && mode.h == desktop->h &&
+      mode.refresh_rate_numerator == desktop->refresh_rate_numerator &&
+      mode.refresh_rate_denominator == desktop->refresh_rate_denominator) {
+    std::fprintf(stderr,
+                 "  [fullscreen] desktop already runs %.2f Hz, "
+                 "staying borderless\n",
+                 desktop->refresh_rate);
+    return;
+  }
+  if (!found || !SDL_SetWindowFullscreenMode(window, &mode)) {
     std::fprintf(stderr, "  [fullscreen] no %.0f Hz mode, staying borderless: %s\n",
                  refresh, SDL_GetError());
     return;
@@ -1680,6 +1691,60 @@ void UpdateWindowTextLayer() {
     return;
   }
 }
+
+std::atomic<void*> g_present_window{nullptr};
+std::atomic<uint64_t> g_present_window_ticks_ns{0};
+
+void PublishPresentWindow() {
+  void* hwnd =
+      g_state.sdl_window != nullptr && !g_state.quit_requested
+          ? SDL_GetPointerProperty(SDL_GetWindowProperties(g_state.sdl_window),
+                                   SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)
+          : nullptr;
+  g_present_window.store(hwnd, std::memory_order_release);
+  g_present_window_ticks_ns.store(SDL_GetTicksNS(), std::memory_order_release);
+}
+
+bool PresentWindowHidden() {
+  static void* const user32 = __w32_pe_open("user32.dll");
+  static const auto is_iconic =
+      reinterpret_cast<int32_t(__attribute__((ms_abi)) *)(void*)>(
+          user32 != nullptr ? __w32_pe_symbol(user32, "IsIconic") : nullptr);
+  static const auto client_rect =
+      reinterpret_cast<int32_t(__attribute__((ms_abi)) *)(void*, int32_t*)>(
+          user32 != nullptr ? __w32_pe_symbol(user32, "GetClientRect")
+                            : nullptr);
+  void* hwnd = g_present_window.load(std::memory_order_acquire);
+  const uint64_t published =
+      g_present_window_ticks_ns.load(std::memory_order_acquire);
+  if (hwnd == nullptr || is_iconic == nullptr || client_rect == nullptr ||
+      SDL_GetTicksNS() - published >= 1000000000ULL) {
+    return false;
+  }
+  if (is_iconic(hwnd) != 0) {
+    return true;
+  }
+  int32_t client[4] = {};
+  return client_rect(hwnd, client) != 0 &&
+         (client[2] <= client[0] || client[3] <= client[1]);
+}
+
+bool OnPumpThread() {
+  return SDL_GetCurrentThreadID() ==
+         g_pump_thread_id.load(std::memory_order_acquire);
+}
+
+extern "C" bool blox7_window_holds_presents() {
+  return !OnPumpThread() &&
+         (g_fullscreen_switching.load(std::memory_order_acquire) ||
+          PresentWindowHidden());
+}
+
+extern "C" bool blox7_window_hides_presents() {
+  return !OnPumpThread() &&
+         !g_fullscreen_switching.load(std::memory_order_acquire) &&
+         PresentWindowHidden();
+}
 #endif
 
 Status RecordResizeReadinessSurfaceCommit(const WindowSurfaceEvent& event) {
@@ -2207,7 +2272,11 @@ bool RequestFullscreenState(bool fullscreen, const char* reason) {
       (SDL_GetWindowFlags(g_state.sdl_window) & SDL_WINDOW_FULLSCREEN) != 0;
   if (current_fullscreen != fullscreen) {
     CaptureWindowState();
-    if (!SDL_SetWindowFullscreen(g_state.sdl_window, fullscreen)) {
+    g_fullscreen_switching.store(true, std::memory_order_release);
+    const bool switched =
+        SDL_SetWindowFullscreen(g_state.sdl_window, fullscreen);
+    g_fullscreen_switching.store(false, std::memory_order_release);
+    if (!switched) {
       fprintf(stderr, "  [fullscreen] SDL request failed: %s\n",
               SDL_GetError());
       return false;
@@ -2558,6 +2627,8 @@ bool PumpEvents() {
       SDL_GetWindowSizeInPixels(g_state.sdl_window, &pixel_width,
                                 &pixel_height);
       void* observed_native_window = QueryNativeWindowHandle();
+      const WindowSurfaceSnapshot previous_surface =
+          g_window_surface_lifecycle.Snapshot();
       const Status surface_status = g_window_surface_lifecycle.Observe(
           reinterpret_cast<uintptr_t>(observed_native_window),
           pixel_width > 0 ? static_cast<uint32_t>(pixel_width) : 0,
@@ -2590,6 +2661,11 @@ bool PumpEvents() {
         g_state.native_window = observed_native_window;
         const WindowSurfaceSnapshot surface =
             g_window_surface_lifecycle.Snapshot();
+        if (previous_surface.available && surface.available &&
+            (previous_surface.width != surface.width ||
+             previous_surface.height != surface.height)) {
+          g_vulkan_surface_recovery_gate.NotifyResize(SDL_GetTicksNS());
+        }
         if (surface.available) {
           g_state.width = static_cast<int>(surface.width);
           g_state.height = static_cast<int>(surface.height);
@@ -2696,6 +2772,9 @@ bool PumpEvents() {
       }
     }
   }
+#ifdef BLOX7_WIN32
+  PublishPresentWindow();
+#endif
   return !g_state.quit_requested;
 }
 
@@ -2761,6 +2840,7 @@ void Shutdown() {
   g_gles_text_overlay.reset();
 #ifdef BLOX7_WIN32
   ::blox7::win32::DestroyTextLayer();
+  g_present_window.store(nullptr, std::memory_order_release);
 #endif
   if (!g_state.direct_vulkan && g_state.egl_context != nullptr) {
     SDL_GL_MakeCurrent(g_state.sdl_window, nullptr);
