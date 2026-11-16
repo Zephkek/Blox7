@@ -98,6 +98,8 @@ struct SocketInfo {
   bool dontfrag6;
   int tclass6;
   int bound_if;  // SO_BINDTODEVICE
+  bool lingering;
+  int linger_seconds;
   struct { int16_t level, name; int value; } kept[24];
   uint8_t nkept;
   SOCKET nl_kernel;
@@ -2500,6 +2502,15 @@ long own_setsockopt(W32File* f, SocketInfo* s, int level, int name, const void* 
         return -ENOPROTOOPT;
       case SO_BINDTODEVICE:
         return bind_device(f, s, val, len);
+      case SO_LINGER: {
+        if (tcp_socket(s)) break;
+        if (len < sizeof(linger)) return -EINVAL;
+        linger l;
+        memcpy(&l, val, sizeof l);
+        s->lingering = l.l_onoff != 0;
+        if (l.l_onoff) s->linger_seconds = l.l_linger;
+        return 0;
+      }
       case SO_RCVTIMEO_NEW:
         name = SO_RCVTIMEO;
         break;
@@ -2827,6 +2838,12 @@ long sys_getsockopt(long fd, long level_l, long name_l, long val_l, long len_l, 
       if (name == SO_DOMAIN) return put_int(level, s->domain, out, len);
       if (name == SO_PROTOCOL) return put_int(level, s->protocol, out, len);
       if (name == SO_BINDTODEVICE) return get_device(s, out, len);
+      if (name == SO_LINGER && !tcp_socket(s)) {
+        const linger l{s->lingering ? 1 : 0, s->linger_seconds};
+        memcpy(out, &l, *len < sizeof l ? *len : sizeof l);
+        *len = sizeof l;
+        return 0;
+      }
       if (name == SO_ERROR && udp_socket(s)) {
         pull_icmp(f, s);
         const long e = take_error(s);

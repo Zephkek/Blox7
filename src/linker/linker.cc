@@ -735,27 +735,31 @@ bool IsBlockedRobloxCrashReportNativeSymbol(
   return false;
 }
 
+void* FindSymbol(LibraryHandle handle, const std::string& symbol_name) {
+  if (!handle || IsBlockedRobloxCrashReportNativeSymbol(symbol_name)) {
+    return nullptr;
+  }
+#ifdef BLOX7_USE_BIONIC_LINKER
+  return ::linker::dlsym(handle, symbol_name.c_str());
+#else
+  return ::dlsym(handle, symbol_name.c_str());
+#endif
+}
+
 void* ResolveSymbol(LibraryHandle handle, const std::string& symbol_name) {
   if (!handle || IsBlockedRobloxCrashReportNativeSymbol(symbol_name)) {
     return nullptr;
   }
-
+  void* sym = FindSymbol(handle, symbol_name);
+  if (!sym) {
 #ifdef BLOX7_USE_BIONIC_LINKER
-  void* sym = ::linker::dlsym(handle, symbol_name.c_str());
-  if (!sym) {
     char* err = ::linker::dlerror();
-    std::cerr << "  [linker] symbol '" << symbol_name << "' not found. dlerror: "
-              << (err ? err : "unknown error") << '\n';
-  }
 #else
-  void* sym = ::dlsym(handle, symbol_name.c_str());
-  if (!sym) {
     char* err = ::dlerror();
+#endif
     std::cerr << "  [linker] symbol '" << symbol_name << "' not found. dlerror: "
               << (err ? err : "unknown error") << '\n';
   }
-#endif
-
   return sym;
 }
 

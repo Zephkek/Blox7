@@ -52,6 +52,7 @@ LibraryHandle LoadLibrary(const std::string& real_path,
                           const std::string& host_alias);
 
 void* ResolveSymbol(LibraryHandle handle, const std::string& symbol_name);
+void* FindSymbol(LibraryHandle handle, const std::string& symbol_name);
 
 bool IsBlockedRobloxCrashReportNativeSymbol(
     std::string_view symbol_name) noexcept;

@@ -5756,7 +5756,12 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       }
     }
   } else {
-    if (jni_timeout_ms > 0) {
+#ifdef BLOX7_WIN32
+    const bool alarm_watchdog = false;
+#else
+    const bool alarm_watchdog = jni_timeout_ms > 0;
+#endif
+    if (alarm_watchdog) {
       g_jni_onload_in_progress = 1;
       g_jni_onload_timings_printed = 0;
       std::cout << "  [jvm] JNI_OnLoad timeout watchdog armed: "
@@ -5772,7 +5777,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
 
     jni_version = jni_onload(raw_vm, nullptr);
 
-    if (jni_timeout_ms > 0) {
+    if (alarm_watchdog) {
       g_jni_onload_in_progress = 0;
       g_jni_onload_jmp_armed = 0;
       alarm(0);
@@ -5935,13 +5940,13 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
                 "nativeInitClientSettingsSigned"));
     auto* native_init_client_settings_cached =
         reinterpret_cast<NativeInitClientSettingsCachedFn>(
-            linker::ResolveSymbol(
+            linker::FindSymbol(
                 roblox_handle,
                 "Java_com_roblox_engine_jni_NativeGLInterface_"
                 "nativeInitClientSettingsCached"));
     auto* native_init_client_settings_cached_compressed =
         reinterpret_cast<NativeInitClientSettingsCachedCompressedFn>(
-            linker::ResolveSymbol(
+            linker::FindSymbol(
                 roblox_handle,
                 "Java_com_roblox_engine_jni_NativeGLInterface_"
                 "nativeInitClientSettingsCachedCompressed"));
