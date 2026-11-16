@@ -1,7 +1,9 @@
 #include "libc_shim/libc_shim.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <cstdarg>
 #include <cstdio>
@@ -13,6 +15,7 @@
 #include <limits.h>
 #include <unordered_map>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace libc_shim {
@@ -21,6 +24,7 @@ namespace {
 
 std::unordered_map<std::string, std::string> g_path_mappings;
 std::vector<std::string> g_ca_bundle_aliases;
+std::unordered_map<std::string, std::string> g_mod_files;
 
 bool g_installed = false;
 std::atomic<GuestAllocator> g_guest_allocator{nullptr};
@@ -40,6 +44,31 @@ constexpr std::array<const char*, 8> kAndroidCaBundlePaths = {
     "rbx_bin/assets/ssl/cacert.pem",
     "rbx_bin/assets/content/ssl/cacert.pem",
 };
+constexpr std::array<std::pair<const char*, const char*>, 3> kModFiles = {{
+    {"BLOX7_CURSOR_ARROW_FILE", "content/textures/Cursors/KeyboardMouse/ArrowFarCursor.png"},
+    {"BLOX7_CURSOR_ARROW_FILE", "content/textures/ArrowCursor.png"},
+    {"BLOX7_CURSOR_HAND_FILE", "content/textures/Cursors/KeyboardMouse/ArrowCursor.png"},
+}};
+constexpr std::array<const char*, 11> kModExtensions = {
+    ".png", ".jpg", ".jpeg", ".tga", ".dds", ".ktx", ".ttf", ".otf", ".ogg", ".mp3", ".wav",
+};
+
+std::string Lowercase(std::string text) {
+  for (char& ch : text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  return text;
+}
+
+bool IsModFile(const std::filesystem::path& path) {
+  const std::string extension = Lowercase(path.extension().string());
+  return std::find(kModExtensions.begin(), kModExtensions.end(), extension) != kModExtensions.end();
+}
+
+bool IsReplaceableFont(const std::filesystem::path& path) {
+  const std::string name = Lowercase(path.filename().string());
+  const std::string extension = Lowercase(path.extension().string());
+  return (extension == ".ttf" || extension == ".otf") && name.rfind("noto", 0) != 0 &&
+         name != "robloxemoji.ttf" && name != "twemojimozilla.ttf";
+}
 
 bool IsEnabled(const char* name) {
   const char* value = std::getenv(name);
@@ -220,6 +249,49 @@ HostCaBundleResolution ConfigureHostCaBundlePathMappings() {
   return resolution;
 }
 
+void ConfigureModPathMappings() {
+  std::string assets;
+  if (const char* content = GetEnvNonEmpty("BLOX7_ASSET_PATH")) {
+    auto root = std::filesystem::path(content).lexically_normal();
+    if (root.filename().empty()) root = root.parent_path();
+    if (root.filename() == "content") assets = root.parent_path().string();
+  }
+  const auto map = [&assets](const std::string& relative, const std::string& file) {
+    g_mod_files[relative] = file;
+    if (relative.rfind("content/", 0) == 0) RegisterPathMapping(relative, file);
+    RegisterPathMapping("rbx_bin/assets/" + relative, file);
+    if (!assets.empty()) RegisterPathMapping(assets + "/" + relative, file);
+  };
+  std::error_code error;
+  if (const char* mods = GetEnvNonEmpty("BLOX7_MODS_DIR")) {
+    const std::filesystem::path root(mods);
+    std::filesystem::recursive_directory_iterator iterator(root, error);
+    const std::filesystem::recursive_directory_iterator end;
+    while (!error && iterator != end) {
+      if (iterator->is_regular_file(error) && IsModFile(iterator->path()))
+        map(iterator->path().lexically_relative(root).generic_string(), iterator->path().string());
+      iterator.increment(error);
+    }
+    error.clear();
+  }
+  const char* font = GetEnvNonEmpty("BLOX7_FONT_FILE");
+  if (font != nullptr && !assets.empty() && access(font, R_OK) == 0) {
+    for (const std::string folder : {"content/fonts", "fonts"}) {
+      std::filesystem::directory_iterator iterator(assets + "/" + folder, error);
+      const std::filesystem::directory_iterator end;
+      while (!error && iterator != end) {
+        if (IsReplaceableFont(iterator->path())) map(folder + "/" + iterator->path().filename().string(), font);
+        iterator.increment(error);
+      }
+      error.clear();
+    }
+  }
+  for (const auto& [variable, relative] : kModFiles) {
+    const char* file = GetEnvNonEmpty(variable);
+    if (file != nullptr && access(file, R_OK) == 0) map(relative, file);
+  }
+}
+
 const char* HostCaBundleStatusName(HostCaBundleStatus status) {
   switch (status) {
     case HostCaBundleStatus::kReady:
@@ -287,6 +359,7 @@ void Install() {
       RegisterPathMapping("rbx_bin/assets", assets_root);
     }
   }
+  ConfigureModPathMappings();
   RegisterPathMapping("/sdcard/Android/data/com.roblox.client",
                       data_root + "/sdcard/Android/data/com.roblox.client");
   RegisterPathMapping("/storage/emulated/0/Android/data/com.roblox.client",
@@ -323,6 +396,7 @@ void RegisterPathMapping(const std::string& android_prefix,
 void ClearPathMappings() {
   g_path_mappings.clear();
   g_ca_bundle_aliases.clear();
+  g_mod_files.clear();
 }
 
 }  // namespace libc_shim
@@ -338,6 +412,13 @@ const char* HostPath(const char* path, std::string* storage) {
 }
 
 }  // namespace
+
+extern "C" bool blox7_mod_file(const char* relative, char* file, size_t size) {
+  const auto found = libc_shim::g_mod_files.find(relative == nullptr ? "" : relative);
+  if (found == libc_shim::g_mod_files.end() || file == nullptr || found->second.size() >= size) return false;
+  std::memcpy(file, found->second.c_str(), found->second.size() + 1);
+  return true;
+}
 
 extern "C" int blox7_open(const char* path, int flags, ...) {
   std::string translated;

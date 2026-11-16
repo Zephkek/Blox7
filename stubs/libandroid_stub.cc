@@ -128,6 +128,11 @@ std::string AssetCacheKey(const std::string& root,
   return key;
 }
 
+std::string AssetRoot() {
+  const char* root = GetEnvNonEmpty("BLOX7_ASSET_ROOT");
+  return root != nullptr ? root : "rbx_bin/assets";
+}
+
 std::string ResolveAssetPath(const char* filename) {
   if (filename == nullptr) {
     return {};
@@ -138,8 +143,7 @@ std::string ResolveAssetPath(const char* filename) {
   }
 
   const std::string requested(requested_view);
-  const char* root_env = GetEnvNonEmpty("BLOX7_ASSET_ROOT");
-  const std::string root = root_env != nullptr ? root_env : "rbx_bin/assets";
+  const std::string root = AssetRoot();
   const std::string cache_key = AssetCacheKey(root, requested);
 
   {
@@ -225,7 +229,7 @@ std::string ApkEntryName(const char* filename) {
 bool OpenStoredApkEntryDescriptor(const std::string& entry_name, int* fd,
                                   off_t* start, off_t* length) {
   const char* apk_path = GetEnvNonEmpty("BLOX7_ASSET_APK_PATH");
-  if (apk_path == nullptr || fd == nullptr || start == nullptr ||
+  if (apk_path == nullptr || entry_name.empty() || fd == nullptr || start == nullptr ||
       length == nullptr) {
     return false;
   }
@@ -323,6 +327,18 @@ bool Blox7UsesDirectVulkan() {
   return backend != nullptr && std::strcmp(backend, "direct-vulkan") == 0;
 }
 
+std::string ModFile(const std::string& path) {
+  const std::string root = AssetRoot();
+  if (path.size() <= root.size() || path.compare(0, root.size(), root) != 0 || path[root.size()] != '/') {
+    return {};
+  }
+  using Fn = bool (*)(const char*, char*, size_t);
+  static Fn cached_fn = nullptr;
+  const Fn fn = ResolveCached(&cached_fn, "blox7_mod_file");
+  char file[4096];
+  return fn != nullptr && fn(path.c_str() + root.size() + 1, file, sizeof file) ? std::string(file) : std::string();
+}
+
 bool EnsureLoaded(AAsset* asset) {
   if (asset->loaded) {
     return true;
@@ -353,8 +369,9 @@ AAsset* AAssetManager_open(AAssetManager* mgr, const char* filename,
     return nullptr;
   }
   auto* asset = new AAsset;
-  asset->path = path;
-  asset->apk_entry = ApkEntryName(filename);
+  const std::string mod = ModFile(path);
+  asset->path = mod.empty() ? path : mod;
+  asset->apk_entry = mod.empty() ? ApkEntryName(filename) : std::string();
   if (Blox7UsesDirectVulkan() && libc_shim::IsBundledSkyTexture(path.c_str()) &&
       !EnsureLoaded(asset)) {
     delete asset;

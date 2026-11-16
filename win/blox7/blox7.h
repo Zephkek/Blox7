@@ -55,6 +55,11 @@ struct Settings {
   bool capture_processor = false;
   std::wstring screenshots_dir;
   std::wstring videos_dir;
+  std::wstring cursor_arrow;
+  std::wstring cursor_hand;
+  std::wstring font;
+  std::wstring window_title;
+  std::wstring window_icon;
 };
 
 enum class DeviceKind { kPhone, kTablet, kPc, kConsole };
@@ -103,6 +108,10 @@ std::wstring capture_folder(const Settings& settings, bool videos);
 SIZE capture_frame(const Settings& settings);
 double capture_megabytes(const Settings& settings);
 std::wstring hardware_video_encoder();
+std::wstring mods_folder(const Paths& paths);
+std::wstring check_cursor(const std::wstring& file);
+std::wstring check_font(const std::wstring& file);
+std::wstring check_icon(const std::wstring& file);
 
 Paths resolve_paths();
 OsInfo os_info();

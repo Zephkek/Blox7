@@ -36,7 +36,7 @@ constexpr UINT_PTR kCaretTimer = 3;
 constexpr UINT kAboutCommand = 0x0010;
 
 constexpr float kMargin = 11, kMainWidth = 460, kCommandHeight = 45;
-constexpr float kDialogWidth = 460, kDialogHeight = 380, kTabHeight = 21;
+constexpr float kDialogWidth = 490, kDialogHeight = 380, kTabHeight = 21;
 constexpr float kButtonWidth = 75, kButtonHeight = 23, kGap = 7;
 
 constexpr uint32_t kWhite = 0xFFFFFF, kBlack = 0x000000, kFace = 0xF0F0F0, kSeparator = 0xDFDFDF;
@@ -67,7 +67,7 @@ uint32_t mix(uint32_t a, uint32_t b, float t) {
 }
 
 enum class Stage { Unpacking, Ready, Launching, Running, Failed };
-enum class Tab { Graphics, Display, Effects, Captures, Performance, Flags, Device, About };
+enum class Tab { Graphics, Display, Effects, Mods, Captures, Performance, Flags, Device, About };
 enum class Look { Normal, Hot, Pressed, Disabled };
 enum class Glyph { Phone, Tablet, Pc, Console };
 enum class Cursor { Arrow, Hand, Beam };
@@ -96,6 +96,16 @@ enum : int {
   kScreenshotsLink,
   kVideosLink,
   kDefaultFoldersLink,
+  kArrowBrowse,
+  kArrowRemove,
+  kHandBrowse,
+  kHandRemove,
+  kFontBrowse,
+  kFontRemove,
+  kTitleField,
+  kIconBrowse,
+  kIconRemove,
+  kModsLink,
   kTabFirst = 100,
   kFlagRowFirst = 200,
   kBackdrop = 899,
@@ -137,8 +147,9 @@ constexpr struct {
   Tab tab;
   const wchar_t* label;
 } kTabs[] = {{Tab::Graphics, L"Graphics"},       {Tab::Display, L"Display"}, {Tab::Effects, L"Effects"},
-             {Tab::Captures, L"Captures"},       {Tab::Performance, L"Performance"},
-             {Tab::Flags, L"Flags"},             {Tab::Device, L"Device"},   {Tab::About, L"About"}};
+             {Tab::Mods, L"Mods"},               {Tab::Captures, L"Captures"},
+             {Tab::Performance, L"Performance"}, {Tab::Flags, L"Flags"},
+             {Tab::Device, L"Device"},           {Tab::About, L"About"}};
 
 struct Spring {
   float value = 0, target = 0;
@@ -227,6 +238,7 @@ struct App {
   D2D1_RECT_F flag_list_area{};
   std::wstring shader_status;
   bool shader_error = false;
+  std::wstring mod_error[4];
 
   PROCESS_INFORMATION child{};
   bool window_seen = false;
@@ -1710,6 +1722,99 @@ void page_captures(const D2D1_RECT_F& page) {
     });
 }
 
+struct ModPicker {
+  const wchar_t* label;
+  std::wstring Settings::*file;
+  int browse, remove;
+  const wchar_t* none;
+  const wchar_t* filter;
+  const wchar_t* title;
+  std::wstring (*check)(const std::wstring&);
+};
+
+const ModPicker kModPickers[] = {
+    {L"Arrow cursor:", &Settings::cursor_arrow, kArrowBrowse, kArrowRemove, L"Roblox's arrow", L"PNG images (*.png)\0*.png\0",
+     L"Pick an arrow cursor (a PNG with the tip in the middle)", check_cursor},
+    {L"Hand cursor:", &Settings::cursor_hand, kHandBrowse, kHandRemove, L"Roblox's hand", L"PNG images (*.png)\0*.png\0",
+     L"Pick a hand cursor (a PNG with the fingertip in the middle)", check_cursor},
+    {L"Font:", &Settings::font, kFontBrowse, kFontRemove, L"Roblox's fonts", L"Fonts (*.ttf, *.otf)\0*.ttf;*.otf\0",
+     L"Pick a font for Roblox's text", check_font},
+    {L"Icon:", &Settings::window_icon, kIconBrowse, kIconRemove, L"Blox7's icon",
+     L"Icons and pictures (*.ico, *.png)\0*.ico;*.png\0All pictures\0*.ico;*.png;*.bmp;*.gif;*.jpg;*.jpeg;*.tif;*.tiff\0",
+     L"Pick a window icon", check_icon},
+};
+
+void browse_mod(size_t index) {
+  const ModPicker& picker = kModPickers[index];
+  std::wstring& value = g.pending.*picker.file;
+  wchar_t file[MAX_PATH] = {};
+  if (!value.empty()) wcsncpy(file, value.c_str(), MAX_PATH - 1);
+  OPENFILENAMEW dialog{};
+  dialog.lStructSize = sizeof dialog;
+  dialog.hwndOwner = g.dialog.hwnd;
+  dialog.lpstrFilter = picker.filter;
+  dialog.lpstrFile = file;
+  dialog.nMaxFile = MAX_PATH;
+  dialog.lpstrTitle = picker.title;
+  dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER;
+  if (!run_file_dialog(dialog, false)) return;
+  g.mod_error[index] = picker.check(file);
+  if (!g.mod_error[index].empty()) return;
+  value = file;
+  mark_dirty();
+}
+
+void open_mods_folder() {
+  const std::wstring folder = mods_folder(g.paths);
+  SHCreateDirectoryExW(nullptr, (folder + L"\\content").c_str(), nullptr);
+  ShellExecuteW(g.dialog.hwnd, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void page_mods(const D2D1_RECT_F& page) {
+  const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18, label = 84;
+  float y = page.top + kMargin;
+  const auto file_row = [&](float row, size_t index) {
+    const ModPicker& picker = kModPickers[index];
+    const std::wstring& value = g.pending.*picker.file;
+    const std::wstring& error = g.mod_error[index];
+    text(picker.label, g.fonts.body, rect(ix, row + 4, label, 15), kText);
+    const D2D1_RECT_F box = rect(ix + label, row, iw - label - kButtonWidth * 2 - kGap * 2, kButtonHeight);
+    fill_rect(box, ink(kWhite));
+    stroke_rect(box, 0xABADB3);
+    const size_t slash = value.find_last_of(L"\\/");
+    const std::wstring shown = !error.empty() ? error : value.empty() ? picker.none : value.substr(slash == std::wstring::npos ? 0 : slash + 1);
+    text(shown, g.fonts.field, D2D1::RectF(box.left + 5, box.top, box.right - 5, box.bottom),
+         !error.empty() ? kError : value.empty() ? kDisabled : kText);
+    push_button(picker.browse, rect(box.right + kGap, row, kButtonWidth, kButtonHeight), L"Browse...", true, [index] { browse_mod(index); });
+    push_button(picker.remove, rect(box.right + kGap * 2 + kButtonWidth, row, kButtonWidth, kButtonHeight), L"Remove", !value.empty(),
+                [index] {
+                  (g.pending.*kModPickers[index].file).clear();
+                  g.mod_error[index].clear();
+                  mark_dirty();
+                });
+  };
+
+  group(rect(x, y, w, 100), L"Roblox");
+  file_row(y + 16, 0);
+  file_row(y + 44, 1);
+  file_row(y + 72, 2);
+  y += 100 + kMargin;
+
+  group(rect(x, y, w, 72), L"Window");
+  text(L"Title:", g.fonts.body, rect(ix, y + 20, label, 15), kText);
+  const D2D1_RECT_F title = rect(ix + label, y + 16, iw - label, kButtonHeight);
+  text_field(kTitleField, title, g.pending.window_title);
+  if (g.pending.window_title.empty() && g.focus != kTitleField)
+    text(L"Roblox", g.fonts.field, D2D1::RectF(title.left + 4, title.top + 1, title.right - 4, title.bottom - 1), kDisabled);
+  file_row(y + 44, 3);
+  y += 72 + kMargin;
+
+  group(rect(x, y, w, 72), L"Mods folder");
+  text(L"Pictures and fonts in it replace Roblox's own. It's laid out like Bloxstrap's Modifications folder.", g.fonts.paragraph,
+       rect(ix, y + 16, iw, 30), kSecondary);
+  link(kModsLink, ix, y + 48, L"Open the mods folder", open_mods_folder);
+}
+
 void draw_tabs(const D2D1_RECT_F& strip) {
   float x = strip.left + 2;
   D2D1_RECT_F chosen{};
@@ -1759,6 +1864,7 @@ void draw_dialog() {
     case Tab::Graphics: page_graphics(inner); break;
     case Tab::Display: page_display(inner); break;
     case Tab::Effects: page_effects(inner); break;
+    case Tab::Mods: page_mods(inner); break;
     case Tab::Captures: page_captures(inner); break;
     case Tab::Performance: page_performance(inner); break;
     case Tab::Flags: page_flags(inner); break;
@@ -1974,6 +2080,7 @@ void mouse_moved(LPARAM lp) {
 }
 
 std::wstring* focused_text() {
+  if (c == &g.dialog && g.tab == Tab::Mods && g.focus == kTitleField) return &g.pending.window_title;
   if (c != &g.dialog || g.tab != Tab::Flags) return nullptr;
   if (g.focus == kNameField) return &g.name_text;
   if (g.focus == kValueField) return &g.value_text;
@@ -1989,6 +2096,7 @@ void restart_caret() {
 bool edit_key(WPARAM key) {
   std::wstring* field = focused_text();
   if (!field) return false;
+  const size_t before = field->size();
   g.caret = std::min(g.caret, field->size());
   const bool control = GetKeyState(VK_CONTROL) < 0;
   switch (key) {
@@ -2013,6 +2121,7 @@ bool edit_key(WPARAM key) {
       break;
     default: return false;
   }
+  if (field == &g.pending.window_title && field->size() != before) mark_dirty();
   restart_caret();
   return true;
 }
@@ -2020,9 +2129,12 @@ bool edit_key(WPARAM key) {
 bool edit_char(wchar_t ch) {
   std::wstring* field = focused_text();
   if (!field) return false;
+  const size_t before = field->size();
   g.caret = std::min(g.caret, field->size());
   if (ch == L'\b') {
     if (g.caret > 0) field->erase(--g.caret, 1);
+  } else if ((ch == L'\t' || ch == L'\r') && g.focus == kTitleField) {
+    g.focus = 0;
   } else if (ch == L'\t') {
     g.focus = g.focus == kFindField ? kNameField : g.focus == kNameField ? kValueField : kFindField;
     g.caret = focused_text()->size();
@@ -2035,6 +2147,7 @@ bool edit_char(wchar_t ch) {
   } else {
     return ch < 0x20;
   }
+  if (field == &g.pending.window_title && field->size() != before) mark_dirty();
   restart_caret();
   return true;
 }
@@ -2105,7 +2218,7 @@ LRESULT handle(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
       c->drag = hit ? hit->drag : nullptr;
       if (c->drag) c->drag(c->mouse_x);
       if (c == &g.dialog && (!hit || (hit->id != kNameField && hit->id != kValueField && hit->id != kFindField &&
-                                      hit->id != kAddFlag)))
+                                      hit->id != kAddFlag && hit->id != kTitleField)))
         g.focus = 0;
       if (c->pressed) SetCapture(hwnd);
       InvalidateRect(hwnd, nullptr, FALSE);
@@ -2275,6 +2388,7 @@ void open_settings(Tab tab) {
   g.flag_message.clear();
   g.shader_status.clear();
   g.shader_error = false;
+  for (std::wstring& error : g.mod_error) error.clear();
   g.name_text.clear();
   g.value_text.clear();
   g.dialog.draw = draw_dialog;
@@ -2383,6 +2497,9 @@ int render_ui(const std::wstring& dir) {
   g.settings.quality = L"superhq";
   g.settings.frame_rate_limit = L"144";
   g.settings.render_scale = 80;
+  g.settings.cursor_arrow = L"C:\\Mods\\2013\\ArrowFarCursor.png";
+  g.settings.cursor_hand = L"C:\\Mods\\2013\\ArrowCursor.png";
+  g.settings.window_icon = L"C:\\Mods\\roblox-2013.ico";
   effects_preset(&g.settings, L"vivid");
   g.pending = g.settings;
   g.version = L"2.746.1266";
@@ -2418,6 +2535,7 @@ int render_ui(const std::wstring& dir) {
                  {L"settings-graphics-open", Tab::Graphics, kPopupFirst + 3, kQuality},
                  {L"settings-display", Tab::Display, option_id(kFullscreen, 0), -1},
                  {L"settings-effects", Tab::Effects, option_id(kVibrance, 0), -1},
+                 {L"settings-mods", Tab::Mods, kModsLink, -1},
                  {L"settings-captures", Tab::Captures, kVideosFolder, -1},
                  {L"settings-captures-open", Tab::Captures, kPopupFirst + 1, kCaptureSize},
                  {L"settings-performance", Tab::Performance, kOkButton, -1},

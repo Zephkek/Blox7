@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -172,6 +174,66 @@ TEST_F(LibcShimTest, ValidCaBundleOverrideMapsAndroidAliases) {
   EXPECT_EQ(fclose(mapped_file), 0);
 
   EXPECT_EQ(unlink(temp_template), 0);
+}
+
+TEST_F(LibcShimTest, ModsReplaceRobloxMediaButNotCodeOrCertificates) {
+  char temp_template[] = "/tmp/blox7_mods_XXXXXX";
+  ASSERT_NE(mkdtemp(temp_template), nullptr);
+  const std::filesystem::path base(temp_template);
+  const std::filesystem::path assets = base / "payload/assets";
+  const std::filesystem::path mods = base / "mods";
+  const auto touch = [](const std::filesystem::path& file) {
+    std::filesystem::create_directories(file.parent_path());
+    std::ofstream(file) << "blox7";
+  };
+  for (const char* font :
+       {"content/fonts/BuilderSans-Regular.otf", "content/fonts/NotoSansThaiUI-Regular.ttf",
+        "content/fonts/TwemojiMozilla.ttf", "fonts/SourceSansPro-Regular.ttf"})
+    touch(assets / font);
+  for (const char* file :
+       {"content/textures/ui/Button.png", "ExtraContent/textures/sky/white.png",
+        "ExtraContent/LuaPackages/Init.lua", "content/ssl/cacert.pem"})
+    touch(mods / file);
+  touch(base / "arrow.png");
+  touch(base / "font.ttf");
+  ASSERT_EQ(setenv("BLOX7_ASSET_PATH", (assets / "content/").c_str(), 1), 0);
+  ASSERT_EQ(setenv("BLOX7_MODS_DIR", mods.c_str(), 1), 0);
+  ASSERT_EQ(setenv("BLOX7_FONT_FILE", (base / "font.ttf").c_str(), 1), 0);
+  ASSERT_EQ(setenv("BLOX7_CURSOR_ARROW_FILE", (base / "arrow.png").c_str(), 1), 0);
+  ASSERT_EQ(setenv("BLOX7_CURSOR_HAND_FILE", (base / "hand.png").c_str(), 1), 0);
+
+  ConfigureModPathMappings();
+
+  const std::string arrow = "content/textures/Cursors/KeyboardMouse/ArrowFarCursor.png";
+  for (const std::string& alias :
+       {arrow, "rbx_bin/assets/" + arrow, (assets / arrow).string()})
+    EXPECT_EQ(TranslatePath(alias), (base / "arrow.png").string());
+  const std::string hand = "content/textures/Cursors/KeyboardMouse/ArrowCursor.png";
+  EXPECT_EQ(TranslatePath(hand), hand);
+  EXPECT_EQ(TranslatePath("content/textures/ui/Button.png"),
+            (mods / "content/textures/ui/Button.png").string());
+  EXPECT_EQ(TranslatePath("rbx_bin/assets/ExtraContent/textures/sky/white.png"),
+            (mods / "ExtraContent/textures/sky/white.png").string());
+  for (const char* untouched :
+       {"rbx_bin/assets/ExtraContent/LuaPackages/Init.lua", "content/ssl/cacert.pem",
+        "content/fonts/NotoSansThaiUI-Regular.ttf", "content/fonts/TwemojiMozilla.ttf"})
+    EXPECT_EQ(TranslatePath(untouched), untouched);
+  EXPECT_EQ(TranslatePath("content/fonts/BuilderSans-Regular.otf"),
+            (base / "font.ttf").string());
+  EXPECT_EQ(TranslatePath("rbx_bin/assets/fonts/SourceSansPro-Regular.ttf"),
+            (base / "font.ttf").string());
+  char asset[512];
+  ASSERT_TRUE(blox7_mod_file(arrow.c_str(), asset, sizeof asset));
+  EXPECT_EQ(std::string(asset), (base / "arrow.png").string());
+  ASSERT_TRUE(blox7_mod_file("content/fonts/BuilderSans-Regular.otf", asset, sizeof asset));
+  EXPECT_EQ(std::string(asset), (base / "font.ttf").string());
+  EXPECT_FALSE(blox7_mod_file("content/ssl/cacert.pem", asset, sizeof asset));
+  EXPECT_FALSE(blox7_mod_file(hand.c_str(), asset, sizeof asset));
+
+  for (const char* variable : {"BLOX7_MODS_DIR", "BLOX7_FONT_FILE",
+                               "BLOX7_CURSOR_ARROW_FILE", "BLOX7_CURSOR_HAND_FILE"})
+    EXPECT_EQ(unsetenv(variable), 0);
+  std::filesystem::remove_all(base);
 }
 
 TEST_F(LibcShimTest, SystemCaBundleIsResolvedAsAbsoluteRegularFile) {

@@ -35,6 +35,8 @@ HostCaBundleResolution ResolveHostCaBundle();
 
 HostCaBundleResolution ConfigureHostCaBundlePathMappings();
 
+void ConfigureModPathMappings();
+
 const char* HostCaBundleStatusName(HostCaBundleStatus status);
 
 std::string TranslatePath(const std::string& android_path);
@@ -64,6 +66,7 @@ char* blox7_realpath(const char* path, char* resolved_path);
 ssize_t blox7_readlink(const char* path, char* buf, size_t bufsiz);
 ssize_t blox7___readlink_chk(const char* path, char* buf, size_t len,
                                 size_t buf_len);
+bool blox7_mod_file(const char* relative, char* file, size_t size);
 }
 
 #endif  // BLOX7_LIBC_SHIM_LIBC_SHIM_H_

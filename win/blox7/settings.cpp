@@ -1,10 +1,12 @@
 #include <dxgi1_6.h>
 #include <mfapi.h>
 #include <shlobj.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
 #include <map>
 #include <optional>
@@ -622,6 +624,85 @@ std::wstring set_join_links(const Paths& paths, bool on, std::map<std::string, s
   return error;
 }
 
+const CLSID kWicFactory = {0xcacaf262, 0x9370, 0x4615, {0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a}};
+const GUID kPngContainer = {0x1b7cfaf4, 0x713f, 0x473c, {0xbb, 0xcd, 0x61, 0x37, 0x42, 0x5f, 0xae, 0xaf}};
+const GUID kBgra = {0x6fddc324, 0x4e03, 0x4bfe, {0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x0f}};
+
+template <class T>
+void release(T*& p) {
+  if (p) p->Release();
+  p = nullptr;
+}
+
+std::wstring with_image(const std::wstring& file,
+                        const std::function<std::wstring(IWICImagingFactory*, IWICBitmapDecoder*)>& use) {
+  HMODULE ole = LoadLibraryW(L"ole32.dll");
+  using InitFn = HRESULT(WINAPI*)(LPVOID, DWORD);
+  using UninitFn = void(WINAPI*)();
+  using CreateFn = HRESULT(WINAPI*)(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID*);
+  const auto init = ole ? reinterpret_cast<InitFn>(GetProcAddress(ole, "CoInitializeEx")) : nullptr;
+  const auto uninit = ole ? reinterpret_cast<UninitFn>(GetProcAddress(ole, "CoUninitialize")) : nullptr;
+  const auto create = ole ? reinterpret_cast<CreateFn>(GetProcAddress(ole, "CoCreateInstance")) : nullptr;
+  if (!init || !uninit || !create) return L"Windows can't read images here.";
+  const HRESULT com = init(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  IWICImagingFactory* wic = nullptr;
+  IWICBitmapDecoder* decoder = nullptr;
+  std::wstring error = L"Windows can't read this image.";
+  if (SUCCEEDED(create(kWicFactory, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IWICImagingFactory), reinterpret_cast<void**>(&wic))) &&
+      SUCCEEDED(wic->CreateDecoderFromFilename(file.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder)))
+    error = use(wic, decoder);
+  release(decoder);
+  release(wic);
+  if (SUCCEEDED(com)) uninit();
+  return error;
+}
+
+std::wstring save_icon_png(const std::wstring& source, const std::wstring& target) {
+  return with_image(source, [&target](IWICImagingFactory* wic, IWICBitmapDecoder* decoder) -> std::wstring {
+    UINT frames = 0, best = 0, best_area = 0;
+    decoder->GetFrameCount(&frames);
+    for (UINT i = 0; i < frames; ++i) {
+      IWICBitmapFrameDecode* frame = nullptr;
+      UINT w = 0, h = 0;
+      if (SUCCEEDED(decoder->GetFrame(i, &frame)) && SUCCEEDED(frame->GetSize(&w, &h)) && w * h > best_area) {
+        best = i;
+        best_area = w * h;
+      }
+      release(frame);
+    }
+    if (best_area == 0) return L"Windows can't read this image.";
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICBitmapScaler* scaler = nullptr;
+    IWICFormatConverter* converter = nullptr;
+    IWICStream* stream = nullptr;
+    IWICBitmapEncoder* encoder = nullptr;
+    IWICBitmapFrameEncode* out = nullptr;
+    UINT w = 0, h = 0;
+    bool ok = SUCCEEDED(decoder->GetFrame(best, &frame)) && SUCCEEDED(frame->GetSize(&w, &h));
+    const double fit = std::min(1.0, 256.0 / std::max(w, h));
+    const UINT fw = std::max(1L, std::lround(w * fit)), fh = std::max(1L, std::lround(h * fit));
+    const std::wstring fresh = target + L".new";
+    ok = ok && SUCCEEDED(wic->CreateBitmapScaler(&scaler)) &&
+         SUCCEEDED(scaler->Initialize(frame, fw, fh, WICBitmapInterpolationModeFant)) &&
+         SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
+         SUCCEEDED(converter->Initialize(scaler, kBgra, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom)) &&
+         SUCCEEDED(wic->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(fresh.c_str(), GENERIC_WRITE)) &&
+         SUCCEEDED(wic->CreateEncoder(kPngContainer, nullptr, &encoder)) &&
+         SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) && SUCCEEDED(encoder->CreateNewFrame(&out, nullptr)) &&
+         SUCCEEDED(out->Initialize(nullptr)) && SUCCEEDED(out->WriteSource(converter, nullptr)) && SUCCEEDED(out->Commit()) &&
+         SUCCEEDED(encoder->Commit());
+    release(out);
+    release(encoder);
+    release(stream);
+    release(converter);
+    release(scaler);
+    release(frame);
+    if (ok && MoveFileExW(fresh.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) return {};
+    DeleteFileW(fresh.c_str());
+    return L"Blox7 couldn't save the window icon.";
+  });
+}
+
 }  // namespace
 
 Settings load_settings(const Paths& paths) {
@@ -691,6 +772,11 @@ Settings load_settings(const Paths& paths) {
   s.capture_processor = text("capture_encoder") == "processor";
   s.screenshots_dir = widen(text("screenshots_dir"));
   s.videos_dir = widen(text("videos_dir"));
+  s.cursor_arrow = widen(text("cursor_arrow"));
+  s.cursor_hand = widen(text("cursor_hand"));
+  s.font = widen(text("font"));
+  s.window_title = widen(text("window_title"));
+  s.window_icon = widen(text("window_icon"));
   return s;
 }
 
@@ -799,6 +885,11 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["capture_encoder"] = s.capture_processor ? "processor" : "";
   ini["screenshots_dir"] = narrow(s.screenshots_dir);
   ini["videos_dir"] = narrow(s.videos_dir);
+  ini["cursor_arrow"] = narrow(s.cursor_arrow);
+  ini["cursor_hand"] = narrow(s.cursor_hand);
+  ini["font"] = narrow(s.font);
+  ini["window_title"] = narrow(s.window_title);
+  ini["window_icon"] = narrow(s.window_icon);
   const bool vulkan = s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan";
   set_windows_gpu_preference(paths, !vulkan && !s.gpu.empty() ? windows_gpu_preference(s.gpu) : 0, ini);
   std::wstring links = set_join_links(paths, s.join_links, ini);
@@ -861,6 +952,19 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
     if (refresh_shader(paths, fx.shader, &rebuilt).empty()) compiled = widen(posix_path(paths.home + L"\\shader.spv"));
   }
   SetEnvironmentVariableW(L"BLOX7_POST_SHADER", compiled.empty() ? nullptr : compiled.c_str());
+
+  const auto export_file = [](const wchar_t* variable, const std::wstring& file) {
+    const std::string path = GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES ? std::string() : posix_path(file);
+    SetEnvironmentVariableW(variable, path.empty() ? nullptr : widen(path).c_str());
+  };
+  export_file(L"BLOX7_MODS_DIR", mods_folder(paths));
+  export_file(L"BLOX7_CURSOR_ARROW_FILE", s.cursor_arrow);
+  export_file(L"BLOX7_CURSOR_HAND_FILE", s.cursor_hand);
+  export_file(L"BLOX7_FONT_FILE", s.font);
+  SetEnvironmentVariableW(L"BLOX7_WIN_TITLE", s.window_title.empty() ? nullptr : s.window_title.c_str());
+  const std::wstring icon = paths.home + L"\\window-icon.png";
+  if (!s.window_icon.empty() && save_icon_png(s.window_icon, icon).empty())
+    SetEnvironmentVariableW(L"BLOX7_WINDOW_ICON_FILE", widen(posix_path(icon)).c_str());
 }
 
 std::wstring refresh_shader(const Paths& paths, const std::wstring& source, bool* rebuilt) {
@@ -986,6 +1090,35 @@ double capture_megabytes(const Settings& s) {
   if (area <= 0) return 0;
   const double bits = s.capture_fps * std::pow(8294400.0 / area, 0.5) * capture_bits(s.capture_quality) / 1000.0 * area;
   return bits * 30 / 8 / 1e6;
+}
+
+std::wstring mods_folder(const Paths& paths) { return paths.home + L"\\mods"; }
+
+std::wstring check_cursor(const std::wstring& file) {
+  return with_image(file, [](IWICImagingFactory*, IWICBitmapDecoder* decoder) -> std::wstring {
+    GUID format{};
+    if (FAILED(decoder->GetContainerFormat(&format)) || format != kPngContainer) return L"Roblox only reads PNG cursors.";
+    return {};
+  });
+}
+
+std::wstring check_font(const std::wstring& file) {
+  HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return L"Blox7 can't open this file.";
+  char head[4] = {};
+  DWORD got = 0;
+  ReadFile(handle, head, sizeof head, &got, nullptr);
+  CloseHandle(handle);
+  const bool font = got == sizeof head && (memcmp(head, "\0\1\0\0", 4) == 0 || memcmp(head, "OTTO", 4) == 0 ||
+                                           memcmp(head, "true", 4) == 0);
+  return font ? std::wstring() : L"That isn't a .ttf or .otf font.";
+}
+
+std::wstring check_icon(const std::wstring& file) {
+  return with_image(file, [](IWICImagingFactory*, IWICBitmapDecoder* decoder) -> std::wstring {
+    UINT frames = 0;
+    return SUCCEEDED(decoder->GetFrameCount(&frames)) && frames > 0 ? std::wstring() : L"Windows can't read this image.";
+  });
 }
 
 std::wstring hardware_video_encoder() {
