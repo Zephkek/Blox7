@@ -50,14 +50,17 @@ replaced by a syscall layer that runs on Win32 inside the game's process.
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
-    <img src="docs/how-it-works-light.svg" alt="On a phone, libroblox.so, the Android runtime and Bionic libc call into the Linux kernel. In Blox7 the same libroblox.so and Bionic run on the Blox7 runtime and the Blox7 syscall layer, which calls Win32 and the Windows NT kernel.">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.png">
+    <img src="docs/how-it-works-light.png" width="692" alt="Blox7's stack, drawn like Android's platform diagram: Roblox's libroblox.so on top, then the Blox7 runtime, the Android libraries and the JNI runtime, the Win32 bridges, the Blox7 syscall layer, and Windows 7 through 11.">
   </picture>
 </p>
 
 Bionic's syscall stubs call functions like `sys_openat` and `sys_futex` instead of the kernel, and each one answers
 the way Linux would. Roblox also contains a few raw `syscall` instructions that don't go through libc. Each of those
 gets a debug register parked on it, and the exception handler runs the call through the same table.
+
+Roblox's Java code never runs. Its native code still calls into Java through JNI, and Blox7's JNI VM answers those
+calls in C++.
 
 Graphics, input and audio skip the syscall layer. Bridges pass them to the Windows GPU driver and SDL3.
 
