@@ -494,6 +494,38 @@ bool in_windows_image(void* address) {
   return w32.VirtualQuery(address, &mbi, sizeof mbi) && mbi.type == 0x1000000 /* MEM_IMAGE */;
 }
 
+bool stack_memory(const W32_MEMORY_BASIC_INFORMATION& m) {
+  return m.state == 0x1000 && (m.protect & 0xcc) && !(m.protect & 0x100);
+}
+
+bool fit_stack(uintptr_t sp) {
+  void** teb;
+  __asm__("mov %%gs:0x30, %0" : "=r"(teb));
+  if (sp >= reinterpret_cast<uintptr_t>(teb[2]) && sp < reinterpret_cast<uintptr_t>(teb[1])) return false;
+  W32_MEMORY_BASIC_INFORMATION m;
+  if (!w32.VirtualQuery(reinterpret_cast<void*>(sp), &m, sizeof m) || !stack_memory(m)) return false;
+  void* const owner = m.allocation_base;
+  uintptr_t lo = reinterpret_cast<uintptr_t>(m.base), hi = lo + m.region_size;
+  while (lo > reinterpret_cast<uintptr_t>(owner) && w32.VirtualQuery(reinterpret_cast<void*>(lo - 1), &m, sizeof m) &&
+         m.allocation_base == owner && stack_memory(m))
+    lo = reinterpret_cast<uintptr_t>(m.base);
+  while (w32.VirtualQuery(reinterpret_cast<void*>(hi), &m, sizeof m) && m.allocation_base == owner && stack_memory(m))
+    hi = reinterpret_cast<uintptr_t>(m.base) + m.region_size;
+  teb[2] = reinterpret_cast<void*>(lo);
+  teb[1] = reinterpret_cast<void*>(hi);
+  return true;
+}
+
+bool finish_stack_probe(const WinExceptionRecord* r, WinContext* c) {
+  static constexpr uint8_t kTestProbe[] = {0x45, 0x84, 0x1b, 0x4d, 0x3b, 0xd3};
+  static constexpr uint8_t kStoreProbe[] = {0x41, 0xc6, 0x03, 0x00, 0x4d, 0x3b, 0xd3};
+  const void* ip = reinterpret_cast<const void*>(c->rip);
+  if (memcmp(ip, kTestProbe, sizeof kTestProbe) != 0 && memcmp(ip, kStoreProbe, sizeof kStoreProbe) != 0) return false;
+  if (r->information[1] != c->r11 || c->r10 >= c->r11) return false;
+  c->r11 = c->r10;
+  return true;
+}
+
 long WINAPI on_exception(WinExceptionPointers* ep) {
   WinExceptionRecord* r = ep->record;
   WinContext* c = ep->context;
@@ -514,9 +546,12 @@ long WINAPI on_exception(WinExceptionPointers* ep) {
     case kIntOverflow: sig = SIGFPE; code = FPE_INTOVF; break;
     case kBreakpoint: case kSingleStep: sig = SIGTRAP; code = TRAP_BRKPT; break;
     case kStackOverflow: return kContinueSearch;
-    default: return kContinueSearch;
+    default: fit_stack(c->rsp); return kContinueSearch;
   }
-  if (in_windows_image(r->address)) return kContinueSearch;
+  if (in_windows_image(r->address)) {
+    if (fit_stack(c->rsp) && r->code == kAccessViolation && finish_stack_probe(r, c)) return kContinueExecution;
+    return kContinueSearch;
+  }
   siginfo_t info;
   memset(&info, 0, sizeof info);
   info.si_signo = sig;
