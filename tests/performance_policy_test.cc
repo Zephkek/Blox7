@@ -321,6 +321,7 @@ TEST(PerformancePolicyTest, ComposesFrameRateBeforePerformanceMode) {
   EXPECT_EQ(parsed.at("DFFlagHttpClientSkipRetryForStreamingRequests"), "True");
   EXPECT_EQ(parsed.at("FFlagLuaAppDefaultHttpRetry"), "False");
   EXPECT_EQ(parsed.at("DFFlagDebugEnableToggleForNonWindows"), "True");
+  EXPECT_EQ(parsed.at("FFlagSlowDownRenderingHonorEarlyRelease"), "True");
 }
 
 TEST(PerformancePolicyTest, RejectsConflictingOrMalformedOverrides) {

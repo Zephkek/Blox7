@@ -68,9 +68,14 @@ int LogicalCpuFallback(const cpu_set_t* allowed) {
   return static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
 }
 
-bool MergeVideoCaptureClientSettingsOverrides(std::string_view base_json,
-                                              std::string *merged_json,
-                                              std::string *error) {
+constexpr std::array<ClientSetting, 2> kClientFixSettings = {{
+    {"DFFlagDebugEnableToggleForNonWindows", "True"},
+    {"FFlagSlowDownRenderingHonorEarlyRelease", "True"},
+}};
+
+bool MergeClientFixSettingsOverrides(std::string_view base_json,
+                                     std::string *merged_json,
+                                     std::string *error) {
   nlohmann::json overrides =
       nlohmann::json::parse(base_json, nullptr, false, true);
   if (overrides.is_discarded() || !overrides.is_object()) {
@@ -79,7 +84,9 @@ bool MergeVideoCaptureClientSettingsOverrides(std::string_view base_json,
     }
     return false;
   }
-  overrides["DFFlagDebugEnableToggleForNonWindows"] = "True";
+  for (const ClientSetting &setting : kClientFixSettings) {
+    overrides[std::string(setting.name)] = std::string(setting.value);
+  }
   *merged_json = overrides.dump();
   return true;
 }
@@ -381,8 +388,8 @@ bool MergeRuntimeClientSettingsOverrides(const FrameRatePolicy& frame_rate,
                                                error)) {
     return false;
   }
-  return MergeVideoCaptureClientSettingsOverrides(crash_report_overrides,
-                                                  merged_json, error);
+  return MergeClientFixSettingsOverrides(crash_report_overrides, merged_json,
+                                         error);
 }
 
 bool MergeAudioDeviceMenuClientSettingsOverrides(std::string_view base_json,
