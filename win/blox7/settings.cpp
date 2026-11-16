@@ -1,4 +1,6 @@
 #include <dxgi1_6.h>
+#include <mfapi.h>
+#include <shlobj.h>
 
 #include <algorithm>
 #include <cmath>
@@ -322,7 +324,38 @@ const char* const kPresetFlags[][2] = {
 const char* const kScaleFlags[] = {"DFIntDebugDynamicRenderKiloPixels", "FFlagRenderLoadExperimentalUpscalers",
                                    "DFFlagRenderLanczosUpsamplingNonRinging"};
 
+const char* const kCaptureFlags[] = {"FIntVideoCaptureMaxLongSide", "FIntVideoCaptureMaxShortSide", "DFIntCaptureVideoMaxFrameRate",
+                                     "DFIntCaptureVideoBitsPerThousandPixels"};
+
+struct CaptureBox {
+  int longer, shorter;
+};
+
+CaptureBox capture_box(int size) {
+  if (size == 0) return {4096, 2304};
+  if (size == 1080 || size == 1440) return {size * 16 / 9, size};
+  return {1280, 720};
+}
+
+int capture_bits(const std::wstring& quality) { return quality == L"highest" ? 200 : quality == L"high" ? 150 : 100; }
+
 using FlagList = std::vector<std::pair<std::string, std::string>>;
+
+FlagList capture_flags(const Settings& s) {
+  FlagList flags;
+  if (s.capture_size != 720) {
+    const CaptureBox box = capture_box(s.capture_size);
+    flags.emplace_back(kCaptureFlags[0], std::to_string(box.longer));
+    flags.emplace_back(kCaptureFlags[1], std::to_string(box.shorter));
+  }
+  if (s.capture_fps != 30) flags.emplace_back(kCaptureFlags[2], std::to_string(s.capture_fps));
+  if (s.capture_quality != L"auto") flags.emplace_back(kCaptureFlags[3], std::to_string(capture_bits(s.capture_quality)));
+  return flags;
+}
+
+bool is_capture_flag(const std::string& name) {
+  return std::find(std::begin(kCaptureFlags), std::end(kCaptureFlags), name) != std::end(kCaptureFlags);
+}
 
 bool own_flags(FlagList& flags, std::map<std::string, std::string>& ini, const char* key, const FlagList& wanted,
                bool (*mine)(const std::string&)) {
@@ -338,12 +371,15 @@ bool is_scale_flag(const std::string& name) {
   return std::find(std::begin(kScaleFlags), std::end(kScaleFlags), name) != std::end(kScaleFlags);
 }
 
-void apply_quality(const Paths& paths, const Settings& s) {
+const Preset* find_preset(const Settings& s) {
   const std::string id = narrow(s.quality);
-  const Preset* preset = nullptr;
   for (const Preset& p : kPresets)
-    if (id == p.id) preset = &p;
+    if (id == p.id) return &p;
+  return nullptr;
+}
 
+void apply_owned_flags(const Paths& paths, const Settings& s) {
+  const Preset* preset = find_preset(s);
   auto ini = read_ini(ini_path(paths));
   const std::wstring flags_file = fflags_path(paths);
   auto flags = read_flags(read_all(flags_file));
@@ -359,12 +395,16 @@ void apply_quality(const Paths& paths, const Settings& s) {
   }
   const bool presets = own_flags(flags, ini, "preset_flags", preset_flags, is_preset_flag);
   const bool scaled = own_flags(flags, ini, "scale_flags", scale_flags, is_scale_flag);
-  if (presets || scaled) {
+  const bool captures = own_flags(flags, ini, "capture_flags", capture_flags(s), is_capture_flag);
+  if (presets || scaled || captures) {
     make_parent(flags_file);
     write_all(flags_file, write_flags(flags));
     write_ini(ini_path(paths), ini);
   }
+}
 
+void apply_quality(const Paths& paths, const Settings& s) {
+  const Preset* preset = find_preset(s);
   if (!preset) return;
   const std::wstring xml_path = basic_settings_path(paths);
   if (xml_path.empty()) return;
@@ -639,6 +679,18 @@ Settings load_settings(const Paths& paths) {
   s.fxaa = number("fx_fxaa", 0) > 0.5f;
   if (const auto shader = ini.find("shader"); shader != ini.end()) s.shader = widen(shader->second);
   if (s.effects != L"custom") effects_preset(&s, s.effects);
+  const auto text = [&ini](const char* key) {
+    const auto found = ini.find(key);
+    return found == ini.end() ? std::string() : found->second;
+  };
+  const std::string size = text("capture_size"), quality = text("capture_quality");
+  if (size == "1080" || size == "1440") s.capture_size = atoi(size.c_str());
+  else if (size == "game") s.capture_size = 0;
+  if (text("capture_fps") == "60") s.capture_fps = 60;
+  if (quality == "high" || quality == "highest") s.capture_quality = widen(quality);
+  s.capture_processor = text("capture_encoder") == "processor";
+  s.screenshots_dir = widen(text("screenshots_dir"));
+  s.videos_dir = widen(text("videos_dir"));
   return s;
 }
 
@@ -741,6 +793,12 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["fx_brightness"] = s.effects == L"custom" ? decimal(s.brightness) : "";
   ini["fx_fxaa"] = s.fxaa ? "1" : "";
   ini["shader"] = narrow(s.shader);
+  ini["capture_size"] = s.capture_size == 0 ? "game" : s.capture_size == 720 ? "" : std::to_string(s.capture_size);
+  ini["capture_fps"] = s.capture_fps == 30 ? "" : std::to_string(s.capture_fps);
+  ini["capture_quality"] = s.capture_quality == L"auto" ? "" : narrow(s.capture_quality);
+  ini["capture_encoder"] = s.capture_processor ? "processor" : "";
+  ini["screenshots_dir"] = narrow(s.screenshots_dir);
+  ini["videos_dir"] = narrow(s.videos_dir);
   const bool vulkan = s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan";
   set_windows_gpu_preference(paths, !vulkan && !s.gpu.empty() ? windows_gpu_preference(s.gpu) : 0, ini);
   std::wstring links = set_join_links(paths, s.join_links, ini);
@@ -766,8 +824,12 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
     s.backend = L"opengl";
     SetEnvironmentVariableW(L"BLOX7_GRAPHICS_BACKEND", L"opengl");
   }
+  apply_owned_flags(paths, s);
   apply_quality(paths, s);
   SetEnvironmentVariableW(L"BLOX7_VULKAN_DEVICE", s.gpu.empty() ? nullptr : s.gpu.c_str());
+  SetEnvironmentVariableW(L"BLOX7_SCREENSHOTS_DIR", s.screenshots_dir.empty() ? nullptr : s.screenshots_dir.c_str());
+  SetEnvironmentVariableW(L"BLOX7_VIDEOS_DIR", s.videos_dir.empty() ? nullptr : s.videos_dir.c_str());
+  SetEnvironmentVariableW(L"BLOX7_VIDEO_ENCODER", s.capture_processor ? L"software" : nullptr);
   const wchar_t* driver = nullptr;
   if (s.gpu.rfind(L"10de:", 0) == 0) driver = L"*nv-vk*";
   else if (s.gpu.rfind(L"8086:", 0) == 0) driver = L"*igvk*";
@@ -883,13 +945,93 @@ std::vector<int> refresh_rates() {
 
 std::vector<FastFlag> load_fast_flags(const Paths& paths) {
   auto ini = read_ini(ini_path(paths));
-  const bool presets = ini["preset_flags"] == "1", scaled = ini["scale_flags"] == "1";
+  const bool presets = ini["preset_flags"] == "1", scaled = ini["scale_flags"] == "1", captured = ini["capture_flags"] == "1";
   std::vector<FastFlag> flags;
   for (const auto& [name, raw] : read_flags(read_all(fflags_path(paths)))) {
-    const wchar_t* owner = presets && is_preset_flag(name) ? L"Super HQ" : scaled && is_scale_flag(name) ? L"Render scale" : nullptr;
+    const wchar_t* owner = presets && is_preset_flag(name)    ? L"Super HQ"
+                           : scaled && is_scale_flag(name)     ? L"Render scale"
+                           : captured && is_capture_flag(name) ? L"Captures"
+                                                               : nullptr;
     flags.push_back({widen(name), shown_value(raw), owner != nullptr, owner ? owner : L""});
   }
   return flags;
+}
+
+std::wstring capture_folder(const Settings& s, bool videos) {
+  const std::wstring& chosen = videos ? s.videos_dir : s.screenshots_dir;
+  if (!chosen.empty()) return chosen;
+  static const GUID kPictures = {0x33E28130, 0x4E1E, 0x4676, {0x83, 0x5A, 0x98, 0x39, 0x5C, 0x3B, 0xC3, 0xBB}};
+  static const GUID kVideos = {0x18989B1D, 0x99B5, 0x455B, {0x84, 0x1C, 0xAB, 0x7C, 0x74, 0xE4, 0xDD, 0xFC}};
+  using FreeFn = void(WINAPI*)(LPVOID);
+  static const auto free_memory = reinterpret_cast<FreeFn>(GetProcAddress(LoadLibraryW(L"ole32.dll"), "CoTaskMemFree"));
+  PWSTR known = nullptr;
+  std::wstring folder;
+  if (SUCCEEDED(SHGetKnownFolderPath(videos ? kVideos : kPictures, 0, nullptr, &known)) && known) folder = std::wstring(known) + L"\\Roblox";
+  if (known && free_memory) free_memory(known);
+  return folder;
+}
+
+SIZE capture_frame(const Settings& s) {
+  const SIZE game = render_size(s);
+  const CaptureBox box = capture_box(s.capture_size);
+  const double longer = std::max(game.cx, game.cy), shorter = std::min(game.cx, game.cy);
+  if (longer <= 0 || shorter <= 0) return {0, 0};
+  const double scale = std::min({1.0, box.longer / longer, box.shorter / shorter});
+  return {static_cast<LONG>(std::lround(game.cx * scale)) & ~1L, static_cast<LONG>(std::lround(game.cy * scale)) & ~1L};
+}
+
+double capture_megabytes(const Settings& s) {
+  const SIZE frame = capture_frame(s);
+  const double area = static_cast<double>(frame.cx) * frame.cy;
+  if (area <= 0) return 0;
+  const double bits = s.capture_fps * std::pow(8294400.0 / area, 0.5) * capture_bits(s.capture_quality) / 1000.0 * area;
+  return bits * 30 / 8 / 1e6;
+}
+
+std::wstring hardware_video_encoder() {
+  static const std::wstring found = [] {
+    static const GUID kEncoders = {0xF79EAC7D, 0xE545, 0x4387, {0xBD, 0xEE, 0xD6, 0x47, 0xD7, 0xBD, 0xE4, 0x2A}};
+    static const GUID kVideo = {0x73646976, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
+    static const GUID kNv12 = {0x3231564E, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
+    static const GUID kH264 = {0x34363248, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
+    static const GUID kFriendlyName = {0x314FFBAE, 0x5B41, 0x4C95, {0x9C, 0x19, 0x4E, 0x7D, 0x58, 0x6F, 0xAC, 0xE3}};
+    HMODULE mfplat = LoadLibraryW(L"mfplat.dll");
+    HMODULE ole = LoadLibraryW(L"ole32.dll");
+    using StartupFn = HRESULT(WINAPI*)(ULONG, DWORD);
+    using ShutdownFn = HRESULT(WINAPI*)();
+    using EnumFn = HRESULT(WINAPI*)(GUID, UINT32, const MFT_REGISTER_TYPE_INFO*, const MFT_REGISTER_TYPE_INFO*, IMFActivate***, UINT32*);
+    using FreeFn = void(WINAPI*)(LPVOID);
+    using InitFn = HRESULT(WINAPI*)(LPVOID, DWORD);
+    using UninitFn = void(WINAPI*)();
+    const auto startup = mfplat ? reinterpret_cast<StartupFn>(GetProcAddress(mfplat, "MFStartup")) : nullptr;
+    const auto shutdown = mfplat ? reinterpret_cast<ShutdownFn>(GetProcAddress(mfplat, "MFShutdown")) : nullptr;
+    const auto enumerate = mfplat ? reinterpret_cast<EnumFn>(GetProcAddress(mfplat, "MFTEnumEx")) : nullptr;
+    const auto free_memory = ole ? reinterpret_cast<FreeFn>(GetProcAddress(ole, "CoTaskMemFree")) : nullptr;
+    const auto init = ole ? reinterpret_cast<InitFn>(GetProcAddress(ole, "CoInitializeEx")) : nullptr;
+    const auto uninit = ole ? reinterpret_cast<UninitFn>(GetProcAddress(ole, "CoUninitialize")) : nullptr;
+    std::wstring name;
+    if (!startup || !shutdown || !enumerate || !free_memory || !init || !uninit) return name;
+    const HRESULT com = init(nullptr, COINIT_APARTMENTTHREADED);
+    if (SUCCEEDED(startup(MF_VERSION, MFSTARTUP_LITE))) {
+      const MFT_REGISTER_TYPE_INFO in{kVideo, kNv12}, out{kVideo, kH264};
+      IMFActivate** activates = nullptr;
+      UINT32 count = 0;
+      if (SUCCEEDED(enumerate(kEncoders, MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER, &in, &out, &activates, &count)) && activates) {
+        for (UINT32 i = 0; i < count; ++i) {
+          LPWSTR text = nullptr;
+          UINT32 length = 0;
+          if (name.empty() && SUCCEEDED(activates[i]->GetAllocatedString(kFriendlyName, &text, &length)) && text) name = text;
+          if (text) free_memory(text);
+          activates[i]->Release();
+        }
+        free_memory(activates);
+      }
+      shutdown();
+    }
+    if (SUCCEEDED(com)) uninit();
+    return name;
+  }();
+  return found;
 }
 
 SIZE render_size(const Settings& s) {
@@ -917,6 +1059,7 @@ std::wstring check_fast_flag(const std::wstring& name, std::wstring* value, cons
   if (pending.quality == L"superhq" && is_preset_flag(plain)) return L"Super HQ sets this flag. Change the preset first.";
   if (pending.backend.find(L"vulkan") != std::wstring::npos && pending.render_scale < 100 && is_scale_flag(plain))
     return L"Render scale sets this flag. Change it under Graphics.";
+  if (!capture_flags(pending).empty() && is_capture_flag(plain)) return L"Captures sets this flag. Change it on the Captures tab.";
   std::wstring v = trimmed_wide(*value);
   if (kind == FlagKind::kFlag) {
     std::wstring lower = v;

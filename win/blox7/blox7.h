@@ -49,6 +49,12 @@ struct Settings {
   std::wstring gpu;
   bool join_links = false;
   int render_scale = 100;
+  int capture_size = 720;
+  int capture_fps = 30;
+  std::wstring capture_quality = L"auto";
+  bool capture_processor = false;
+  std::wstring screenshots_dir;
+  std::wstring videos_dir;
 };
 
 enum class DeviceKind { kPhone, kTablet, kPc, kConsole };
@@ -93,6 +99,10 @@ SIZE render_size(const Settings& settings);
 std::wstring export_fast_flags(const std::wstring& file, const std::vector<FastFlag>& flags);
 void effects_preset(Settings* settings, const std::wstring& preset);
 std::wstring compile_shader(const Paths& paths, const std::wstring& source);
+std::wstring capture_folder(const Settings& settings, bool videos);
+SIZE capture_frame(const Settings& settings);
+double capture_megabytes(const Settings& settings);
+std::wstring hardware_video_encoder();
 
 Paths resolve_paths();
 OsInfo os_info();

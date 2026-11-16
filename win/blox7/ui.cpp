@@ -2,6 +2,8 @@
 #include <dwrite.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <wincodec.h>
 
 #include <algorithm>
@@ -34,7 +36,7 @@ constexpr UINT_PTR kCaretTimer = 3;
 constexpr UINT kAboutCommand = 0x0010;
 
 constexpr float kMargin = 11, kMainWidth = 460, kCommandHeight = 45;
-constexpr float kDialogWidth = 424, kDialogHeight = 360, kTabHeight = 21;
+constexpr float kDialogWidth = 460, kDialogHeight = 380, kTabHeight = 21;
 constexpr float kButtonWidth = 75, kButtonHeight = 23, kGap = 7;
 
 constexpr uint32_t kWhite = 0xFFFFFF, kBlack = 0x000000, kFace = 0xF0F0F0, kSeparator = 0xDFDFDF;
@@ -65,7 +67,7 @@ uint32_t mix(uint32_t a, uint32_t b, float t) {
 }
 
 enum class Stage { Unpacking, Ready, Launching, Running, Failed };
-enum class Tab { Graphics, Display, Effects, Performance, Flags, Device, About };
+enum class Tab { Graphics, Display, Effects, Captures, Performance, Flags, Device, About };
 enum class Look { Normal, Hot, Pressed, Disabled };
 enum class Glyph { Phone, Tablet, Pc, Console };
 enum class Cursor { Arrow, Hand, Beam };
@@ -89,6 +91,11 @@ enum : int {
   kLicensesLink,
   kBrowseShader,
   kRemoveShader,
+  kScreenshotsFolder,
+  kVideosFolder,
+  kScreenshotsLink,
+  kVideosLink,
+  kDefaultFoldersLink,
   kTabFirst = 100,
   kFlagRowFirst = 200,
   kBackdrop = 899,
@@ -118,6 +125,10 @@ enum Control : int {
   kBrightness,
   kFxaa,
   kJoinLinks,
+  kCaptureSize,
+  kCaptureRate,
+  kCaptureQuality,
+  kCaptureEncoder,
 };
 
 constexpr int option_id(Control control, size_t option) { return kOptionFirst + control * 100 + static_cast<int>(option); }
@@ -125,9 +136,9 @@ constexpr int option_id(Control control, size_t option) { return kOptionFirst + 
 constexpr struct {
   Tab tab;
   const wchar_t* label;
-} kTabs[] = {{Tab::Graphics, L"Graphics"}, {Tab::Display, L"Display"},       {Tab::Effects, L"Effects"},
-             {Tab::Performance, L"Performance"}, {Tab::Flags, L"Flags"}, {Tab::Device, L"Device"},
-             {Tab::About, L"About"}};
+} kTabs[] = {{Tab::Graphics, L"Graphics"},       {Tab::Display, L"Display"}, {Tab::Effects, L"Effects"},
+             {Tab::Captures, L"Captures"},       {Tab::Performance, L"Performance"},
+             {Tab::Flags, L"Flags"},             {Tab::Device, L"Device"},   {Tab::About, L"About"}};
 
 struct Spring {
   float value = 0, target = 0;
@@ -1425,7 +1436,7 @@ void page_about(const D2D1_RECT_F& page) {
   float y = page.top + kMargin;
   draw_logo(x + 24, y + 24, 36);
   text(L"Blox7", g.fonts.instruction, rect(x + 60, y, w - 60, 21), kInstruction);
-  text(L"Version 0.1", g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kSecondary);
+  text(L"Version 0.3", g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kSecondary);
   text(L"Roblox ported back to Windows 7.", g.fonts.body, rect(x + 60, y + 39, w - 60, 15), kText);
   y += 66;
   text(L"Runs Roblox's Android app natively on Windows 7 through 11. Built on Mocktail by komaruworld.",
@@ -1569,6 +1580,136 @@ void page_effects(const D2D1_RECT_F& page) {
   text(status, g.fonts.body, rect(ix, y + 46, iw, 15), g.shader_error ? kError : kSecondary);
 }
 
+std::wstring encoder_label() {
+  std::wstring name;
+  for (const wchar_t ch : hardware_video_encoder())
+    if (ch >= 32 && ch < 127 && !(ch == L' ' && (name.empty() || name.back() == L' '))) name += ch;
+  for (const wchar_t* tail : {L" H.264 Encoder MFT", L" Encoder MFT", L" MFT"})
+    if (const size_t at = name.find(tail); at != std::wstring::npos) {
+      name.erase(at);
+      break;
+    }
+  while (!name.empty() && name.back() == L' ') name.pop_back();
+  return name.empty() ? L"Graphics card (none found)" : L"Graphics card (" + name + L")";
+}
+
+std::wstring pick_folder(const std::wstring& start, const wchar_t* title) {
+  HMODULE ole = LoadLibraryW(L"ole32.dll");
+  using InitFn = HRESULT(WINAPI*)(LPVOID, DWORD);
+  using UninitFn = void(WINAPI*)();
+  using CreateFn = HRESULT(WINAPI*)(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID*);
+  using FreeFn = void(WINAPI*)(LPVOID);
+  const auto init = ole ? reinterpret_cast<InitFn>(GetProcAddress(ole, "CoInitializeEx")) : nullptr;
+  const auto uninit = ole ? reinterpret_cast<UninitFn>(GetProcAddress(ole, "CoUninitialize")) : nullptr;
+  const auto create = ole ? reinterpret_cast<CreateFn>(GetProcAddress(ole, "CoCreateInstance")) : nullptr;
+  const auto free_memory = ole ? reinterpret_cast<FreeFn>(GetProcAddress(ole, "CoTaskMemFree")) : nullptr;
+  if (!init || !uninit || !create || !free_memory) return {};
+  static const CLSID kFileOpenDialog = {0xDC1C5A9C, 0xE88A, 0x4DDE, {0xA5, 0xA1, 0x60, 0xF8, 0x2A, 0x20, 0xAE, 0xF7}};
+  const HRESULT com = init(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  std::wstring picked;
+  IFileOpenDialog* dialog = nullptr;
+  if (SUCCEEDED(create(kFileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, __uuidof(IFileOpenDialog), reinterpret_cast<void**>(&dialog)))) {
+    FILEOPENDIALOGOPTIONS options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dialog->SetTitle(title);
+    std::wstring folder = start;
+    while (!folder.empty() && GetFileAttributesW(folder.c_str()) == INVALID_FILE_ATTRIBUTES) {
+      const size_t slash = folder.find_last_of(L'\\');
+      folder = slash == std::wstring::npos || slash < 3 ? std::wstring() : folder.substr(0, slash);
+    }
+    IShellItem* item = nullptr;
+    if (!folder.empty() && SUCCEEDED(SHCreateItemFromParsingName(folder.c_str(), nullptr, __uuidof(IShellItem), reinterpret_cast<void**>(&item)))) {
+      dialog->SetFolder(item);
+      item->Release();
+      item = nullptr;
+    }
+    if (SUCCEEDED(dialog->Show(g.dialog.hwnd)) && SUCCEEDED(dialog->GetResult(&item))) {
+      PWSTR path = nullptr;
+      if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) picked = path;
+      if (path) free_memory(path);
+      item->Release();
+    }
+    dialog->Release();
+  }
+  if (SUCCEEDED(com)) uninit();
+  return picked;
+}
+
+void change_capture_folder(bool videos) {
+  Settings defaults = g.pending;
+  defaults.screenshots_dir.clear();
+  defaults.videos_dir.clear();
+  const std::wstring picked =
+      pick_folder(capture_folder(g.pending, videos), videos ? L"Pick where videos are saved" : L"Pick where screenshots are saved");
+  if (picked.empty()) return;
+  (videos ? g.pending.videos_dir : g.pending.screenshots_dir) =
+      _wcsicmp(picked.c_str(), capture_folder(defaults, videos).c_str()) == 0 ? std::wstring() : picked;
+  mark_dirty();
+}
+
+void open_capture_folder(bool videos) {
+  const std::wstring folder = capture_folder(g.pending, videos);
+  if (folder.empty()) return;
+  SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);
+  ShellExecuteW(g.dialog.hwnd, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void page_captures(const D2D1_RECT_F& page) {
+  const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18;
+  float y = page.top + kMargin;
+  static const int sizes[] = {720, 1080, 1440, 0};
+  static const std::vector<std::wstring> qualities = {L"auto", L"high", L"highest"};
+  const size_t size = std::find(std::begin(sizes), std::end(sizes), g.pending.capture_size) - std::begin(sizes);
+  group(rect(x, y, w, 150), L"Videos");
+  combo_row(L"Resolution:", ix, y + 16, 76, 168, kCaptureSize, {L"720p, like a phone", L"1080p", L"1440p", L"Same as the game"},
+            size < std::size(sizes) ? size : 0, true, [](size_t i) {
+              g.pending.capture_size = sizes[i];
+              mark_dirty();
+            });
+  combo_row(L"Frame rate:", ix, y + 42, 76, 168, kCaptureRate, {L"30 FPS, like a phone", L"60 FPS"}, g.pending.capture_fps == 60 ? 1 : 0,
+            true, [](size_t i) {
+              g.pending.capture_fps = i == 1 ? 60 : 30;
+              mark_dirty();
+            });
+  combo_row(L"Quality:", ix, y + 68, 76, 168, kCaptureQuality, {L"Roblox decides", L"High", L"Highest"},
+            index_of(qualities, g.pending.capture_quality), true, [](size_t i) {
+              g.pending.capture_quality = qualities[i];
+              mark_dirty();
+            });
+  combo_row(L"Encoder:", ix, y + 94, 76, iw - 76, kCaptureEncoder, {encoder_label(), L"Processor (OpenH264)"},
+            g.pending.capture_processor ? 1 : 0, true, [](size_t i) {
+              g.pending.capture_processor = i == 1;
+              mark_dirty();
+            });
+  const SIZE frame = capture_frame(g.pending);
+  wchar_t note[128];
+  std::swprintf(note, 128, L"Videos come out at %ld x %ld, about %.0f MB per 30 seconds.", frame.cx, frame.cy,
+                std::max(1.0, capture_megabytes(g.pending)));
+  text(note, g.fonts.body, rect(ix, y + 124, iw, 15), kSecondary);
+  y += 150 + kMargin;
+
+  group(rect(x, y, w, 100), L"Saved to");
+  const auto folder_row = [&](float row, const wchar_t* label, bool videos, int button) {
+    text(label, g.fonts.body, rect(ix, row + 4, 76, 15), kText);
+    const D2D1_RECT_F box = rect(ix + 76, row, iw - 76 - kButtonWidth - kGap, kButtonHeight);
+    fill_rect(box, ink(kWhite));
+    stroke_rect(box, 0xABADB3);
+    text(capture_folder(g.pending, videos), g.fonts.field, D2D1::RectF(box.left + 5, box.top, box.right - 5, box.bottom), kText);
+    push_button(button, rect(box.right + kGap, row, kButtonWidth, kButtonHeight), L"Change...", true, [videos] { change_capture_folder(videos); });
+  };
+  folder_row(y + 16, L"Screenshots:", false, kScreenshotsFolder);
+  folder_row(y + 44, L"Videos:", true, kVideosFolder);
+  link(kScreenshotsLink, ix, y + 76, L"Open screenshots", [] { open_capture_folder(false); });
+  link(kVideosLink, ix + 120, y + 76, L"Open videos", [] { open_capture_folder(true); });
+  if (!g.pending.screenshots_dir.empty() || !g.pending.videos_dir.empty())
+    link(kDefaultFoldersLink, ix + 220, y + 76, L"Use the default folders", [] {
+      g.pending.screenshots_dir.clear();
+      g.pending.videos_dir.clear();
+      mark_dirty();
+    });
+}
+
 void draw_tabs(const D2D1_RECT_F& strip) {
   float x = strip.left + 2;
   D2D1_RECT_F chosen{};
@@ -1618,6 +1759,7 @@ void draw_dialog() {
     case Tab::Graphics: page_graphics(inner); break;
     case Tab::Display: page_display(inner); break;
     case Tab::Effects: page_effects(inner); break;
+    case Tab::Captures: page_captures(inner); break;
     case Tab::Performance: page_performance(inner); break;
     case Tab::Flags: page_flags(inner); break;
     case Tab::Device: page_device(inner); break;
@@ -2276,6 +2418,8 @@ int render_ui(const std::wstring& dir) {
                  {L"settings-graphics-open", Tab::Graphics, kPopupFirst + 3, kQuality},
                  {L"settings-display", Tab::Display, option_id(kFullscreen, 0), -1},
                  {L"settings-effects", Tab::Effects, option_id(kVibrance, 0), -1},
+                 {L"settings-captures", Tab::Captures, kVideosFolder, -1},
+                 {L"settings-captures-open", Tab::Captures, kPopupFirst + 1, kCaptureSize},
                  {L"settings-performance", Tab::Performance, kOkButton, -1},
                  {L"settings-flags", Tab::Flags, kFlagRowFirst + 3, -1},
                  {L"settings-device", Tab::Device, option_id(kProfile, 1), -1},
