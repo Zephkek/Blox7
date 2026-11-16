@@ -18,9 +18,9 @@
 #include "media/encoding.h"
 #include "media/ffmpeg_decoder.h"
 #include "media/ffmpeg_encoder.h"
-#include "media/h264_encoder.h"
 #include "media/input_surface.h"
 #include "media/media_format.h"
+#include "media/video_encoder.h"
 
 struct ANativeWindow;
 
@@ -109,7 +109,7 @@ class MediaCodec final : public FrameSink {
   State state_ = State::kUninitialized;
   MediaFormat output_format_;
   std::unique_ptr<FfmpegDecoder> decoder_;
-  std::unique_ptr<H264Encoder> video_encoder_;
+  std::unique_ptr<VideoEncoder> video_encoder_;
   std::unique_ptr<FfmpegEncoder> audio_encoder_;
   std::shared_ptr<InputSurface> surface_;
   bool surface_input_ = false;

@@ -9,6 +9,7 @@ constexpr std::size_t kMaximumJsonBytes = 64 * 1024;
 constexpr std::size_t kMaximumFeatures = 64;
 constexpr char kMicrophone[] = "MICROPHONE_ACCESS";
 constexpr char kLocalNetwork[] = "LOCAL_NETWORK";
+constexpr char kMediaStorage[] = "WRITE_MEDIA_STORAGE";
 
 struct Response {
   nlohmann::json body;
@@ -68,7 +69,9 @@ Response Answer(JNIEnv* env, jstring message, std::size_t method,
   if (!request.is_object())
     return rejected;
   if (support) {
-    return {{{"permissions", {kMicrophone, kLocalNetwork}}}, 0, "supported"};
+    return {{{"permissions", {kMicrophone, kLocalNetwork, kMediaStorage}}},
+            0,
+            "supported"};
   }
   const auto features = request.find("permissions");
   if (features == request.end() || !features->is_array() ||
@@ -85,7 +88,8 @@ Response Answer(JNIEnv* env, jstring message, std::size_t method,
         name.find('\0') != std::string::npos) {
       return rejected;
     }
-    if (name != kLocalNetwork && (name != kMicrophone || !microphone_enabled)) {
+    if (name != kLocalNetwork && name != kMediaStorage &&
+        (name != kMicrophone || !microphone_enabled)) {
       missing.push_back(name);
     }
   }

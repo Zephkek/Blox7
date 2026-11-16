@@ -61,6 +61,7 @@
 #include "libc_shim/libc_shim.h"
 #include "linker/linker.h"
 #include "blox7/graphics/bionic_egl_bridge.h"
+#include "runtime/album_saver.h"
 #include "runtime/device_memory_profile.h"
 #include "runtime/display_size.h"
 #include "runtime/environment.h"
@@ -3212,6 +3213,10 @@ void ConfigureLocalStorage(JNIEnv* env, const EngineStartupContext* context) {
   EnsureAndroidDirectory(files_dir + "/appData/rbx-storage");
   EnsureAndroidDirectory(data_dir + "/rbx-storage");
   EnsureAndroidDirectory(data_dir + "/shared_prefs");
+#if defined(BLOX7_WIN32)
+  blox7::runtime::MoveFinishedVideos(
+      libc_shim::TranslatePath(files_dir + "/video"));
+#endif
   EnsureAndroidDirectory(cache_dir);
   EnsureAndroidDirectory(cache_dir + "/ContentProvider_2");
   EnsureAndroidDirectory(cache_dir + "/rbx-storage");
@@ -4863,6 +4868,8 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
     stub_names.push_back("libvulkan.so");
   }
 
+  static constexpr const char* kMediaNdkDlsymExports[] = {
+      "AMediaCodec_createInputSurface", "AMediaCodec_signalEndOfInputStream"};
   std::vector<void*> stub_handles;
   void* bionic_vulkan_adapter_handle = nullptr;
   for (const char* name : stub_names) {
@@ -4892,6 +4899,13 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       stub_handles.push_back(h);
       if (std::strcmp(name, "libvulkan.so") == 0) {
         bionic_vulkan_adapter_handle = h;
+      }
+      if (exact_adapter && std::strcmp(name, "libmediandk.so") == 0) {
+        for (const char* symbol : kMediaNdkDlsymExports) {
+          if (void* address = ::dlsym(h, symbol)) {
+            linker::RegisterSyntheticSymbol(name, symbol, address);
+          }
+        }
       }
     } else {
       std::cerr << "  [warn]  Could not preload " << name
@@ -6037,6 +6051,18 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
             "Java_com_roblox_engine_jni_NativeSettingsInterface_"
             "nativeGetCookiesForDomain"));
     jni_vm->SetRobloxCookieGetter(native_get_cookies_for_domain);
+#if defined(BLOX7_WIN32)
+    jni_vm->SetRobloxAlbumSaver(
+        [](const std::string& path, std::string* message) {
+          return blox7::runtime::SaveCaptureToWindowsMediaFolder(
+              libc_shim::TranslatePath(path), message);
+        },
+        reinterpret_cast<jnivm::RobloxImageSavedToAlbumFinished>(
+            linker::ResolveSymbol(
+                roblox_handle,
+                "Java_com_roblox_engine_jni_NativeGLInterface_"
+                "nativeImageSavedToAlbumFinished")));
+#endif
     auto* native_cookie_manager_set_cookie =
         reinterpret_cast<NativeSetTwoStringParamsFn>(linker::ResolveSymbol(
             roblox_handle,

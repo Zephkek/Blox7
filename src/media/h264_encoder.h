@@ -7,37 +7,36 @@
 
 #include "media/encoding.h"
 #include "media/media_format.h"
+#include "media/video_encoder.h"
 
 class ISVCEncoder;
 
 namespace blox7::media {
 
-class H264Encoder final {
+class H264Encoder final : public VideoEncoder {
  public:
-  static std::unique_ptr<H264Encoder> Create(const MediaFormat& format);
-  ~H264Encoder();
+  static std::unique_ptr<H264Encoder> Create(const AvcSettings& settings);
+  ~H264Encoder() override;
   H264Encoder(const H264Encoder&) = delete;
   H264Encoder& operator=(const H264Encoder&) = delete;
 
-  std::int32_t width() const { return width_; }
-  std::int32_t height() const { return height_; }
-  const PictureLayout& layout() const { return layout_; }
+  std::int32_t width() const override { return settings_.width; }
+  std::int32_t height() const override { return settings_.height; }
+  const PictureLayout& layout() const override { return layout_; }
 
   bool Encode(const std::uint8_t* picture, std::int64_t time_us,
-              std::vector<EncodedPacket>* out);
-  void RequestKeyFrame();
-  MediaFormat OutputFormat() const;
+              std::vector<EncodedPacket>* out) override;
+  bool Drain(std::vector<EncodedPacket>* out) override;
+  void RequestKeyFrame() override;
+  void Interrupt() override {}
+  MediaFormat OutputFormat() const override;
 
  private:
-  H264Encoder(ISVCEncoder* encoder, std::int32_t width, std::int32_t height,
-              std::int32_t bitrate, float frame_rate);
+  H264Encoder(ISVCEncoder* encoder, const AvcSettings& settings);
 
   ISVCEncoder* const encoder_;
-  const std::int32_t width_;
-  const std::int32_t height_;
+  const AvcSettings settings_;
   const PictureLayout layout_;
-  const std::int32_t bitrate_;
-  const float frame_rate_;
   std::vector<std::uint8_t> sps_;
   std::vector<std::uint8_t> pps_;
   bool config_sent_ = false;

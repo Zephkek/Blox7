@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <new>
 #include <string>
 #include <thread>
@@ -23,6 +25,27 @@ constexpr std::int32_t kDataspaceBt709Limited = 0x10C10000;
 constexpr std::int32_t kBitrateModeVbr = 1;
 constexpr std::int32_t kAvcProfileHigh = 8;
 
+std::int32_t AvcProfile(int profile_idc, int constraints) {
+  switch (profile_idc) {
+    case 66:
+      return (constraints & 0x40) != 0 ? 0x10000 : 0x1;
+    case 77:
+      return 0x2;
+    case 88:
+      return 0x4;
+    case 100:
+      return (constraints & 0x0C) == 0x0C ? 0x80000 : kAvcProfileHigh;
+    case 110:
+      return 0x10;
+    case 122:
+      return 0x20;
+    case 244:
+      return 0x40;
+    default:
+      return kAvcProfileHigh;
+  }
+}
+
 std::int32_t AvcLevel(int level_idc) {
   static constexpr struct {
     int idc;
@@ -38,17 +61,6 @@ std::int32_t AvcLevel(int level_idc) {
     }
   }
   return 0;
-}
-
-std::int32_t Int32Or(const MediaFormat& format, const char* key,
-                     std::int32_t fallback) {
-  std::int32_t value = 0;
-  return format.GetInt32(key, &value) ? value : fallback;
-}
-
-float FloatOr(const MediaFormat& format, const char* key, float fallback) {
-  float value = 0;
-  return format.GetFloat(key, &value) ? value : fallback;
 }
 
 unsigned int IntraPeriod(float seconds, float frame_rate) {
@@ -78,24 +90,89 @@ std::size_t StartCodeLength(const std::uint8_t* nal, std::size_t size) {
   return 0;
 }
 
+bool ReadAvcSettings(const MediaFormat& format, AvcSettings* settings) {
+  settings->width = format.Int32Or("width", 0);
+  settings->height = format.Int32Or("height", 0);
+  const PictureLayout layout =
+      PictureLayout::For(settings->width, settings->height);
+  if (layout.width < 16 || layout.height < 16 || settings->width > 4096 ||
+      settings->height > 4096) {
+    std::fprintf(stderr, "  [mediacodec] no H.264 encoder for %dx%d\n",
+                 settings->width, settings->height);
+    return false;
+  }
+  settings->bitrate =
+      std::max(format.Int32Or("bitrate", kDefaultBitrate), 16000);
+  settings->frame_rate =
+      std::clamp(format.FloatOr("frame-rate", kDefaultFrameRate), 1.0f,
+                 240.0f);
+  settings->key_frame_interval = format.FloatOr("i-frame-interval", 1.0f);
+  if (layout.width != settings->width || layout.height != settings->height) {
+    std::fprintf(stderr, "  [mediacodec] encoding %dx%d as %dx%d\n",
+                 settings->width, settings->height, layout.width,
+                 layout.height);
+  }
+  return true;
+}
+
 }  // namespace
 
-std::unique_ptr<H264Encoder> H264Encoder::Create(const MediaFormat& format) {
-  const std::int32_t width = Int32Or(format, "width", 0);
-  const std::int32_t height = Int32Or(format, "height", 0);
-  const PictureLayout layout = PictureLayout::For(width, height);
-  if (layout.width < 16 || layout.height < 16 || width > 4096 ||
-      height > 4096) {
-    std::fprintf(stderr, "  [mediacodec] no H.264 encoder for %dx%d\n", width,
-                 height);
+std::unique_ptr<VideoEncoder> CreateAvcEncoder(const MediaFormat& format) {
+  AvcSettings settings;
+  if (!ReadAvcSettings(format, &settings)) {
     return nullptr;
   }
-  const std::int32_t bitrate =
-      std::max(Int32Or(format, "bitrate", kDefaultBitrate), 16000);
-  const float frame_rate =
-      std::clamp(FloatOr(format, "frame-rate", kDefaultFrameRate), 1.0f,
-                 240.0f);
-  const float interval = FloatOr(format, "i-frame-interval", 1.0f);
+#if defined(BLOX7_WIN32)
+  const char* choice = std::getenv("BLOX7_VIDEO_ENCODER");
+  if (choice == nullptr || std::strcmp(choice, "software") != 0) {
+    if (std::unique_ptr<VideoEncoder> hardware =
+            CreateHardwareAvcEncoder(settings)) {
+      return hardware;
+    }
+  }
+#endif
+  return H264Encoder::Create(settings);
+}
+
+MediaFormat AvcOutputFormat(const AvcSettings& settings,
+                            const PictureLayout& layout,
+                            const std::vector<std::uint8_t>& sps,
+                            const std::vector<std::uint8_t>& pps) {
+  const std::size_t start = StartCodeLength(sps.data(), sps.size());
+  const bool parsed = start != 0 && sps.size() >= start + 4;
+  MediaFormat format;
+  format.Set("bitrate", settings.bitrate);
+  format.Set("bitrate-mode", kBitrateModeVbr);
+  format.Set("width", layout.width);
+  format.Set("color-standard", kColorStandardBt709);
+  format.Set("color-range", kColorRangeLimited);
+  format.Set("color-transfer", kColorTransferSdrVideo);
+  format.Set("frame-rate",
+             static_cast<std::int32_t>(std::lround(settings.frame_rate)));
+  format.Set("height", layout.height);
+  format.Set("intra-refresh-period", 0);
+  if (parsed) {
+    format.Set("level", AvcLevel(sps[start + 3]));
+  }
+  format.Set("max-bitrate", settings.bitrate);
+  format.Set("mime", std::string("video/avc"));
+  format.Set("prepend-sps-pps-to-idr-frames", 0);
+  format.Set("priority", 0);
+  format.Set("profile", parsed ? AvcProfile(sps[start + 1], sps[start + 2])
+                               : kAvcProfileHigh);
+  if (!sps.empty() && !pps.empty()) {
+    format.Set("csd-0", sps);
+    format.Set("android._dataspace", kDataspaceBt709Limited);
+    format.Set("csd-1", pps);
+  }
+  return format;
+}
+
+std::unique_ptr<H264Encoder> H264Encoder::Create(const AvcSettings& settings) {
+  const PictureLayout layout =
+      PictureLayout::For(settings.width, settings.height);
+  const std::int32_t bitrate = settings.bitrate;
+  const float frame_rate = settings.frame_rate;
   const int threads = ThreadCount(layout);
 
   ISVCEncoder* encoder = nullptr;
@@ -115,7 +192,7 @@ std::unique_ptr<H264Encoder> H264Encoder::Create(const MediaFormat& format) {
   params.fMaxFrameRate = frame_rate;
   params.iTemporalLayerNum = 1;
   params.iSpatialLayerNum = 1;
-  params.uiIntraPeriod = IntraPeriod(interval, frame_rate);
+  params.uiIntraPeriod = IntraPeriod(settings.key_frame_interval, frame_rate);
   params.eSpsPpsIdStrategy = CONSTANT_ID;
   params.bPrefixNalAddingCtrl = false;
   params.bEnableFrameSkip = false;
@@ -149,27 +226,18 @@ std::unique_ptr<H264Encoder> H264Encoder::Create(const MediaFormat& format) {
   }
   int data_format = videoFormatI420;
   encoder->SetOption(ENCODER_OPTION_DATAFORMAT, &data_format);
-  if (layout.width != width || layout.height != height) {
-    std::fprintf(stderr, "  [mediacodec] encoding %dx%d as %dx%d\n", width,
-                 height, layout.width, layout.height);
-  }
-  std::unique_ptr<H264Encoder> created(new (std::nothrow) H264Encoder(
-      encoder, width, height, bitrate, frame_rate));
+  std::unique_ptr<H264Encoder> created(
+      new (std::nothrow) H264Encoder(encoder, settings));
   if (created == nullptr) {
     WelsDestroySVCEncoder(encoder);
   }
   return created;
 }
 
-H264Encoder::H264Encoder(ISVCEncoder* encoder, std::int32_t width,
-                         std::int32_t height, std::int32_t bitrate,
-                         float frame_rate)
+H264Encoder::H264Encoder(ISVCEncoder* encoder, const AvcSettings& settings)
     : encoder_(encoder),
-      width_(width),
-      height_(height),
-      layout_(PictureLayout::For(width, height)),
-      bitrate_(bitrate),
-      frame_rate_(frame_rate) {}
+      settings_(settings),
+      layout_(PictureLayout::For(settings.width, settings.height)) {}
 
 H264Encoder::~H264Encoder() {
   encoder_->Uninitialize();
@@ -200,13 +268,15 @@ bool H264Encoder::Encode(const std::uint8_t* picture, std::int64_t time_us,
   }
   EncodedPacket frame;
   frame.time_us = time_us;
-  frame.flags =
-      info.eFrameType == videoFrameTypeIDR ? AMEDIACODEC_BUFFER_FLAG_KEY_FRAME : 0;
+  frame.flags = info.eFrameType == videoFrameTypeIDR
+                    ? AMEDIACODEC_BUFFER_FLAG_KEY_FRAME
+                    : 0;
   for (int layer = 0; layer < info.iLayerNum; ++layer) {
     const SLayerBSInfo& bits = info.sLayerInfo[layer];
     const std::uint8_t* nal = bits.pBsBuf;
     for (int index = 0; index < bits.iNalCount; ++index) {
-      const std::size_t size = static_cast<std::size_t>(bits.pNalLengthInByte[index]);
+      const std::size_t size =
+          static_cast<std::size_t>(bits.pNalLengthInByte[index]);
       const std::size_t start = StartCodeLength(nal, size);
       const int type = start < size ? nal[start] & 0x1f : 0;
       if (type == 7 || type == 8) {
@@ -235,33 +305,12 @@ bool H264Encoder::Encode(const std::uint8_t* picture, std::int64_t time_us,
   return true;
 }
 
+bool H264Encoder::Drain(std::vector<EncodedPacket>*) { return true; }
+
 void H264Encoder::RequestKeyFrame() { encoder_->ForceIntraFrame(true); }
 
 MediaFormat H264Encoder::OutputFormat() const {
-  MediaFormat format;
-  format.Set("bitrate", bitrate_);
-  format.Set("bitrate-mode", kBitrateModeVbr);
-  format.Set("width", layout_.width);
-  format.Set("color-standard", kColorStandardBt709);
-  format.Set("color-range", kColorRangeLimited);
-  format.Set("color-transfer", kColorTransferSdrVideo);
-  format.Set("frame-rate", static_cast<std::int32_t>(std::lround(frame_rate_)));
-  format.Set("height", layout_.height);
-  format.Set("intra-refresh-period", 0);
-  if (sps_.size() > 7) {
-    format.Set("level", AvcLevel(sps_[7]));
-  }
-  format.Set("max-bitrate", bitrate_);
-  format.Set("mime", std::string("video/avc"));
-  format.Set("prepend-sps-pps-to-idr-frames", 0);
-  format.Set("priority", 0);
-  format.Set("profile", kAvcProfileHigh);
-  if (!sps_.empty() && !pps_.empty()) {
-    format.Set("csd-0", sps_);
-    format.Set("android._dataspace", kDataspaceBt709Limited);
-    format.Set("csd-1", pps_);
-  }
-  return format;
+  return AvcOutputFormat(settings_, layout_, sps_, pps_);
 }
 
 }  // namespace blox7::media

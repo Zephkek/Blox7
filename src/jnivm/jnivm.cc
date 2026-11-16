@@ -3304,6 +3304,18 @@ void HandleStaticVoidMethodV(JNIEnv *env, jclass clazz, jmethodID methodID,
     return;
   }
   const std::shared_ptr<Class> method_class = ClassFromJClass(clazz);
+  if (std::strcmp(name, "saveImageToAlbum") == 0 &&
+      std::strcmp(MethodSignature(methodID), "(Ljava/lang/String;)V") == 0 &&
+      method_class != nullptr &&
+      method_class->GetName() ==
+          "com/roblox/engine/jni/NativeGLJavaInterface") {
+    jstring path = va_arg(args, jstring);
+    VM* vm = CurrentVM();
+    if (vm != nullptr) {
+      (void)vm->SaveRobloxImageToAlbum(env, path);
+    }
+    return;
+  }
   if (std::strcmp(name, "openNativeOverlay") == 0 &&
       std::strcmp(MethodSignature(methodID),
                   "(Ljava/lang/String;Ljava/lang/String;)V") == 0 &&
@@ -3409,6 +3421,17 @@ void HandleStaticVoidMethodA(JNIEnv *env, jclass clazz, jmethodID methodID,
     return;
   }
   const std::shared_ptr<Class> method_class = ClassFromJClass(clazz);
+  if (std::strcmp(name, "saveImageToAlbum") == 0 &&
+      std::strcmp(MethodSignature(methodID), "(Ljava/lang/String;)V") == 0 &&
+      method_class != nullptr &&
+      method_class->GetName() ==
+          "com/roblox/engine/jni/NativeGLJavaInterface") {
+    VM* vm = CurrentVM();
+    if (vm != nullptr) {
+      (void)vm->SaveRobloxImageToAlbum(env, static_cast<jstring>(args[0].l));
+    }
+    return;
+  }
   if (std::strcmp(name, "openNativeOverlay") == 0 &&
       std::strcmp(MethodSignature(methodID),
                   "(Ljava/lang/String;Ljava/lang/String;)V") == 0 &&
@@ -5416,6 +5439,41 @@ bool VM::CopyRobloxCredentialFromProvider(std::string* credential) const {
 void VM::SetRobloxCookieGetter(RobloxCookieGetter getter) {
   std::lock_guard<std::mutex> lock(roblox_cookie_getter_mutex_);
   roblox_cookie_getter_ = getter;
+}
+
+void VM::SetRobloxAlbumSaver(RobloxAlbumSaver saver,
+                             RobloxImageSavedToAlbumFinished finished) {
+  std::lock_guard<std::mutex> lock(roblox_album_saver_mutex_);
+  roblox_album_saver_ = saver;
+  roblox_image_saved_to_album_finished_ = finished;
+}
+
+bool VM::SaveRobloxImageToAlbum(JNIEnv* env, jstring path) {
+  RobloxAlbumSaver saver = nullptr;
+  RobloxImageSavedToAlbumFinished finished = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(roblox_album_saver_mutex_);
+    saver = roblox_album_saver_;
+    finished = roblox_image_saved_to_album_finished_;
+  }
+  if (saver == nullptr || env == nullptr || path == nullptr) {
+    return false;
+  }
+  const std::string file = StringFromJString(path);
+  std::string message;
+  const bool saved = saver(file, &message);
+  if (!saved) {
+    std::cerr << "  [captures] " << message << '\n';
+  }
+  if (finished != nullptr) {
+    jstring result_path = env->NewStringUTF(file.c_str());
+    jstring result_message = env->NewStringUTF(message.c_str());
+    finished(env, nullptr, result_path, saved ? JNI_TRUE : JNI_FALSE,
+             result_message);
+    env->DeleteLocalRef(result_message);
+    env->DeleteLocalRef(result_path);
+  }
+  return true;
 }
 
 bool VM::RefreshRobloxCredentialFromEngine(JNIEnv* env) {

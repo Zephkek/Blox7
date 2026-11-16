@@ -25,23 +25,17 @@ std::int64_t MonotonicUs() {
   return static_cast<std::int64_t>(now.tv_sec) * 1000000 + now.tv_nsec / 1000;
 }
 
-std::int32_t Int32Or(const MediaFormat& format, const char* key,
-                     std::int32_t fallback) {
-  std::int32_t value = 0;
-  return format.GetInt32(key, &value) ? value : fallback;
-}
-
 std::size_t InputCapacity(CodecKind kind, const MediaFormat& format) {
   const std::size_t requested = static_cast<std::size_t>(
-      std::max<std::int32_t>(Int32Or(format, "max-input-size", 0), 0));
+      std::max<std::int32_t>(format.Int32Or("max-input-size", 0), 0));
   if (kind == CodecKind::kAac) {
     return std::max<std::size_t>(requested, 64 * 1024);
   }
   const std::int64_t width = std::clamp(
-      std::max(Int32Or(format, "max-width", 0), Int32Or(format, "width", 0)),
+      std::max(format.Int32Or("max-width", 0), format.Int32Or("width", 0)),
       0, 16384);
   const std::int64_t height = std::clamp(
-      std::max(Int32Or(format, "max-height", 0), Int32Or(format, "height", 0)),
+      std::max(format.Int32Or("max-height", 0), format.Int32Or("height", 0)),
       0, 16384);
   const std::int64_t pixels =
       width > 0 && height > 0 ? width * height : std::int64_t{1920} * 1080;
@@ -110,14 +104,14 @@ media_status_t MediaCodec::Configure(const MediaFormat& format, bool surface,
   input_capacity_ = InputCapacity(kind_, format);
   OutputLayout initial;
   if (kind_ == CodecKind::kAac) {
-    initial.sample_rate = Int32Or(format, "sample-rate", 44100);
-    initial.channels = Int32Or(format, "channel-count", 2);
+    initial.sample_rate = format.Int32Or("sample-rate", 44100);
+    initial.channels = format.Int32Or("channel-count", 2);
     std::fprintf(stderr, "  [mediacodec] %s: %s %d Hz, %d channels\n",
                  name_.c_str(), CodecMime(kind_), initial.sample_rate,
                  initial.channels);
   } else {
-    initial.width = Int32Or(format, "width", 0);
-    initial.height = Int32Or(format, "height", 0);
+    initial.width = format.Int32Or("width", 0);
+    initial.height = format.Int32Or("height", 0);
     initial.stride = initial.width;
     std::fprintf(stderr, "  [mediacodec] %s: %s %dx%d\n", name_.c_str(),
                  CodecMime(kind_), initial.width, initial.height);
@@ -138,7 +132,7 @@ media_status_t MediaCodec::ConfigureEncoderLocked(const MediaFormat& format) {
                    name_.c_str(), color_format);
       return AMEDIA_ERROR_UNSUPPORTED;
     }
-    video_encoder_ = H264Encoder::Create(format);
+    video_encoder_ = CreateAvcEncoder(format);
     if (video_encoder_ == nullptr) {
       return AMEDIA_ERROR_UNSUPPORTED;
     }
@@ -209,6 +203,9 @@ media_status_t MediaCodec::Stop() {
   lock.unlock();
   if (attached != nullptr) {
     attached->Detach(this);
+  }
+  if (video_encoder_ != nullptr) {
+    video_encoder_->Interrupt();
   }
   if (worker_.joinable()) {
     worker_.join();
@@ -706,7 +703,14 @@ void MediaCodec::EncodeFrame(std::unique_lock<std::mutex>& lock) {
     EncodedPacket last;
     last.flags = AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM;
     lock.unlock();
-    const bool delivered = DeliverPacket(lock, last);
+    std::vector<EncodedPacket> rest;
+    if (!video_encoder_->Drain(&rest) && !failure_logged_) {
+      failure_logged_ = true;
+      std::fprintf(stderr, "  [mediacodec] %s failed to drain the encoder\n",
+                   name_.c_str());
+    }
+    const bool delivered =
+        DeliverPackets(lock, rest) && DeliverPacket(lock, last);
     lock.lock();
     if (delivered) {
       end_sent_ = true;

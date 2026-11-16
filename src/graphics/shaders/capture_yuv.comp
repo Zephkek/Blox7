@@ -1,0 +1,75 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D frame;
+
+layout(std430, set = 0, binding = 1) writeonly buffer Planes {
+  uint words[];
+} planes;
+
+layout(push_constant) uniform Job {
+  int width;
+  int height;
+  uint luma_row_words;
+  uint chroma_row_words;
+  uint u_word;
+  uint v_word;
+  uint interleaved;
+} job;
+
+const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 Fetch(int x, int y) {
+  return texelFetch(frame, ivec2(min(x, job.width - 1), min(y, job.height - 1)), 0).rgb;
+}
+
+uint Byte(float value) {
+  return uint(clamp(value + 0.5, 0.0, 255.0));
+}
+
+uint Luma(vec3 rgb) {
+  return Byte(16.0 + 219.0 * dot(rgb, kLuma));
+}
+
+void main() {
+  const int x = int(gl_GlobalInvocationID.x) * 8;
+  const int y = int(gl_GlobalInvocationID.y) * 2;
+  if (x >= job.width || y >= job.height) {
+    return;
+  }
+  uint luma[4] = uint[4](0u, 0u, 0u, 0u);
+  uint u = 0u;
+  uint v = 0u;
+  uint uv[2] = uint[2](0u, 0u);
+  for (int pair = 0; pair < 4; ++pair) {
+    const vec3 a = Fetch(x + pair * 2, y);
+    const vec3 b = Fetch(x + pair * 2 + 1, y);
+    const vec3 c = Fetch(x + pair * 2, y + 1);
+    const vec3 d = Fetch(x + pair * 2 + 1, y + 1);
+    const uint shift = uint(pair & 1) * 16u;
+    luma[pair >> 1] |= (Luma(a) | (Luma(b) << 8u)) << shift;
+    luma[2 + (pair >> 1)] |= (Luma(c) | (Luma(d) << 8u)) << shift;
+    const vec3 average = (a + b + c + d) * 0.25;
+    const float luminance = dot(average, kLuma);
+    const uint cb = Byte(128.0 + 224.0 * (average.b - luminance) / 1.8556);
+    const uint cr = Byte(128.0 + 224.0 * (average.r - luminance) / 1.5748);
+    u |= cb << (uint(pair) * 8u);
+    v |= cr << (uint(pair) * 8u);
+    uv[pair >> 1] |= (cb | (cr << 8u)) << shift;
+  }
+  const uint row = uint(y) * job.luma_row_words + uint(x) / 4u;
+  planes.words[row] = luma[0];
+  planes.words[row + 1u] = luma[1];
+  planes.words[row + job.luma_row_words] = luma[2];
+  planes.words[row + job.luma_row_words + 1u] = luma[3];
+  if (job.interleaved != 0u) {
+    const uint chroma = job.u_word + uint(y / 2) * job.chroma_row_words + uint(x) / 4u;
+    planes.words[chroma] = uv[0];
+    planes.words[chroma + 1u] = uv[1];
+  } else {
+    const uint chroma = uint(y / 2) * job.chroma_row_words + uint(x) / 8u;
+    planes.words[job.u_word + chroma] = u;
+    planes.words[job.v_word + chroma] = v;
+  }
+}

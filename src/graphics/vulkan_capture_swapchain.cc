@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "blox7/media/encoder_surface.h"
+#include "gen/capture_yuv_shader.h"
 
 namespace blox7 {
 namespace graphics {
@@ -54,9 +55,20 @@ struct AndroidSurfaceCreateInfo {
   X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) X(vkResetFences)      \
   X(vkQueueSubmit)
 
+#define CAPTURE_CONVERT_FUNCTIONS(X)                                          \
+  X(vkCreateShaderModule) X(vkDestroyShaderModule)                            \
+  X(vkCreateDescriptorSetLayout) X(vkDestroyDescriptorSetLayout)              \
+  X(vkCreatePipelineLayout) X(vkDestroyPipelineLayout)                        \
+  X(vkCreateComputePipelines) X(vkDestroyPipeline) X(vkCreateSampler)         \
+  X(vkDestroySampler) X(vkCreateDescriptorPool) X(vkDestroyDescriptorPool)    \
+  X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) X(vkCreateImageView)  \
+  X(vkDestroyImageView) X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets)       \
+  X(vkCmdPushConstants) X(vkCmdDispatch) X(vkCmdCopyBuffer)
+
 struct Functions {
 #define CAPTURE_DECLARE(name) PFN_##name name = nullptr;
   CAPTURE_DEVICE_FUNCTIONS(CAPTURE_DECLARE)
+  CAPTURE_CONVERT_FUNCTIONS(CAPTURE_DECLARE)
 #undef CAPTURE_DECLARE
 };
 
@@ -66,6 +78,34 @@ struct Device {
   VkPhysicalDeviceMemoryProperties memory{};
   VkQueue spare_queue = VK_NULL_HANDLE;
   std::mutex* spare_queue_mutex = nullptr;
+  bool convert_loaded = false;
+  std::mutex convert_mutex;
+  bool convert_tried = false;
+  VkSampler sampler = VK_NULL_HANDLE;
+  VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+  VkPipelineLayout layout = VK_NULL_HANDLE;
+  VkPipeline pipeline = VK_NULL_HANDLE;
+};
+
+struct Planes {
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint32_t luma_stride = 0;
+  std::uint32_t chroma_stride = 0;
+  bool interleaved = false;
+  VkDeviceSize luma_size = 0;
+  VkDeviceSize chroma_size = 0;
+  VkDeviceSize total = 0;
+};
+
+struct ConvertJob {
+  std::int32_t width;
+  std::int32_t height;
+  std::uint32_t luma_row_words;
+  std::uint32_t chroma_row_words;
+  std::uint32_t u_word;
+  std::uint32_t v_word;
+  std::uint32_t interleaved;
 };
 
 struct Surface {
@@ -84,6 +124,10 @@ struct Image {
   VkDeviceMemory buffer_memory = VK_NULL_HANDLE;
   void* mapped = nullptr;
   VkFence fence = VK_NULL_HANDLE;
+  VkImageView view = VK_NULL_HANDLE;
+  VkDescriptorSet set = VK_NULL_HANDLE;
+  VkBuffer planes = VK_NULL_HANDLE;
+  VkDeviceMemory planes_memory = VK_NULL_HANDLE;
   ImageState state = ImageState::kFree;
   std::int64_t present_us = 0;
 };
@@ -99,6 +143,9 @@ struct Chain {
   VkExtent2D extent{};
   std::int32_t pixels = BLOX7_ENCODER_PIXELS_RGBA;
   bool coherent = true;
+  bool convert = false;
+  Planes planes;
+  VkDescriptorPool pool = VK_NULL_HANDLE;
   std::vector<Image> images;
   std::unordered_map<std::uint32_t, Recorded> recorded;
   std::deque<std::uint32_t> free_images;
@@ -110,6 +157,127 @@ struct Chain {
   std::condition_variable changed;
   std::thread worker;
 };
+
+bool PlanesFrom(const Blox7EncoderPlanes& source, VkExtent2D extent,
+                Planes* planes) {
+  if (source.width < 2 || source.height < 2 || (source.width & 1) != 0 ||
+      (source.height & 1) != 0 ||
+      static_cast<std::uint32_t>(source.width) > extent.width ||
+      static_cast<std::uint32_t>(source.height) > extent.height ||
+      source.luma_stride % 4 != 0 || source.chroma_stride % 4 != 0) {
+    return false;
+  }
+  const std::int32_t blocks = (source.width + 7) & ~7;
+  if (source.luma_stride < blocks ||
+      source.chroma_stride < (source.interleaved != 0 ? blocks : blocks / 2)) {
+    return false;
+  }
+  planes->width = static_cast<std::uint32_t>(source.width);
+  planes->height = static_cast<std::uint32_t>(source.height);
+  planes->luma_stride = static_cast<std::uint32_t>(source.luma_stride);
+  planes->chroma_stride = static_cast<std::uint32_t>(source.chroma_stride);
+  planes->interleaved = source.interleaved != 0;
+  planes->luma_size =
+      static_cast<VkDeviceSize>(planes->luma_stride) * planes->height;
+  planes->chroma_size =
+      static_cast<VkDeviceSize>(planes->chroma_stride) * (planes->height / 2u);
+  planes->total =
+      planes->luma_size + (planes->interleaved ? 1 : 2) * planes->chroma_size;
+  return true;
+}
+
+void DestroyConverter(Device& d) {
+  const Functions& f = d.f;
+  if (d.pipeline != VK_NULL_HANDLE) {
+    f.vkDestroyPipeline(d.handle, d.pipeline, nullptr);
+  }
+  if (d.layout != VK_NULL_HANDLE) {
+    f.vkDestroyPipelineLayout(d.handle, d.layout, nullptr);
+  }
+  if (d.set_layout != VK_NULL_HANDLE) {
+    f.vkDestroyDescriptorSetLayout(d.handle, d.set_layout, nullptr);
+  }
+  if (d.sampler != VK_NULL_HANDLE) {
+    f.vkDestroySampler(d.handle, d.sampler, nullptr);
+  }
+  d.pipeline = VK_NULL_HANDLE;
+  d.layout = VK_NULL_HANDLE;
+  d.set_layout = VK_NULL_HANDLE;
+  d.sampler = VK_NULL_HANDLE;
+}
+
+bool EnsureConverter(Device& d) {
+  std::lock_guard<std::mutex> lock(d.convert_mutex);
+  if (d.convert_tried) {
+    return d.pipeline != VK_NULL_HANDLE;
+  }
+  d.convert_tried = true;
+  if (!d.convert_loaded) {
+    return false;
+  }
+  const Functions& f = d.f;
+  VkSamplerCreateInfo sampler_info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+  sampler_info.magFilter = VK_FILTER_NEAREST;
+  sampler_info.minFilter = VK_FILTER_NEAREST;
+  sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  const VkDescriptorSetLayoutBinding bindings[2] = {
+      {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+       VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+      {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT,
+       nullptr}};
+  VkDescriptorSetLayoutCreateInfo set_info{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+  set_info.bindingCount = 2;
+  set_info.pBindings = bindings;
+  const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                  sizeof(ConvertJob)};
+  VkShaderModuleCreateInfo shader_info{
+      VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+  shader_info.codeSize = sizeof kCaptureYuvShader;
+  shader_info.pCode = kCaptureYuvShader;
+  VkShaderModule shader = VK_NULL_HANDLE;
+  bool ok = f.vkCreateSampler(d.handle, &sampler_info, nullptr, &d.sampler) ==
+                VK_SUCCESS &&
+            f.vkCreateDescriptorSetLayout(d.handle, &set_info, nullptr,
+                                          &d.set_layout) == VK_SUCCESS;
+  if (ok) {
+    VkPipelineLayoutCreateInfo layout_info{
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layout_info.setLayoutCount = 1;
+    layout_info.pSetLayouts = &d.set_layout;
+    layout_info.pushConstantRangeCount = 1;
+    layout_info.pPushConstantRanges = &range;
+    ok = f.vkCreatePipelineLayout(d.handle, &layout_info, nullptr,
+                                  &d.layout) == VK_SUCCESS &&
+         f.vkCreateShaderModule(d.handle, &shader_info, nullptr, &shader) ==
+             VK_SUCCESS;
+  }
+  if (ok) {
+    VkComputePipelineCreateInfo pipeline_info{
+        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    pipeline_info.stage.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    pipeline_info.stage.module = shader;
+    pipeline_info.stage.pName = "main";
+    pipeline_info.layout = d.layout;
+    ok = f.vkCreateComputePipelines(d.handle, VK_NULL_HANDLE, 1,
+                                    &pipeline_info, nullptr,
+                                    &d.pipeline) == VK_SUCCESS;
+  }
+  if (shader != VK_NULL_HANDLE) {
+    f.vkDestroyShaderModule(d.handle, shader, nullptr);
+  }
+  if (!ok) {
+    DestroyConverter(d);
+    std::fprintf(stderr,
+                 "  [vulkan] capture frames convert on the CPU, the GPU "
+                 "converter didn't build\n");
+  }
+  return ok;
+}
 
 std::int64_t MonotonicUs() {
   timespec now{};
@@ -176,6 +344,15 @@ void DestroyResources(Chain& chain) {
     if (image.fence != VK_NULL_HANDLE) {
       f.vkDestroyFence(device, image.fence, nullptr);
     }
+    if (image.view != VK_NULL_HANDLE) {
+      f.vkDestroyImageView(device, image.view, nullptr);
+    }
+    if (image.planes != VK_NULL_HANDLE) {
+      f.vkDestroyBuffer(device, image.planes, nullptr);
+    }
+    if (image.planes_memory != VK_NULL_HANDLE) {
+      f.vkFreeMemory(device, image.planes_memory, nullptr);
+    }
     if (image.mapped != nullptr) {
       f.vkUnmapMemory(device, image.buffer_memory);
     }
@@ -193,6 +370,74 @@ void DestroyResources(Chain& chain) {
     }
   }
   chain.images.clear();
+  if (chain.pool != VK_NULL_HANDLE) {
+    f.vkDestroyDescriptorPool(device, chain.pool, nullptr);
+    chain.pool = VK_NULL_HANDLE;
+  }
+}
+
+bool CreateConverterResources(Chain& chain,
+                              const VkSwapchainCreateInfoKHR& info,
+                              Image& image) {
+  const Device& d = *chain.device;
+  const Functions& f = d.f;
+  VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+  buffer_info.size = chain.planes.total;
+  buffer_info.usage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  if (f.vkCreateBuffer(d.handle, &buffer_info, nullptr, &image.planes) !=
+      VK_SUCCESS) {
+    return false;
+  }
+  VkMemoryRequirements requirements{};
+  f.vkGetBufferMemoryRequirements(d.handle, image.planes, &requirements);
+  VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  allocate.allocationSize = requirements.size;
+  if (!FindMemoryType(d.memory, requirements.memoryTypeBits,
+                      {VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0},
+                      &allocate.memoryTypeIndex) ||
+      f.vkAllocateMemory(d.handle, &allocate, nullptr, &image.planes_memory) !=
+          VK_SUCCESS ||
+      f.vkBindBufferMemory(d.handle, image.planes, image.planes_memory, 0) !=
+          VK_SUCCESS) {
+    return false;
+  }
+  VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  view_info.image = image.image;
+  view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view_info.format = info.imageFormat;
+  view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  if (f.vkCreateImageView(d.handle, &view_info, nullptr, &image.view) !=
+      VK_SUCCESS) {
+    return false;
+  }
+  VkDescriptorSetAllocateInfo set_info{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  set_info.descriptorPool = chain.pool;
+  set_info.descriptorSetCount = 1;
+  set_info.pSetLayouts = &d.set_layout;
+  if (f.vkAllocateDescriptorSets(d.handle, &set_info, &image.set) !=
+      VK_SUCCESS) {
+    return false;
+  }
+  const VkDescriptorImageInfo frame{d.sampler, image.view,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  const VkDescriptorBufferInfo planes{image.planes, 0, VK_WHOLE_SIZE};
+  VkWriteDescriptorSet writes[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                    {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+  writes[0].dstSet = image.set;
+  writes[0].dstBinding = 0;
+  writes[0].descriptorCount = 1;
+  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[0].pImageInfo = &frame;
+  writes[1].dstSet = image.set;
+  writes[1].dstBinding = 1;
+  writes[1].descriptorCount = 1;
+  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  writes[1].pBufferInfo = &planes;
+  f.vkUpdateDescriptorSets(d.handle, 2, writes, 0, nullptr);
+  return true;
 }
 
 bool CreateImages(Chain& chain, const VkSwapchainCreateInfoKHR& info,
@@ -200,8 +445,24 @@ bool CreateImages(Chain& chain, const VkSwapchainCreateInfoKHR& info,
   const Device& d = *chain.device;
   const Functions& f = d.f;
   chain.images.resize(count);
-  const VkDeviceSize bytes = static_cast<VkDeviceSize>(chain.extent.width) *
-                             chain.extent.height * 4;
+  const VkDeviceSize bytes =
+      chain.convert ? chain.planes.total
+                    : static_cast<VkDeviceSize>(chain.extent.width) *
+                          chain.extent.height * 4;
+  if (chain.convert) {
+    const VkDescriptorPoolSize sizes[2] = {
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, count},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, count}};
+    VkDescriptorPoolCreateInfo pool_info{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    pool_info.maxSets = count;
+    pool_info.poolSizeCount = 2;
+    pool_info.pPoolSizes = sizes;
+    if (f.vkCreateDescriptorPool(d.handle, &pool_info, nullptr, &chain.pool) !=
+        VK_SUCCESS) {
+      return false;
+    }
+  }
   for (Image& image : chain.images) {
     VkImageCreateInfo image_info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     if ((info.flags & VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR) != 0) {
@@ -217,7 +478,8 @@ bool CreateImages(Chain& chain, const VkSwapchainCreateInfoKHR& info,
     image_info.arrayLayers = std::max(info.imageArrayLayers, 1u);
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.usage = info.imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    image_info.usage = info.imageUsage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                       (chain.convert ? VK_IMAGE_USAGE_SAMPLED_BIT : 0);
     image_info.sharingMode = info.imageSharingMode;
     image_info.queueFamilyIndexCount =
         info.imageSharingMode == VK_SHARING_MODE_CONCURRENT
@@ -281,11 +543,67 @@ bool CreateImages(Chain& chain, const VkSwapchainCreateInfoKHR& info,
 
     const VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     if (f.vkCreateFence(d.handle, &fence_info, nullptr, &image.fence) !=
-        VK_SUCCESS) {
+            VK_SUCCESS ||
+        (chain.convert && !CreateConverterResources(chain, info, image))) {
       return false;
     }
   }
   return true;
+}
+
+void RecordConvert(const Chain& chain, const Image& image,
+                   VkCommandBuffer cmd) {
+  const Device& d = *chain.device;
+  const Functions& f = d.f;
+  const Planes& planes = chain.planes;
+  const VkImageMemoryBarrier to_read = ImageBarrier(
+      image.image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_MEMORY_WRITE_BIT,
+      VK_ACCESS_SHADER_READ_BIT);
+  f.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &to_read);
+  f.vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, d.pipeline);
+  f.vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, d.layout, 0, 1,
+                            &image.set, 0, nullptr);
+  const ConvertJob job{static_cast<std::int32_t>(planes.width),
+                       static_cast<std::int32_t>(planes.height),
+                       planes.luma_stride / 4u,
+                       planes.chroma_stride / 4u,
+                       static_cast<std::uint32_t>(planes.luma_size / 4u),
+                       static_cast<std::uint32_t>(
+                           (planes.luma_size + planes.chroma_size) / 4u),
+                       planes.interleaved ? 1u : 0u};
+  f.vkCmdPushConstants(cmd, d.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof job, &job);
+  f.vkCmdDispatch(cmd, (planes.width + 63u) / 64u, (planes.height + 15u) / 16u,
+                  1);
+  VkBufferMemoryBarrier written{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+  written.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  written.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  written.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  written.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  written.buffer = image.planes;
+  written.size = VK_WHOLE_SIZE;
+  const VkImageMemoryBarrier to_present = ImageBarrier(
+      image.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 0, 0);
+  f.vkCmdPipelineBarrier(
+      cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+      0, nullptr, 1, &written, 1, &to_present);
+  const VkBufferCopy region{0, 0, planes.total};
+  f.vkCmdCopyBuffer(cmd, image.planes, image.buffer, 1, &region);
+  VkBufferMemoryBarrier to_host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+  to_host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  to_host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+  to_host.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_host.buffer = image.buffer;
+  to_host.size = VK_WHOLE_SIZE;
+  f.vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                         &to_host, 0, nullptr);
 }
 
 Recorded* RecordFor(Chain& chain, std::uint32_t family) {
@@ -319,6 +637,11 @@ Recorded* RecordFor(Chain& chain, std::uint32_t family) {
     ok = f.vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS;
     if (!ok) {
       break;
+    }
+    if (chain.convert) {
+      RecordConvert(chain, image, cmd);
+      ok = f.vkEndCommandBuffer(cmd) == VK_SUCCESS;
+      continue;
     }
     const VkImageMemoryBarrier to_copy = ImageBarrier(
         image.image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -366,13 +689,14 @@ void RunWorker(std::shared_ptr<Chain> chain) {
       return chain->stop.load(std::memory_order_acquire) ||
              !chain->presented.empty();
     });
-    if (chain->stop.load(std::memory_order_acquire)) {
+    if (chain->presented.empty()) {
       return;
     }
     const std::uint32_t index = chain->presented.front();
     Image& image = chain->images[index];
     lock.unlock();
-    VkResult waited = VK_TIMEOUT;
+    VkResult waited =
+        f.vkWaitForFences(device, 1, &image.fence, VK_TRUE, kFenceSliceNs);
     while (waited == VK_TIMEOUT &&
            !chain->stop.load(std::memory_order_acquire)) {
       waited = f.vkWaitForFences(device, 1, &image.fence, VK_TRUE,
@@ -385,20 +709,25 @@ void RunWorker(std::shared_ptr<Chain> chain) {
         range.size = VK_WHOLE_SIZE;
         f.vkInvalidateMappedMemoryRanges(device, 1, &range);
       }
-      chain->surface.ops->submit(
-          chain->surface.window, image.mapped,
-          static_cast<std::int32_t>(chain->extent.width * 4), chain->pixels,
-          image.present_us);
-    } else if (waited != VK_TIMEOUT) {
+      if (chain->convert) {
+        chain->surface.ops->submit_planes(chain->surface.window, image.mapped,
+                                          image.present_us);
+      } else {
+        chain->surface.ops->submit(
+            chain->surface.window, image.mapped,
+            static_cast<std::int32_t>(chain->extent.width * 4), chain->pixels,
+            image.present_us);
+      }
+    } else if (chain->convert) {
+      chain->surface.ops->submit_planes(chain->surface.window, nullptr,
+                                        image.present_us);
+    } else {
       chain->surface.ops->submit(chain->surface.window, nullptr, 0,
                                  chain->pixels, image.present_us);
     }
     lock.lock();
-    if (waited == VK_TIMEOUT) {
-      return;
-    }
     chain->presented.pop_front();
-    if (waited != VK_SUCCESS) {
+    if (waited != VK_SUCCESS && waited != VK_TIMEOUT) {
       chain->lost = waited;
     }
     image.state = ImageState::kFree;
@@ -587,7 +916,11 @@ void VulkanCaptureSwapchains::RegisterDevice(
       reinterpret_cast<PFN_##name>(get_device_proc_addr(device, #name));    \
   loaded = loaded && d->f.name != nullptr;
   CAPTURE_DEVICE_FUNCTIONS(CAPTURE_LOAD)
+  const bool required = loaded;
+  CAPTURE_CONVERT_FUNCTIONS(CAPTURE_LOAD)
 #undef CAPTURE_LOAD
+  d->convert_loaded = loaded;
+  loaded = required;
   const auto memory_properties =
       reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
           get_instance_proc_addr(instance,
@@ -609,6 +942,7 @@ void VulkanCaptureSwapchains::RegisterDevice(
 
 void VulkanCaptureSwapchains::DestroyDevice(VkDevice device) {
   std::vector<std::shared_ptr<Chain>> doomed;
+  std::shared_ptr<Device> gone;
   {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     for (auto it = impl_->chains.begin(); it != impl_->chains.end();) {
@@ -636,10 +970,17 @@ void VulkanCaptureSwapchains::DestroyDevice(VkDevice device) {
                        }),
         impl_->pending_fences.end());
     impl_->CountPendingLocked();
-    impl_->devices.erase(device);
+    if (const auto found = impl_->devices.find(device);
+        found != impl_->devices.end()) {
+      gone = std::move(found->second);
+      impl_->devices.erase(found);
+    }
   }
   for (const std::shared_ptr<Chain>& chain : doomed) {
     Shutdown(*chain);
+  }
+  if (gone != nullptr) {
+    DestroyConverter(*gone);
   }
 }
 
@@ -734,9 +1075,7 @@ bool VulkanCaptureSwapchains::SurfaceSupport(VkPhysicalDevice physical_device,
     std::vector<VkQueueFamilyProperties> properties(count);
     queue_families(physical_device, &count, properties.data());
     usable = family < count &&
-                     (properties[family].queueFlags &
-                      (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT |
-                       VK_QUEUE_TRANSFER_BIT)) != 0
+                     (properties[family].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0
                  ? VK_TRUE
                  : VK_FALSE;
   }
@@ -923,6 +1262,11 @@ bool VulkanCaptureSwapchains::CreateSwapchain(
   chain->pixels = info->imageFormat == VK_FORMAT_B8G8R8A8_UNORM
                       ? BLOX7_ENCODER_PIXELS_BGRA
                       : BLOX7_ENCODER_PIXELS_RGBA;
+  Blox7EncoderPlanes encoder_planes{};
+  surface.ops->planes(surface.window, &encoder_planes);
+  chain->convert =
+      PlanesFrom(encoder_planes, info->imageExtent, &chain->planes) &&
+      info->imageArrayLayers <= 1 && EnsureConverter(*owner);
   const std::uint32_t count =
       std::clamp(std::max(info->minImageCount, kMinImages), kMinImages,
                  kMaxImages);
@@ -1199,7 +1543,7 @@ bool VulkanCaptureSwapchains::QueuePresent(VkQueue queue,
   }
   std::vector<VkResult> results(count, VK_SUCCESS);
   const std::vector<VkPipelineStageFlags> stages(
-      present_info->waitSemaphoreCount, VK_PIPELINE_STAGE_TRANSFER_BIT);
+      present_info->waitSemaphoreCount, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
   bool holds_signal = present_info->waitSemaphoreCount != 0;
   for (std::uint32_t index = 0; index < count; ++index) {
     if (captured[index] == nullptr) {

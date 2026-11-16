@@ -22,22 +22,16 @@ constexpr std::int32_t kDefaultBitrate = 64000;
 constexpr std::int32_t kPcmEncoding16Bit = 2;
 constexpr std::int32_t kAacProfileLow = 2;
 
-std::int32_t Int32Or(const MediaFormat& format, const char* key,
-                     std::int32_t fallback) {
-  std::int32_t value = 0;
-  return format.GetInt32(key, &value) ? value : fallback;
-}
-
 }  // namespace
 
 std::unique_ptr<FfmpegEncoder> FfmpegEncoder::Create(
     const MediaFormat& format) {
   av_log_set_level(AV_LOG_FATAL);
-  const std::int32_t sample_rate = Int32Or(format, "sample-rate", 0);
-  const std::int32_t channels = Int32Or(format, "channel-count", 0);
-  const std::int32_t bitrate = Int32Or(format, "bitrate", kDefaultBitrate);
-  const std::int32_t pcm = Int32Or(format, "pcm-encoding", kPcmEncoding16Bit);
-  const std::int32_t profile = Int32Or(format, "aac-profile", kAacProfileLow);
+  const std::int32_t sample_rate = format.Int32Or("sample-rate", 0);
+  const std::int32_t channels = format.Int32Or("channel-count", 0);
+  const std::int32_t bitrate = format.Int32Or("bitrate", kDefaultBitrate);
+  const std::int32_t pcm = format.Int32Or("pcm-encoding", kPcmEncoding16Bit);
+  const std::int32_t profile = format.Int32Or("aac-profile", kAacProfileLow);
   if (sample_rate < 8000 || sample_rate > 96000 || channels < 1 ||
       channels > 8 || pcm != kPcmEncoding16Bit || profile != kAacProfileLow ||
       bitrate <= 0) {

@@ -639,6 +639,7 @@ if(BLOX7_WIN32)
   )
   # the focused TextBox gets its own layer over the game window
   target_sources(blox7 PRIVATE win/runtime/text_layer_win.cc)
+  target_sources(blox7 PRIVATE win/runtime/album_saver_win.cc)
   target_link_libraries(blox7 PRIVATE Blox7::Update SDL3::SDL3)
 endif()
 

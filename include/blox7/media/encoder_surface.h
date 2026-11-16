@@ -14,6 +14,14 @@ enum {
   BLOX7_ENCODER_PIXELS_BGRA = 1,
 };
 
+typedef struct Blox7EncoderPlanes {
+  int32_t width;
+  int32_t height;
+  int32_t luma_stride;
+  int32_t chroma_stride;
+  int32_t interleaved;
+} Blox7EncoderPlanes;
+
 typedef struct Blox7EncoderSurface {
   void (*size)(const void* window, int32_t* width, int32_t* height);
   void (*acquire)(const void* window);
@@ -21,6 +29,8 @@ typedef struct Blox7EncoderSurface {
   void (*queue)(const void* window, int64_t time_us);
   void (*submit)(const void* window, const void* pixels, int32_t stride,
                  int32_t pixels_format, int64_t time_us);
+  void (*planes)(const void* window, Blox7EncoderPlanes* planes);
+  void (*submit_planes)(const void* window, const void* data, int64_t time_us);
 } Blox7EncoderSurface;
 
 typedef const Blox7EncoderSurface* (*Blox7EncoderSurfaceLookup)(

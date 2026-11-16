@@ -65,6 +65,12 @@ struct RobloxCredentialView {
 using RobloxCredentialProvider = RobloxCredentialView (*)(const void *context);
 using RobloxCookieGetter = jstring (*)(JNIEnv* env, jclass clazz,
                                        jstring domain);
+using RobloxAlbumSaver = bool (*)(const std::string& path,
+                                  std::string* message);
+using RobloxImageSavedToAlbumFinished = void (*)(JNIEnv* env, jclass clazz,
+                                                 jstring path,
+                                                 jboolean success,
+                                                 jstring message);
 
 jobject CreateAndroidConfiguration(JNIEnv *env);
 
@@ -266,6 +272,9 @@ public:
   bool CopyRobloxCredentialFromProvider(std::string *credential) const;
 
   void SetRobloxCookieGetter(RobloxCookieGetter getter);
+  void SetRobloxAlbumSaver(RobloxAlbumSaver saver,
+                           RobloxImageSavedToAlbumFinished finished);
+  bool SaveRobloxImageToAlbum(JNIEnv* env, jstring path);
   bool RefreshRobloxCredentialFromEngine(JNIEnv* env);
 
   void SetRobloxCredentialSink(std::shared_ptr<void> context,
@@ -413,6 +422,11 @@ private:
 
   mutable std::mutex roblox_cookie_getter_mutex_;
   RobloxCookieGetter roblox_cookie_getter_ = nullptr;
+
+  mutable std::mutex roblox_album_saver_mutex_;
+  RobloxAlbumSaver roblox_album_saver_ = nullptr;
+  RobloxImageSavedToAlbumFinished roblox_image_saved_to_album_finished_ =
+      nullptr;
 
   struct RobloxCredentialSinkBinding {
     std::shared_ptr<void> context;

@@ -68,6 +68,22 @@ int LogicalCpuFallback(const cpu_set_t* allowed) {
   return static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
 }
 
+bool MergeVideoCaptureClientSettingsOverrides(std::string_view base_json,
+                                              std::string *merged_json,
+                                              std::string *error) {
+  nlohmann::json overrides =
+      nlohmann::json::parse(base_json, nullptr, false, true);
+  if (overrides.is_discarded() || !overrides.is_object()) {
+    if (error != nullptr) {
+      *error = "client-settings overrides must be a JSON object";
+    }
+    return false;
+  }
+  overrides["DFFlagDebugEnableToggleForNonWindows"] = "True";
+  *merged_json = overrides.dump();
+  return true;
+}
+
 }  // namespace
 
 bool ParsePhysicsWorkerMode(std::string_view value, PhysicsWorkerMode* mode) {
@@ -359,8 +375,14 @@ bool MergeRuntimeClientSettingsOverrides(const FrameRatePolicy& frame_rate,
           http_client_overrides, &texture_memory_overrides, error)) {
     return false;
   }
-  return MergeCrashReportClientSettingsOverrides(texture_memory_overrides,
-                                                 merged_json, error);
+  std::string crash_report_overrides;
+  if (!MergeCrashReportClientSettingsOverrides(texture_memory_overrides,
+                                               &crash_report_overrides,
+                                               error)) {
+    return false;
+  }
+  return MergeVideoCaptureClientSettingsOverrides(crash_report_overrides,
+                                                  merged_json, error);
 }
 
 bool MergeAudioDeviceMenuClientSettingsOverrides(std::string_view base_json,

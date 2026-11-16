@@ -1,6 +1,7 @@
 #include "media/input_surface.h"
 
 #include <cstdio>
+#include <cstring>
 #include <new>
 #include <unordered_map>
 #include <utility>
@@ -70,8 +71,32 @@ void SurfaceSubmit(const void* window, const void* pixels, std::int32_t stride,
   }
 }
 
-const Blox7EncoderSurface kOps = {SurfaceSize, SurfaceAcquire, SurfaceRelease,
-                                  SurfaceQueue, SurfaceSubmit};
+void SurfacePlanes(const void* window, Blox7EncoderPlanes* planes) {
+  if (planes == nullptr) {
+    return;
+  }
+  *planes = Blox7EncoderPlanes{};
+  if (const std::shared_ptr<InputSurface> surface = Find(window)) {
+    const PictureLayout& layout = surface->layout();
+    planes->width = layout.width;
+    planes->height = layout.height;
+    planes->luma_stride = layout.luma_stride;
+    planes->chroma_stride = layout.chroma_stride;
+    planes->interleaved = layout.interleaved ? 1 : 0;
+  }
+}
+
+void SurfaceSubmitPlanes(const void* window, const void* data,
+                         std::int64_t time_us) {
+  if (const std::shared_ptr<InputSurface> surface = Find(window)) {
+    surface->SubmitPlanes(data, time_us);
+  }
+}
+
+const Blox7EncoderSurface kOps = {SurfaceSize,   SurfaceAcquire,
+                                  SurfaceRelease, SurfaceQueue,
+                                  SurfaceSubmit, SurfacePlanes,
+                                  SurfaceSubmitPlanes};
 
 }  // namespace
 
@@ -108,44 +133,83 @@ void InputSurface::Release(const void* window) {
 }
 
 void InputSurface::Attach(FrameSink* sink) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(sink_mutex_);
   sink_ = sink;
 }
 
 void InputSurface::Detach(FrameSink* sink) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(sink_mutex_);
   if (sink_ == sink) {
     sink_ = nullptr;
   }
 }
 
 void InputSurface::Queue(std::int64_t time_us) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(sink_mutex_);
   if (sink_ != nullptr) {
     sink_->QueueFrame(time_us);
   }
 }
 
-void InputSurface::Submit(const void* pixels, std::int32_t stride,
-                          std::int32_t format, std::int64_t time_us) {
-  std::lock_guard<std::mutex> lock(mutex_);
+std::vector<std::uint8_t> InputSurface::TakeFrame(std::int64_t time_us) {
+  std::lock_guard<std::mutex> lock(sink_mutex_);
   if (sink_ == nullptr) {
+    return {};
+  }
+  std::vector<std::uint8_t> frame = sink_->TakeFrameBuffer(layout_.Size());
+  if (frame.size() < layout_.Size()) {
+    sink_->DropFrame(time_us);
+    return {};
+  }
+  return frame;
+}
+
+void InputSurface::DeliverFrame(std::vector<std::uint8_t> frame,
+                                std::int64_t time_us) {
+  std::lock_guard<std::mutex> lock(sink_mutex_);
+  if (sink_ != nullptr) {
+    sink_->PushFrame(std::move(frame), time_us);
+  }
+}
+
+void InputSurface::DropFrame(std::int64_t time_us) {
+  std::lock_guard<std::mutex> lock(sink_mutex_);
+  if (sink_ != nullptr) {
+    sink_->DropFrame(time_us);
+  }
+}
+
+void InputSurface::SubmitPlanes(const void* data, std::int64_t time_us) {
+  if (data == nullptr) {
+    DropFrame(time_us);
     return;
   }
+  std::vector<std::uint8_t> frame = TakeFrame(time_us);
+  if (frame.empty()) {
+    return;
+  }
+  std::memcpy(frame.data(), data, layout_.Size());
+  DeliverFrame(std::move(frame), time_us);
+}
+
+void InputSurface::Submit(const void* pixels, std::int32_t stride,
+                          std::int32_t format, std::int64_t time_us) {
+  std::lock_guard<std::mutex> convert(convert_mutex_);
   if (pixels == nullptr || stride < layout_.width * 4) {
-    sink_->DropFrame(time_us);
+    DropFrame(time_us);
     return;
   }
   const AVPixelFormat source =
       format == BLOX7_ENCODER_PIXELS_BGRA ? AV_PIX_FMT_BGRA : AV_PIX_FMT_RGBA;
   if (scaler_ == nullptr || scaler_format_ != source) {
     sws_freeContext(scaler_);
-    scaler_ = sws_getContext(layout_.width, layout_.height, source,
-                             layout_.width, layout_.height, AV_PIX_FMT_YUV420P,
-                             SWS_BILINEAR, nullptr, nullptr, nullptr);
+    scaler_ = sws_getContext(
+        layout_.width, layout_.height, source, layout_.width, layout_.height,
+        layout_.interleaved ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P,
+        SWS_BILINEAR, nullptr, nullptr, nullptr);
     scaler_format_ = source;
     if (scaler_ == nullptr) {
-      sink_->DropFrame(time_us);
+      DropFrame(time_us);
       if (!warned_) {
         warned_ = true;
         std::fprintf(stderr,
@@ -159,22 +223,24 @@ void InputSurface::Submit(const void* pixels, std::int32_t stride,
     sws_setColorspaceDetails(scaler_, bt709, 1, bt709, 0, 0, 1 << 16,
                              1 << 16);
   }
-  std::vector<std::uint8_t> frame = sink_->TakeFrameBuffer(layout_.Size());
-  if (frame.size() < layout_.Size()) {
-    sink_->DropFrame(time_us);
+  std::vector<std::uint8_t> frame = TakeFrame(time_us);
+  if (frame.empty()) {
     return;
   }
   std::uint8_t* const planes[4] = {
       frame.data(), frame.data() + layout_.LumaSize(),
-      frame.data() + layout_.LumaSize() + layout_.ChromaSize(), nullptr};
+      layout_.interleaved
+          ? nullptr
+          : frame.data() + layout_.LumaSize() + layout_.ChromaSize(),
+      nullptr};
   const int strides[4] = {layout_.luma_stride, layout_.chroma_stride,
-                          layout_.chroma_stride, 0};
+                          layout_.interleaved ? 0 : layout_.chroma_stride, 0};
   const std::uint8_t* const source_planes[4] = {
       static_cast<const std::uint8_t*>(pixels), nullptr, nullptr, nullptr};
   const int source_strides[4] = {stride, 0, 0, 0};
   sws_scale(scaler_, source_planes, source_strides, 0, layout_.height, planes,
             strides);
-  sink_->PushFrame(std::move(frame), time_us);
+  DeliverFrame(std::move(frame), time_us);
 }
 
 }  // namespace blox7::media

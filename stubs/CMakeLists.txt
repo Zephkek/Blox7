@@ -89,6 +89,7 @@ target_include_directories(stub_log PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 add_library(stub_mediandk SHARED
   libmediandk_stub.cc
+  ${CMAKE_SOURCE_DIR}/src/media/avc_sps.cc
   ${CMAKE_SOURCE_DIR}/src/media/codec_names.cc
   ${CMAKE_SOURCE_DIR}/src/media/ffmpeg_decoder.cc
   ${CMAKE_SOURCE_DIR}/src/media/ffmpeg_encoder.cc
@@ -119,6 +120,9 @@ target_link_libraries(stub_mediandk PRIVATE
   ${BLOX7_AVUTIL_LIBRARY}
   Threads::Threads
 )
+if(BLOX7_WIN32)
+  target_sources(stub_mediandk PRIVATE ${CMAKE_SOURCE_DIR}/win/media/media_foundation_encoder_win.cc)
+endif()
 
 add_library(stub_openmax SHARED libopensl_stub.cc)
 configure_stub(stub_openmax "libOpenMAXAL.so")

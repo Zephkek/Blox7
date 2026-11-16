@@ -293,10 +293,11 @@ TEST_F(RobloxPermissionsBridgeTest, RegistersBothTransportsAndReinitializes) {
 }
 
 TEST_F(RobloxPermissionsBridgeTest,
-       SupportsMicrophoneAndNetworkWithoutGrantingOthers) {
+       SupportsMicrophoneNetworkAndMediaWithoutGrantingOthers) {
   ASSERT_TRUE(Initialize().ok());
   const Json expected = {
-      {"permissions", {"MICROPHONE_ACCESS", "LOCAL_NETWORK"}}};
+      {"permissions",
+       {"MICROPHONE_ACCESS", "LOCAL_NETWORK", "WRITE_MEDIA_STORAGE"}}};
   EXPECT_EQ(Legacy("SupportsPermissions", "{}").body, expected);
   EXPECT_EQ(Async("SupportsPermissions", "{}"), expected);
   for (const char* method : {"HasPermissions", "PermissionsRequest"}) {
@@ -305,7 +306,7 @@ TEST_F(RobloxPermissionsBridgeTest,
     EXPECT_EQ(Legacy(method).body, authorized);
     EXPECT_EQ(Async(method), authorized);
     const char* mixed =
-        R"({"permissions":["MICROPHONE_ACCESS","LOCAL_NETWORK","CAMERA_ACCESS","CONTACTS_ACCESS","unknown"]})";
+        R"({"permissions":["MICROPHONE_ACCESS","LOCAL_NETWORK","WRITE_MEDIA_STORAGE","CAMERA_ACCESS","CONTACTS_ACCESS","unknown"]})";
     const Json denied = {{"status", "DENIED"},
                          {"missingPermissions",
                           {"CAMERA_ACCESS", "CONTACTS_ACCESS", "unknown"}}};
@@ -318,7 +319,8 @@ TEST_F(RobloxPermissionsBridgeTest,
        DisabledMicrophoneCannotBeGrantedByRequest) {
   ASSERT_TRUE(Initialize(false).ok());
   EXPECT_EQ(Async("SupportsPermissions", "{}").at("permissions"),
-            Json::array({"MICROPHONE_ACCESS", "LOCAL_NETWORK"}));
+            Json::array(
+                {"MICROPHONE_ACCESS", "LOCAL_NETWORK", "WRITE_MEDIA_STORAGE"}));
   for (const char* method : {"HasPermissions", "PermissionsRequest"}) {
     const Json denied = {{"status", "DENIED"},
                          {"missingPermissions", {"MICROPHONE_ACCESS"}}};
@@ -329,6 +331,10 @@ TEST_F(RobloxPermissionsBridgeTest,
   EXPECT_EQ(Async("HasPermissions", R"({"permissions":["LOCAL_NETWORK"]})")
                 .at("status"),
             "AUTHORIZED");
+  EXPECT_EQ(
+      Async("PermissionsRequest", R"({"permissions":["WRITE_MEDIA_STORAGE"]})")
+          .at("status"),
+      "AUTHORIZED");
   EXPECT_EQ(Async("PermissionsRequest",
                   R"({"permissions":["MICROPHONE_ACCESS","LOCAL_NETWORK"]})")
                 .at("missingPermissions"),

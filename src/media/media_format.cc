@@ -50,6 +50,17 @@ bool MediaFormat::GetFloat(const char* key, float* out) const {
   return true;
 }
 
+std::int32_t MediaFormat::Int32Or(const char* key,
+                                  std::int32_t fallback) const {
+  std::int32_t value = 0;
+  return GetInt32(key, &value) ? value : fallback;
+}
+
+float MediaFormat::FloatOr(const char* key, float fallback) const {
+  float value = 0;
+  return GetFloat(key, &value) ? value : fallback;
+}
+
 const MediaFormat::Buffer* MediaFormat::GetBuffer(const char* key) const {
   const Value* value = Find(key);
   return value != nullptr ? std::get_if<Buffer>(value) : nullptr;
