@@ -2,6 +2,7 @@
 #define BLOX7_LEGACY_LEGACY_RUNTIME_H_
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "blox7/status.h"
@@ -40,6 +41,7 @@ class RuntimeDependencies final {
       : jni_vm_(std::move(other.jni_vm_)),
         account_identity_(std::move(other.account_identity_)),
         roblox_credential_(std::move(other.roblox_credential_)),
+        browser_tracker_cookie_(std::move(other.browser_tracker_cookie_)),
         clear_persisted_web_view_cookie_(std::exchange(
             other.clear_persisted_web_view_cookie_, false)),
         shutdown_before_platform_(
@@ -54,6 +56,7 @@ class RuntimeDependencies final {
     jni_vm_ = std::move(other.jni_vm_);
     account_identity_ = std::move(other.account_identity_);
     roblox_credential_ = std::move(other.roblox_credential_);
+    browser_tracker_cookie_ = std::move(other.browser_tracker_cookie_);
     clear_persisted_web_view_cookie_ =
         std::exchange(other.clear_persisted_web_view_cookie_, false);
     shutdown_before_platform_ =
@@ -67,6 +70,12 @@ class RuntimeDependencies final {
   }
   const runtime::SecureRobloxCredential& roblox_credential() const {
     return roblox_credential_;
+  }
+  const std::string& browser_tracker_cookie() const {
+    return browser_tracker_cookie_;
+  }
+  void set_browser_tracker_cookie(std::string cookie) {
+    browser_tracker_cookie_ = std::move(cookie);
   }
   bool clear_persisted_web_view_cookie() const {
     return clear_persisted_web_view_cookie_;
@@ -82,6 +91,7 @@ class RuntimeDependencies final {
   std::shared_ptr<jnivm::VM> jni_vm_;
   jnivm::RobloxAuthIdentity account_identity_;
   runtime::SecureRobloxCredential roblox_credential_;
+  std::string browser_tracker_cookie_;
   bool clear_persisted_web_view_cookie_ = false;
   ShutdownBeforePlatformCallback shutdown_before_platform_ = nullptr;
 };

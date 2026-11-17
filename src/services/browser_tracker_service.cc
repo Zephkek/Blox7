@@ -504,6 +504,7 @@ BrowserTrackerResult BrowserTrackerService::EnsureInitialized(
   }
   if (!authoritative_id.empty()) {
     result.browser_tracker_id = authoritative_id;
+    result.tracker_cookie = std::string(kTrackerCookieName) + "=" + tracker;
     if (stored_id == authoritative_id) {
       close(lock);
       return result;
@@ -578,6 +579,8 @@ BrowserTrackerResult BrowserTrackerService::EnsureInitialized(
           AtomicWrite(app_storage_file, storage, &result.error)) {
         result.status = BrowserTrackerStatus::kCreated;
         result.browser_tracker_id = std::move(authoritative_id);
+        result.tracker_cookie =
+            std::string(kTrackerCookieName) + "=" + tracker;
       }
     }
   }

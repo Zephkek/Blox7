@@ -1113,6 +1113,8 @@ int main(int argc, char* argv[]) {
     }
     dependencies = blox7::legacy::RuntimeDependencies(
         std::move(composition), &ShutdownPlatformBridges);
+    dependencies.set_browser_tracker_cookie(
+        browser_tracker_result.tracker_cookie);
   }
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
       !isolated_canary) {

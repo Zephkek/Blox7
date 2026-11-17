@@ -303,6 +303,7 @@ struct EngineStartupContext {
   JavaVM* java_vm;
   jnivm::RobloxAuthIdentity account_identity;
   const blox7::runtime::SecureRobloxCredential* roblox_credential;
+  const std::string* browser_tracker_cookie;
   blox7::runtime::RobloxGameSessionRuntime* game_session_runtime;
   bool run_prepare_jni;
   bool run_set_asset_path;
@@ -2908,6 +2909,12 @@ void ConfigureNativeSettings(JNIEnv* env, jclass settings_class,
       credential != nullptr ? credential->view() : std::string_view();
   std::string cookie_manager_cookies =
       CookieForJNICookieManager(roblox_cookies, cookie_domain);
+  std::string startup_cookies(roblox_cookies);
+  if (context->browser_tracker_cookie != nullptr &&
+      !context->browser_tracker_cookie->empty()) {
+    if (!startup_cookies.empty()) startup_cookies += "; ";
+    startup_cookies += *context->browser_tracker_cookie;
+  }
   if (!roblox_cookies.empty()) {
     std::cout << "  [engine] typed credential prepared bytes="
               << roblox_cookies.size() << '\n'
@@ -2967,8 +2974,7 @@ void ConfigureNativeSettings(JNIEnv* env, jclass settings_class,
   jstring http_proxy_host_string = env->NewStringUTF(http_proxy_host.c_str());
   jstring cookie_base_url_string = env->NewStringUTF(cookie_base_url.c_str());
   jstring cookie_domain_string = env->NewStringUTF(cookie_domain.c_str());
-  jstring roblox_cookies_string = env->NewStringUTF(
-      credential != nullptr ? credential->c_str() : "");
+  jstring roblox_cookies_string = env->NewStringUTF(startup_cookies.c_str());
   jstring cookie_manager_cookies_string =
       env->NewStringUTF(cookie_manager_cookies.c_str());
   jstring android_id_string = env->NewStringUTF(android_id.c_str());
@@ -3154,10 +3160,10 @@ void ConfigureNativeSettings(JNIEnv* env, jclass settings_class,
               << std::flush;
   }
 
-  if (context->native_set_multiple_cookies && !roblox_cookies.empty() &&
+  if (context->native_set_multiple_cookies && !startup_cookies.empty() &&
       ShouldRunStartupStep("BLOX7_NATIVE_SET_MULTIPLE_COOKIES", true)) {
     std::cout << "  [engine] NativeSettings multipleCookies base="
-              << cookie_base_url << " bytes=" << roblox_cookies.size() << '\n'
+              << cookie_base_url << " bytes=" << startup_cookies.size() << '\n'
               << std::flush;
     run_native_setting("multipleCookies", [&]() {
       context->native_set_multiple_cookies(env, settings_class,
@@ -3187,6 +3193,7 @@ void ConfigureNativeSettings(JNIEnv* env, jclass settings_class,
     });
   }
   blox7::runtime::SecurelyClearString(&cookie_manager_cookies);
+  blox7::runtime::SecurelyClearString(&startup_cookies);
 }
 
 void ConfigureLocalStorage(JNIEnv* env, const EngineStartupContext* context) {
@@ -6652,6 +6659,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
         raw_vm,
         dependencies.account_identity(),
         &dependencies.roblox_credential(),
+        &dependencies.browser_tracker_cookie(),
         game_session_runtime.get(),
         run_prepare_jni,
         run_set_asset_path,
