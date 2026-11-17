@@ -1153,8 +1153,8 @@ ExternalHostAbiProfileResult RegisterProfile(
 }  // namespace
 
 FileSha256Result ComputeFileSha256(const std::string& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
+  const FileDescriptor input(open(path.c_str(), O_RDONLY | O_CLOEXEC));
+  if (input.get() < 0) {
     return {{}, "cannot open file for SHA-256: " + path};
   }
   std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> ctx(
@@ -1163,18 +1163,21 @@ FileSha256Result ComputeFileSha256(const std::string& path) {
     return {{}, "cannot initialize SHA-256 digest context for: " + path};
   }
   std::array<unsigned char, 128 * 1024> buffer{};
-  while (input) {
-    input.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
-    const std::streamsize read = input.gcount();
-    if (read > 0) {
-      if (EVP_DigestUpdate(ctx.get(), buffer.data(),
-                           static_cast<std::size_t>(read)) != 1) {
-        return {{}, "cannot update SHA-256 digest for: " + path};
-      }
+  while (true) {
+    const ssize_t count = read(input.get(), buffer.data(), buffer.size());
+    if (count == 0) {
+      break;
     }
-  }
-  if (!input.eof()) {
-    return {{}, "cannot read file for SHA-256: " + path};
+    if (count < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return {{}, "cannot read file for SHA-256: " + path};
+    }
+    if (EVP_DigestUpdate(ctx.get(), buffer.data(),
+                         static_cast<std::size_t>(count)) != 1) {
+      return {{}, "cannot update SHA-256 digest for: " + path};
+    }
   }
   unsigned char digest[EVP_MAX_MD_SIZE];
   unsigned int len = 0;

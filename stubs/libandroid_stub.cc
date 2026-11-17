@@ -150,7 +150,7 @@ std::string ResolveAssetPath(const char* filename) {
     std::scoped_lock lock(g_asset_lookup_cache.mutex);
     auto it = g_asset_lookup_cache.resolved_paths.find(cache_key);
     if (it != g_asset_lookup_cache.resolved_paths.end()) {
-      if (FileExists(it->second)) {
+      if (::access(it->second.c_str(), F_OK) == 0) {
         return it->second;
       }
       g_asset_lookup_cache.resolved_paths.erase(it);

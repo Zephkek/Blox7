@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -26,6 +27,7 @@ struct Elf {
 static __thread int g_error;
 
 enum { E_NONE, E_NOMEM, E_IO, E_FORMAT, E_RANGE, E_NOT64 };
+enum { IMAGE_BORROWED, IMAGE_MALLOC, IMAGE_VIEW };
 
 static void* fail(int e) {
   g_error = e;
@@ -79,6 +81,14 @@ Elf* elf_begin(int fd, Elf_Cmd cmd, Elf* ref) {
   struct stat st;
   if (fstat(fd, &st) != 0 || st.st_size < 0) return fail(E_IO);
   size_t size = (size_t)st.st_size;
+  if (size && cmd != ELF_C_RDWR && cmd != ELF_C_READ_MMAP_PRIVATE) {
+    void* view = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+    if (view != MAP_FAILED) {
+      Elf* mapped = open_image(view, size, IMAGE_VIEW);
+      if (!mapped) munmap(view, size);
+      return mapped;
+    }
+  }
   char* image = malloc(size ? size : 1);
   if (!image) return fail(E_NOMEM);
   for (size_t done = 0; done < size;) {
@@ -89,16 +99,17 @@ Elf* elf_begin(int fd, Elf_Cmd cmd, Elf* ref) {
     }
     done += (size_t)n;
   }
-  Elf* e = open_image(image, size, 1);
+  Elf* e = open_image(image, size, IMAGE_MALLOC);
   if (!e) free(image);
   return e;
 }
 
-Elf* elf_memory(char* image, size_t size) { return open_image(image, size, 0); }
+Elf* elf_memory(char* image, size_t size) { return open_image(image, size, IMAGE_BORROWED); }
 
 int elf_end(Elf* e) {
   if (!e) return 0;
-  if (e->owns_image) free(e->image);
+  if (e->owns_image == IMAGE_VIEW) munmap(e->image, e->size);
+  else if (e->owns_image == IMAGE_MALLOC) free(e->image);
   free(e->scns);
   free(e);
   return 0;

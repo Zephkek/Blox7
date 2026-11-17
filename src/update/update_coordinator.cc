@@ -836,7 +836,10 @@ UpdateResult RunUpdate(const UpdatePaths& paths, const UpdateRequest& request,
                              downloaded.version_code))) {
     const ExpectedPayloadIdentity identity{
         downloaded.version_name, downloaded.version_code, {}};
-    if (FindStagedCandidate(paths, identity, false))
+    const bool already_current =
+        current && current.version_code == downloaded.version_code &&
+        current.version_name == downloaded.version_name;
+    if (already_current || FindStagedCandidate(paths, identity, false))
       latest_version = downloaded;
   }
   if (request.download_only && !latest_version) {
