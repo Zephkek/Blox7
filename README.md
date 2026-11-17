@@ -44,25 +44,28 @@ keyboard.
 
 ## How it works
 
-Roblox builds its Android app for x86-64 as well as ARM, so its code already runs on a PC's processor. Blox7 gives it
-the rest of Android: the same Bionic libc a phone uses, built from the AOSP sources, with the Linux kernel underneath
-replaced by a syscall layer that runs on Win32 inside the game's process.
+Roblox builds its Android app for x86-64 as well as ARM, so `libroblox.so` already runs on a PC's processor. What it
+needs is the rest of Android around it, and Blox7 provides that inside a normal Windows process.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.png">
-    <img src="docs/how-it-works-light.png" width="692" alt="Blox7's stack, drawn like Android's platform diagram: Roblox's libroblox.so on top, then the Blox7 runtime, the Android libraries and the JNI runtime, the Win32 bridges, the Blox7 syscall layer, and Windows 7 through 11.">
+    <img src="docs/how-it-works-light.png" width="692" alt="The paths a call takes out of libroblox.so. libc calls go through Bionic into Blox7's syscall layer and on to kernel32, ntdll and ws2_32. Raw syscall instructions are trapped by a debug register and land in the same layer. JNI calls are answered by Blox7's JNI VM. Calls into the Android libraries cross bridges to SDL3, opengl32 and vulkan-1.">
   </picture>
 </p>
 
-Bionic's syscall stubs call functions like `sys_openat` and `sys_futex` instead of the kernel, and each one answers
-the way Linux would. Roblox also contains a few raw `syscall` instructions that don't go through libc. Each of those
-gets a debug register parked on it, and the exception handler runs the call through the same table.
+The C library is Bionic, the same one a phone uses, built from the AOSP sources. Its syscall stubs don't enter a
+kernel. They call functions like `sys_openat` and `sys_futex` in Blox7's syscall layer, which do the work with Win32
+and answer the way Linux would.
+
+Roblox also contains a few raw `syscall` instructions that don't go through libc. Each of those gets a debug register
+parked on it, and the exception handler runs the call through the same table.
 
 Roblox's Java code never runs. Its native code still calls into Java through JNI, and Blox7's JNI VM answers those
 calls in C++.
 
-Graphics, input and audio skip the syscall layer. Bridges pass them to the Windows GPU driver and SDL3.
+Graphics, input and audio skip the syscall layer. The Android libraries Roblox links against, like `libEGL.so` and
+`libvulkan.so`, are Blox7's own, and bridges pass their calls to SDL3 and the Windows GPU driver.
 
 ## Building
 
