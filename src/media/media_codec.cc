@@ -18,6 +18,7 @@ constexpr std::size_t kQueuedFrames = 4;
 constexpr std::int32_t kColorFormatYuv420Planar = 19;
 constexpr std::int32_t kColorFormatSurface = 0x7F000789;
 constexpr std::int32_t kPcmEncoding16Bit = 2;
+constexpr std::int64_t kLongestWaitUs = std::int64_t{1} << 40;
 
 std::int64_t MonotonicUs() {
   timespec now{};
@@ -76,7 +77,7 @@ MediaCodec::~MediaCodec() { Stop(); }
 template <typename Predicate>
 bool MediaCodec::WaitFor(std::unique_lock<std::mutex>& lock,
                          std::int64_t timeout_us, Predicate ready) {
-  if (timeout_us < 0) {
+  if (timeout_us < 0 || timeout_us > kLongestWaitUs) {
     changed_.wait(lock, ready);
     return true;
   }
@@ -171,7 +172,7 @@ media_status_t MediaCodec::Start() {
         video_encoder_ != nullptr
             ? std::max<std::size_t>(video_encoder_->layout().Size(), 64 * 1024)
         : audio_encoder_ != nullptr ? 8 * 1024
-                                    : 0;
+                                    : 4 * 1024;
     for (Slot& slot : outputs_) {
       slot.data.resize(capacity);
     }

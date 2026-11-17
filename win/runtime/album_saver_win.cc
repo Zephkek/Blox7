@@ -49,6 +49,7 @@ constexpr std::uint32_t kErrorSharingViolation = 32;
 constexpr std::uint32_t kNotifyFileName = 0x1;
 constexpr std::uint32_t kInfinite = 0xFFFFFFFF;
 constexpr std::uint32_t kWaitSignaled = 0;
+constexpr std::uint32_t kWaitFailed = 0xFFFFFFFF;
 constexpr char kFailure[] = "saveImageToAlbum: Failed to save image with exception: \n";
 
 struct Win32 {
@@ -75,6 +76,8 @@ struct Win32 {
   std::uint32_t(BLOX7_MS* last_error)() = nullptr;
   void*(BLOX7_MS* find_first_change)(const char16_t*, std::int32_t, std::uint32_t) = nullptr;
   std::int32_t(BLOX7_MS* find_next_change)(void*) = nullptr;
+  std::int32_t(BLOX7_MS* find_close_change)(void*) = nullptr;
+  void(BLOX7_MS* sleep)(std::uint32_t) = nullptr;
   std::uint32_t(BLOX7_MS* wait)(void*, std::uint32_t) = nullptr;
   void*(BLOX7_MS* find_first_file)(const char16_t*, void*) = nullptr;
   std::int32_t(BLOX7_MS* find_next_file)(void*, void*) = nullptr;
@@ -123,6 +126,8 @@ const Win32* Api() {
         Bind(kernel32, "GetLastError", &loaded->last_error) &&
         Bind(kernel32, "FindFirstChangeNotificationW", &loaded->find_first_change) &&
         Bind(kernel32, "FindNextChangeNotification", &loaded->find_next_change) &&
+        Bind(kernel32, "FindCloseChangeNotification", &loaded->find_close_change) &&
+        Bind(kernel32, "Sleep", &loaded->sleep) &&
         Bind(kernel32, "WaitForSingleObject", &loaded->wait) &&
         Bind(kernel32, "FindFirstFileW", &loaded->find_first_file) &&
         Bind(kernel32, "FindNextFileW", &loaded->find_next_file) &&
@@ -355,16 +360,18 @@ void WatchVideos(const std::string& directory) {
     return;
   }
   const std::u16string folder = Wide(*w, native.data());
-  w->create_directories(nullptr, folder.c_str(), nullptr);
-  void* change = w->find_first_change(folder.c_str(), 0, kNotifyFileName);
-  if (change == reinterpret_cast<void*>(-1)) {
-    return;
-  }
   for (;;) {
-    const bool writing = MoveClosedVideos(*w, directory, folder);
-    if (w->wait(change, writing ? 1000 : kInfinite) == kWaitSignaled) {
-      w->find_next_change(change);
+    w->create_directories(nullptr, folder.c_str(), nullptr);
+    void* change = w->find_first_change(folder.c_str(), 0, kNotifyFileName);
+    while (change != reinterpret_cast<void*>(-1)) {
+      const bool writing = MoveClosedVideos(*w, directory, folder);
+      const std::uint32_t waited = w->wait(change, writing ? 1000 : kInfinite);
+      if (waited == kWaitFailed || (waited == kWaitSignaled && w->find_next_change(change) == 0)) {
+        w->find_close_change(change);
+        break;
+      }
     }
+    w->sleep(1000);
   }
 }
 

@@ -696,6 +696,9 @@ class MediaFoundationEncoder final : public VideoEncoder {
   }
 
   void SetCodecValue(const Guid& key, std::uint32_t value) {
+    if (!codec_) {
+      return;
+    }
     Variant variant{};
     variant.type = kVariantUint32;
     variant.value.uint32 = value;
@@ -703,6 +706,9 @@ class MediaFoundationEncoder final : public VideoEncoder {
   }
 
   void SetCodecFlag(const Guid& key) {
+    if (!codec_) {
+      return;
+    }
     Variant variant{};
     variant.type = kVariantBool;
     variant.value.boolean = kVariantTrue;
