@@ -144,7 +144,10 @@ void destroy_socket(W32File* f) {
   free(s);
 }
 
-long wsa_fail() { return -w32_errno_from_wsa(w32.WSAGetLastError()); }
+long wsa_fail() {
+  const int error = w32_errno_from_wsa(w32.WSAGetLastError());
+  return -(error ? error : EIO);
+}
 
 SOCKET sock(W32File* f) { return reinterpret_cast<SOCKET>(f->handle); }
 

@@ -1151,6 +1151,10 @@ long newfstatat_impl(long dirfd, long path_l, long st_l, long flags) {
   DWORD open_flags = FILE_FLAG_BACKUP_SEMANTICS;
   size_t link_size = 0;
   DWORD attrs = w32.GetFileAttributesW(win);
+  if (attrs == INVALID_FILE_ATTRIBUTES) {
+    const DWORD err = w32.GetLastError();
+    if (err == W32_ERROR_FILE_NOT_FOUND || err == W32_ERROR_PATH_NOT_FOUND || err == W32_ERROR_INVALID_NAME) return -ENOENT;
+  }
   if (flags & AT_SYMLINK_NOFOLLOW) {
     char target[W32_PATH_MAX];
     if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT) && read_link(win, target, sizeof target) == 0) {
@@ -1213,8 +1217,22 @@ long sys_statx(long dirfd, long path_l, long flags, long, long buf_l, long) {
 }
 
 long sys_faccessat(long dirfd, long path_l, long mode, long, long, long) {
+  char abs[W32_PATH_MAX];
+  long r = absolute(static_cast<int>(dirfd), reinterpret_cast<const char*>(path_l), abs);
+  if (r < 0) return r;
+  WCHAR win[W32_PATH_MAX];
+  if (!is_dev_or_proc(abs) && to_win32(abs, win, W32_PATH_MAX) == 0) {
+    const DWORD attrs = w32.GetFileAttributesW(win);
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+      const DWORD err = w32.GetLastError();
+      if (err == W32_ERROR_FILE_NOT_FOUND || err == W32_ERROR_PATH_NOT_FOUND || err == W32_ERROR_INVALID_NAME) return -ENOENT;
+    } else if (!(attrs & FILE_ATTRIBUTE_REPARSE_POINT) && !may_be_link_file(attrs)) {
+      const bool locked = (attrs & FILE_ATTRIBUTE_READONLY) && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+      return (mode & W_OK) && locked ? -EACCES : 0;
+    }
+  }
   struct stat st;
-  long r = sys_newfstatat(dirfd, path_l, reinterpret_cast<long>(&st), 0, 0, 0);
+  r = sys_newfstatat(AT_FDCWD, reinterpret_cast<long>(abs), reinterpret_cast<long>(&st), 0, 0, 0);
   if (r < 0) return r;
   if ((mode & W_OK) && !(st.st_mode & 0200) && !S_ISDIR(st.st_mode)) return -EACCES;
   return 0;
@@ -1794,7 +1812,68 @@ long sys_mount(long, long, long, long, long, long) { return -EPERM; }
 long sys_umount2(long, long, long, long, long, long) { return -EPERM; }
 long sys_chroot(long, long, long, long, long, long) { return -EPERM; }
 long sys_copy_file_range(long, long, long, long, long, long) { return -EXDEV; }
-long sys_sendfile(long, long, long, long, long, long) { return -EINVAL; }
+long sys_sendfile(long out_fd, long in_fd, long offset_l, long count_l, long, long) {
+  W32File* in = w32_fd_get(static_cast<int>(in_fd));
+  if (!in) return -EBADF;
+  W32File* out = w32_fd_get(static_cast<int>(out_fd));
+  auto* offset = reinterpret_cast<int64_t*>(offset_l);
+  const bool seekable = in->kind == W32Kind::kFile || in->kind == W32Kind::kMemory;
+  int64_t pos = 0;
+  if (seekable && !offset) {
+    Lock lock(&in->lock);
+    pos = in->pos;
+  } else if (offset) {
+    pos = *offset;
+  }
+  long r = 0, total = 0;
+  if ((in->flags & O_ACCMODE) == O_WRONLY || (in->flags & O_PATH)) {
+    r = -EBADF;
+  } else if (!seekable) {
+    r = offset ? -ESPIPE : -EINVAL;
+  } else if (pos < 0 || count_l < 0) {
+    r = -EINVAL;
+  } else if (!out || (out->flags & O_PATH) ||
+             ((out->flags & O_ACCMODE) == O_RDONLY && out->kind != W32Kind::kSocket && out->kind != W32Kind::kEventFd)) {
+    r = -EBADF;
+  } else if ((out->flags & O_APPEND) && out->kind == W32Kind::kFile) {
+    r = -EINVAL;
+  } else {
+    size_t left = count_l < 0x7ffff000 ? static_cast<size_t>(count_l) : 0x7ffff000;
+    const size_t room = left < (1u << 20) ? left : (1u << 20);
+    char* chunk = static_cast<char*>(malloc(room ? room : 1));
+    if (!chunk) r = -ENOMEM;
+    while (chunk && left) {
+      const long got = do_read(in, chunk, left < room ? left : room, pos);
+      if (got <= 0) {
+        r = got;
+        break;
+      }
+      long put = 0;
+      while (put < got) {
+        const long n = do_write(out, chunk + put, static_cast<size_t>(got - put), -1);
+        if (n <= 0) {
+          r = n;
+          break;
+        }
+        put += n;
+      }
+      pos += put;
+      total += put;
+      left -= static_cast<size_t>(put);
+      if (put < got) break;
+    }
+    free(chunk);
+    if (total > 0 && offset) {
+      *offset = pos;
+    } else if (total > 0) {
+      Lock lock(&in->lock);
+      in->pos = pos;
+    }
+  }
+  w32_file_put(out);
+  w32_file_put(in);
+  return total ? total : r;
+}
 
 long sys_fsetxattr(long, long, long, long, long, long) { return -EOPNOTSUPP; }
 long sys_fgetxattr(long, long, long, long, long, long) { return -EOPNOTSUPP; }

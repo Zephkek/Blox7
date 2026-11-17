@@ -18,17 +18,20 @@
 #include "w32_syscalls.h"
 
 int64_t g_w32_tail_ns = 200000;
+uint64_t g_w32_start_tsc;
+int64_t g_w32_start_ns;
 bool w32_hires_timers();
 bool w32_hires_sleep(int64_t ns);
 
 namespace {
 
 int64_t g_qpc_frequency;
+uint64_t g_qpc_ns_per_tick_32;
 
 int64_t qpc_ns() {
   int64_t q;
   w32.QueryPerformanceCounter(&q);
-  return (q / g_qpc_frequency) * 1000000000 + (q % g_qpc_frequency) * 1000000000 / g_qpc_frequency;
+  return static_cast<int64_t>((static_cast<unsigned __int128>(q) * g_qpc_ns_per_tick_32) >> 32);
 }
 
 
@@ -321,6 +324,9 @@ void w32_init_timezone() {
 
 void w32_init_time() {
   w32.QueryPerformanceFrequency(&g_qpc_frequency);
+  g_qpc_ns_per_tick_32 = static_cast<uint64_t>((static_cast<unsigned __int128>(1000000000) << 32) / g_qpc_frequency);
+  g_w32_start_tsc = __rdtsc();
+  g_w32_start_ns = qpc_ns();
   w32.timeBeginPeriod(1);
 }
 

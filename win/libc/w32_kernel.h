@@ -167,9 +167,14 @@ extern const uintptr_t* w32_auxv;
 
 int w32_errno_from_win32(DWORD error);
 int w32_errno_from_wsa(int error);
-inline long w32_fail() { return -w32_errno_from_win32(w32.GetLastError()); }
+inline long w32_fail() {
+  const int error = w32_errno_from_win32(w32.GetLastError());
+  return -(error ? error : 5 /* EIO */);
+}
 
 int64_t w32_monotonic_ns();
+extern uint64_t g_w32_start_tsc;
+extern int64_t g_w32_start_ns;
 int64_t w32_realtime_ns();
 
 long w32_futex_wake(const volatile int* addr, int count);

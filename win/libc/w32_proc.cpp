@@ -209,11 +209,11 @@ double cpu_mhz(const char* brand) {
     if (ghz > 0) return ghz * 1000;
   }
   if (measured == 0) {
+    const uint64_t t0 = g_w32_start_tsc;
+    const int64_t n0 = g_w32_start_ns;
+    const int64_t early_by = 2000000 - (w32_monotonic_ns() - n0);
+    if (early_by > 0) w32.Sleep(static_cast<DWORD>((early_by + 999999) / 1000000));
     unsigned lo, hi;
-    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
-    const uint64_t t0 = (static_cast<uint64_t>(hi) << 32) | lo;
-    const int64_t n0 = w32_monotonic_ns();
-    w32.Sleep(20);
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
     const uint64_t t1 = (static_cast<uint64_t>(hi) << 32) | lo;
     const int64_t n1 = w32_monotonic_ns();
@@ -248,17 +248,20 @@ void cpuinfo(Text& t) {
   const unsigned physical_bits = r[0] & 0xff, virtual_bits = (r[0] >> 8) & 0xff;
   const double mhz = cpu_mhz(name);
   const unsigned cpus = si.processor_count ? si.processor_count : 1;
+  Text flags;
+  cpu_flags(flags);
   for (unsigned i = 0; i < cpus; i++) {
     t.add("processor\t: %u\nvendor_id\t: %s\ncpu family\t: %u\nmodel\t\t: %u\nmodel name\t: %s\nstepping\t: %u\n", i,
           vendor, family, model, name, stepping);
     t.add("cpu MHz\t\t: %.3f\nphysical id\t: 0\nsiblings\t: %u\ncore id\t\t: %u\ncpu cores\t: %u\napicid\t\t: %u\n"
           "initial apicid\t: %u\nfpu\t\t: yes\nfpu_exception\t: yes\ncpuid level\t: %u\nwp\t\t: yes\nflags\t\t: ",
           mhz, cpus, i, cpus, i, i, max_basic);
-    cpu_flags(t);
+    t.bytes(flags.data, flags.size);
     t.add("\nbogomips\t: %.2f\nclflush size\t: %u\ncache_alignment\t: %u\naddress sizes\t: %u bits physical, %u bits "
           "virtual\npower management:\n\n",
           mhz * 2, clflush, clflush, physical_bits, virtual_bits);
   }
+  free(flags.data);
 }
 
 void meminfo(Text& t) {
