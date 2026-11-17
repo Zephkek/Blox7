@@ -33,12 +33,12 @@ def put(src, where, name=None, strip=False):
 
 put(os.path.join(OUT, 'blox7.exe'), BIN)
 put(os.path.join(OUT, 'blox7-console.exe'), BIN)
-put(os.path.join(OUT, 'libc.so'), BIN)
-put(f'{LLVM}/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so', BIN)
-put(os.path.join(deps.PREFIX, 'lib', 'libz.so'), BIN)
+put(os.path.join(OUT, 'libc.so'), BIN, strip=True)
+put(f'{LLVM}/sysroot/usr/lib/x86_64-linux-android/libc++_shared.so', BIN, strip=True)
+put(os.path.join(deps.PREFIX, 'lib', 'libz.so'), BIN, strip=True)
 put(os.path.join(MB, 'blox7'), BIN, 'blox7.so', strip=True)
 for name in ('libSDL3.so', 'libSDL3_ttf.so', 'libGLESv2.so.2'):
-    put(os.path.join(OUT, name), BIN)
+    put(os.path.join(OUT, name), BIN, strip=True)
 put(os.path.join(deps.SRC, 'sdl3-win', 'SDL3.dll'), BIN)
 put(os.path.join(deps.SRC, 'sdl3ttf-win', 'SDL3_ttf.dll'), BIN)
 for name in ('libEGL.so', 'libGLESv2.so', 'libOpenMAXAL.so', 'libOpenSLES.so', 'libandroid.so', 'liblog.so',

@@ -160,10 +160,7 @@ TEST(NativeUpdateConfigTest, ReadsAnAbsoluteApkDirectory) {
   TemporaryDirectory temporary;
   const auto config = temporary.root() / "config.yaml";
   Write(config,
-        "version: 1
-updates:
-  apk_directory: /srv/roblox-apks
-");
+        "version: 1\nupdates:\n  apk_directory: /srv/roblox-apks\n");
   const UpdateConfigResult result = LoadUpdateConfig(config);
   ASSERT_TRUE(result) << result.error;
   EXPECT_EQ(result.config.apk_directory, "/srv/roblox-apks");
@@ -173,10 +170,7 @@ updates:
 TEST(NativeUpdateConfigTest, RejectsARelativeApkDirectory) {
   TemporaryDirectory temporary;
   const auto config = temporary.root() / "config.yaml";
-  Write(config, "version: 1
-updates:
-  apk_directory: roblox-apks
-");
+  Write(config, "version: 1\nupdates:\n  apk_directory: roblox-apks\n");
   const UpdateConfigResult result = LoadUpdateConfig(config);
   EXPECT_FALSE(result);
   EXPECT_NE(result.error.find("absolute"), std::string::npos);
