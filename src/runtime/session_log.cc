@@ -189,18 +189,42 @@ void CopySessionStreams(int stdout_reader, int stderr_reader,
     int output;
     bool active;
     bool output_active;
+    std::string held;
+    std::chrono::steady_clock::time_point held_since;
   };
+  constexpr std::size_t kLongestHeldLine = 64 * 1024;
+  constexpr std::chrono::milliseconds kLongestHold(200);
   std::array<Source, 2> sources = {
-      {{stdout_reader, original_stdout, true, true},
-       {stderr_reader, original_stderr, true, true}}};
+      {{stdout_reader, original_stdout, true, true, {}, {}},
+       {stderr_reader, original_stderr, true, true, {}, {}}}};
   bool log_active = true;
+  const auto write_held = [&](Source& source) {
+    if (log_active && !source.held.empty() &&
+        !WriteAll(log_descriptor, source.held.data(), source.held.size())) {
+      log_active = false;
+    }
+    source.held.clear();
+  };
   std::array<char, 32768> buffer{};
   while (sources[0].active || sources[1].active) {
+    int wait_ms = -1;
+    const auto now = std::chrono::steady_clock::now();
+    for (Source& source : sources) {
+      if (source.held.empty()) continue;
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+          source.held_since + kLongestHold - now);
+      if (left.count() <= 0) {
+        write_held(source);
+      } else if (wait_ms < 0 || left.count() < wait_ms) {
+        wait_ms = static_cast<int>(left.count());
+      }
+    }
     std::array<pollfd, 2> descriptors = {
         {{sources[0].reader, POLLIN, 0}, {sources[1].reader, POLLIN, 0}}};
     if (!sources[0].active) descriptors[0].fd = -1;
     if (!sources[1].active) descriptors[1].fd = -1;
-    const int poll_result = poll(descriptors.data(), descriptors.size(), -1);
+    const int poll_result =
+        poll(descriptors.data(), descriptors.size(), wait_ms);
     if (poll_result < 0) {
       if (errno == EINTR) continue;
       break;
@@ -214,20 +238,37 @@ void CopySessionStreams(int stdout_reader, int stderr_reader,
       const ssize_t bytes = read(source.reader, buffer.data(), buffer.size());
       if (bytes > 0) {
         const std::size_t size = static_cast<std::size_t>(bytes);
-        if (log_active && !WriteAll(log_descriptor, buffer.data(), size)) {
+        std::size_t whole = size;
+        while (whole > 0 && buffer[whole - 1] != '\n') --whole;
+        if (whole == 0 && source.held.size() + size > kLongestHeldLine) {
+          whole = size;
+        }
+        if (whole > 0 && !source.held.empty()) {
+          source.held.append(buffer.data(), whole);
+          write_held(source);
+        } else if (whole > 0 && log_active &&
+                   !WriteAll(log_descriptor, buffer.data(), whole)) {
           log_active = false;
+        }
+        if (whole < size) {
+          if (source.held.empty()) {
+            source.held_since = std::chrono::steady_clock::now();
+          }
+          source.held.append(buffer.data() + whole, size - whole);
         }
         if (source.output_active &&
             !WriteAll(source.output, buffer.data(), size)) {
           source.output_active = false;
         }
       } else if (bytes == 0 || errno != EINTR) {
+        write_held(source);
         close(source.reader);
         source.reader = -1;
         source.active = false;
       }
     }
   }
+  for (Source& source : sources) write_held(source);
   if (log_active) (void)fsync(log_descriptor);
   close(log_descriptor);
   close(original_stdout);

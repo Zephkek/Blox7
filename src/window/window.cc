@@ -1729,14 +1729,17 @@ void UpdateWindowTextLayer() {
 
 std::atomic<void*> g_present_window{nullptr};
 std::atomic<uint64_t> g_present_window_ticks_ns{0};
+std::atomic<bool> g_present_window_closing{false};
 
 void PublishPresentWindow() {
   void* hwnd =
-      g_state.sdl_window != nullptr && !g_state.quit_requested
+      g_state.sdl_window != nullptr
           ? SDL_GetPointerProperty(SDL_GetWindowProperties(g_state.sdl_window),
                                    SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr)
           : nullptr;
   g_present_window.store(hwnd, std::memory_order_release);
+  g_present_window_closing.store(g_state.quit_requested,
+                                 std::memory_order_release);
   g_present_window_ticks_ns.store(SDL_GetTicksNS(), std::memory_order_release);
 }
 
@@ -1753,7 +1756,8 @@ bool PresentWindowHidden() {
   const uint64_t published =
       g_present_window_ticks_ns.load(std::memory_order_acquire);
   if (hwnd == nullptr || is_iconic == nullptr || client_rect == nullptr ||
-      SDL_GetTicksNS() - published >= 1000000000ULL) {
+      (!g_present_window_closing.load(std::memory_order_acquire) &&
+       SDL_GetTicksNS() - published >= 1000000000ULL)) {
     return false;
   }
   if (is_iconic(hwnd) != 0) {
@@ -1771,6 +1775,7 @@ bool OnPumpThread() {
 
 extern "C" bool blox7_window_holds_presents() {
   return !OnPumpThread() &&
+         !g_present_window_closing.load(std::memory_order_acquire) &&
          (g_fullscreen_switching.load(std::memory_order_acquire) ||
           PresentWindowHidden());
 }
