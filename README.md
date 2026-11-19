@@ -1,12 +1,13 @@
-<img src="win/blox7/blox7.png" width="72" align="right" alt="Blox7 logo">
+<p>
+  <img src="win/studio7/studio7.png" width="72" align="right" alt="Studio7 logo">
+  <img src="win/blox7/blox7.png" width="72" align="right" alt="Blox7 logo">
+</p>
 
-# Blox7
+# Blox7 and Studio7
 
 Roblox ended support for Windows 7 and 8.1 in January 2025. Blox7 gets them playing again by running the Android
 version of Roblox as an ordinary Windows process. There is no emulator or virtual machine involved, and it works on
-Windows 10 and 11 too.
-
-Roblox Studio wants Windows 10 as well. [Studio7](#studio7), further down, runs it on Windows 7.
+Windows 10 and 11 too. Studio7 is the second program here, and it runs Roblox Studio on Windows 7.
 
 <p align="center">
   <img src="docs/windows7.jpg" alt="Roblox running on Windows 7 Ultimate">
@@ -18,33 +19,54 @@ Roblox Studio wants Windows 10 as well. [Studio7](#studio7), further down, runs 
   <img src="docs/lobby.jpg" width="32%" alt="A murder mystery lobby">
 </p>
 
+Roblox Studio wants Windows 10 as well, and on Windows 7 it doesn't start on its own. Studio7 downloads the same
+Studio that Windows 10 and 11 get and fills in the functions Windows 7 is missing.
+
+<p align="center">
+  <img src="docs/studio7.jpg" alt="Roblox Studio running on Windows 7">
+</p>
+
 ## Download
 
-Get `Blox7.exe` from the [latest release](https://github.com/Zephkek/Blox7/releases/latest), run it and press Play.
-The first start downloads Roblox (about 150 MB), then you sign in inside the Roblox window.
+Both are on the [latest release](https://github.com/Zephkek/Blox7/releases/latest) page, one exe each.
 
-You need 64-bit Windows 7 SP1 or newer, a Vulkan or OpenGL driver, and the WebView2 Runtime for the sign-in page.
-Windows 7, 8 and 8.1 stop at WebView2 109. If it isn't installed, Blox7 offers to open the download page for it.
+Run `Blox7.exe` and press Play. The first start downloads Roblox (about 150 MB), then you sign in inside the Roblox
+window. It needs 64-bit Windows 7 SP1 or newer and a Vulkan or OpenGL driver.
 
-## The launcher
+Run `Studio7.exe` and press Install. It downloads Roblox Studio from Roblox (about 570 MB), and from then on Open
+Studio starts it. It needs 64-bit Windows 7 SP1. Windows 8 and 8.1 aren't supported yet, and Windows 10 and 11
+don't need it.
+
+Both need the WebView2 Runtime for the sign-in page. Windows 7, 8 and 8.1 stop at WebView2 109. If it isn't
+installed, Blox7 offers to open the download page for it and Studio7 shows a link.
+
+## The launchers
 
 <p align="center">
-  <img src="docs/launcher.png" alt="The Blox7 launcher with its settings open">
+  <img src="docs/launchers.png" alt="The Blox7 and Studio7 launchers, each above its settings window">
 </p>
 
 <p align="center">
-  <img src="docs/ui-effects.png" width="32%" alt="Effects settings">
-  <img src="docs/ui-device.png" width="32%" alt="Device settings">
-  <img src="docs/ui-about.png" width="32%" alt="About Blox7">
+  <img src="docs/ui-effects.png" width="32%" alt="Blox7's Effects settings">
+  <img src="docs/ui-mods.png" width="32%" alt="Blox7's Mods settings">
+  <img src="docs/ui-device.png" width="32%" alt="Blox7's Device settings">
 </p>
 
-The launcher looks like it shipped with Windows 7. In its settings you choose Vulkan or OpenGL ES, a quality preset
-up to Super HQ, and a render resolution, which is worth lowering on a weak GPU. The Effects tab has sharpening,
-vibrance, contrast and brightness, or takes a `.frag` shader of your own. There are also tabs for fast flags and for
-the device Roblox is told it's running on, which can be one of a list of phones or a Windows 11 PC with mouse and
-keyboard.
+Both launchers look like they shipped with Windows 7. In Blox7's settings you choose Vulkan or OpenGL ES, a quality
+preset up to Super HQ, and a render resolution, which is worth lowering on a weak GPU. The Effects tab has
+sharpening, vibrance, contrast and brightness, or takes a `.frag` shader of your own. The Mods tab takes your own
+cursors, font, window title and icon. Captures sets how videos are recorded and where they and screenshots are
+saved. There are also tabs for fast flags and for the device Roblox is told it's running on, which can be one of a
+list of phones or a Windows 11 PC with mouse and keyboard.
+
+Studio7 has less to set. Each time you open it, it looks for a newer Studio and downloads it, unless you turn that
+off. The new version goes next to the one you have and is used from the next start, so an open Studio is never
+replaced. If the new one closes right after starting, Studio7 goes back to the one that worked. Its files are all
+in `%LOCALAPPDATA%\Studio7`, and the Remove button takes them away again.
 
 ## How it works
+
+### Blox7
 
 Roblox builds its Android app for x86-64 as well as ARM, so `libroblox.so` already runs on a PC's processor. What it
 needs is the rest of Android around it, and Blox7 provides that inside a normal Windows process.
@@ -69,43 +91,24 @@ calls in C++.
 Graphics, input and audio skip the syscall layer. The Android libraries Roblox links against, like `libEGL.so` and
 `libvulkan.so`, are Blox7's own, and bridges pass their calls to SDL3 and the Windows GPU driver.
 
-<img src="win/studio7/studio7.png" width="72" align="right" alt="Studio7 logo">
+### Studio7
 
-## Studio7
+Studio is an ordinary Windows program, so none of the Android machinery is involved. What stops it on Windows 7 is
+about forty functions it imports that only came with Windows 8 and 10, like `WaitOnAddress` and
+`GetSystemTimePreciseAsFileTime`.
 
-<p align="center">
-  <img src="docs/studio7.jpg" alt="Roblox Studio running on Windows 7">
-</p>
+Studio7 carries six small DLLs that stand in for `kernel32.dll`, `user32.dll`, `ws2_32.dll` and a few others. They
+pass the functions Windows 7 already has on to the real DLLs and implement the missing ones themselves. After the
+download Studio7 writes their names into the import tables of the files that need them. In the current version that
+is ten names in five files, and each one is noted so it can be put back byte for byte.
 
-Studio7 is a second program in this repo. It runs the current Roblox Studio on Windows 7, where Studio on its own
-doesn't start.
-
-Get `Studio7.exe` from the [latest release](https://github.com/Zephkek/Blox7/releases/latest), run it and press
-Install. It downloads Roblox Studio from Roblox (about 570 MB), and from then on Open Studio starts it. You sign in
-inside Studio, which needs the WebView2 Runtime. If that is missing Studio7 says so and links to version 109, the
-last one for Windows 7. Studio7 needs 64-bit Windows 7 SP1. Windows 8 and 8.1 aren't supported yet.
-
-<p align="center">
-  <img src="docs/studio7-launcher.png" width="756" alt="Studio7 with its settings open">
-</p>
-
-New versions of Studio are downloaded next to the one you have and used from the next start, so an open Studio is
-never replaced. If a new version closes right after starting, Studio7 goes back to the one that worked. Its files
-are all in `%LOCALAPPDATA%\Studio7`, and the Remove button in the settings takes them away again.
-
-Studio is an ordinary Windows program, so none of the Android machinery above is involved. What stops it on
-Windows 7 is about forty functions it imports that only came with Windows 8 and 10, like `WaitOnAddress` and
-`GetSystemTimePreciseAsFileTime`. Studio7 carries six small DLLs that stand in for `kernel32.dll`, `user32.dll`,
-`ws2_32.dll` and a few others. They pass the functions Windows 7 already has on to the real DLLs and implement the
-missing ones themselves. After the download Studio7 writes their names into the import tables of the files that
-need them. In the current version that is ten names in five files, and each one is noted so it can be put back
-byte for byte. Studio also asks for some functions under API-set DLL names that Windows 7 doesn't know, and for
-those Studio7 writes small DLLs that only forward.
+Studio also asks for some functions under API-set DLL names that Windows 7 doesn't know, and for those Studio7
+writes small DLLs that only forward.
 
 ## Building
 
-The build runs on Windows. It needs Python 3, CMake, Ninja, the Android NDK r28c, llvm-mingw, the WebView2 SDK and
-the AOSP bionic sources. The scripts look for these under `D:\toolchains`. Set `BLOX7_NDK`, `BLOX7_MINGW`,
+The build runs on Windows. Blox7 needs Python 3, CMake, Ninja, the Android NDK r28c, llvm-mingw, the WebView2 SDK
+and the AOSP bionic sources. The scripts look for these under `D:\toolchains`. Set `BLOX7_NDK`, `BLOX7_MINGW`,
 `BLOX7_AOSP`, `BLOX7_DEPS_SRC` or `BLOX7_WEBVIEW2_SDK` if yours are somewhere else.
 
 ```bash
@@ -121,12 +124,18 @@ python win/tools/build.py blox7
 
 Run them in that order. The last one writes `win/out/release/Blox7.exe`.
 
-Studio7 builds on its own with `python win/tools/build.py studio7`. It only needs llvm-mingw and, under
-`BLOX7_DEPS_SRC`, the zlib sources in `zlib` and BearSSL 0.6 in `bearssl`. It writes `win/out/release/Studio7.exe`.
+Studio7 is one step and doesn't need any of the steps above. It only needs llvm-mingw and, under `BLOX7_DEPS_SRC`,
+the zlib sources in `zlib` and BearSSL 0.6 in `bearssl`.
+
+```bash
+python win/tools/build.py studio7
+```
+
+That writes `win/out/release/Studio7.exe`.
 
 ## License
 
-Apache 2.0, see [LICENSE](LICENSE). Bundled third-party code keeps its own license. The Android runtime is based
+Apache 2.0, see [LICENSE](LICENSE). Bundled third-party code keeps its own license. Blox7's Android runtime is based
 on [Mocktail](https://github.com/komaruworld/mocktail).
 
-Blox7 is not affiliated with Roblox Corporation or Microsoft.
+Blox7 and Studio7 are not affiliated with Roblox Corporation or Microsoft.
