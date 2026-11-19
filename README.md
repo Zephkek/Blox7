@@ -40,6 +40,11 @@ don't need it.
 Both need the WebView2 Runtime for the sign-in page. Windows 7, 8 and 8.1 stop at WebView2 109. If it isn't
 installed, Blox7 offers to open the download page for it and Studio7 shows a link.
 
+You only need to download each exe once. When a launcher opens it asks GitHub whether a newer one has been published
+here. If so it downloads it, checks it against the SHA-256 that GitHub lists for the file, puts it in its own place
+and starts it. If the settings are open or Roblox is running it doesn't restart, and the new exe is used from the
+next start. Each About page has a box that turns this off.
+
 ## The launchers
 
 <p align="center">
@@ -63,6 +68,11 @@ Studio7 has less to set. Each time you open it, it looks for a newer Studio and 
 off. The new version goes next to the one you have and is used from the next start, so an open Studio is never
 replaced. If the new one closes right after starting, Studio7 goes back to the one that worked. Its files are all
 in `%LOCALAPPDATA%\Studio7`, and the Remove button takes them away again.
+
+It has a Mods tab as well, for your own arrow and hand cursors, a font for Studio's toolbar and a window icon. There
+is also a mods folder, laid out like Studio's own folder, and a picture, font or sound in it replaces the file
+Studio has in the same place. Studio's own files are kept, and they come back when you take a mod out. Remove
+leaves the mods folder alone if there is anything in it.
 
 ## How it works
 
@@ -100,10 +110,16 @@ about forty functions it imports that only came with Windows 8 and 10, like `Wai
 Studio7 carries six small DLLs that stand in for `kernel32.dll`, `user32.dll`, `ws2_32.dll` and a few others. They
 pass the functions Windows 7 already has on to the real DLLs and implement the missing ones themselves. After the
 download Studio7 writes their names into the import tables of the files that need them. In the current version that
-is ten names in five files, and each one is noted so it can be put back byte for byte.
+is eleven names in six files, and each one is noted so it can be put back byte for byte.
 
 Studio also asks for some functions under API-set DLL names that Windows 7 doesn't know, and for those Studio7
 writes small DLLs that only forward.
+
+A few functions that Windows 7 does have are answered by these DLLs too. Studio's video recorder asks the H.264
+encoder for its attribute store, the Windows 7 encoder says it has none, and Studio stops there. Studio7 wraps the
+encoder and hands it one, and recording works. That encoder doesn't take frames larger than 1920x1088. The window
+icon from the Mods tab goes the same way: Qt gives its windows the icon from Studio's exe, and the `user32.dll`
+stand-in puts yours there instead.
 
 ## Building
 
@@ -122,7 +138,8 @@ python win/tools/runtime-build.py
 python win/tools/build.py blox7
 ```
 
-Run them in that order. The last one writes `win/out/release/Blox7.exe`.
+Run them in that order. The last one writes `win/out/release/Blox7.exe`. It also compiles BearSSL 0.6 into the
+launcher for the update check, and looks for its sources in `bearssl` under `BLOX7_DEPS_SRC`.
 
 Studio7 is one step and doesn't need any of the steps above. It only needs llvm-mingw and, under `BLOX7_DEPS_SRC`,
 the zlib sources in `zlib` and BearSSL 0.6 in `bearssl`.
