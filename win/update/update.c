@@ -10,6 +10,9 @@
 #ifndef UPDATE_FILES
 #define UPDATE_FILES "https://github.com/Zephkek/Blox7/releases/download/"
 #endif
+#ifndef UPDATE_RETRY_MS
+#define UPDATE_RETRY_MS 15000
+#endif
 
 typedef struct {
     char *data;
@@ -156,6 +159,16 @@ static BOOL read_feed(const char *json, const char *asset, UpdateInfo *info) {
     return copy_text(value_of(entry, end, "\"updated_at\":\""), stamp, sizeof(stamp)) && moment(stamp, &info->uploaded) && info->size > 0;
 }
 
+static BOOL fetch(const char *url, HttpSink sink, void *context, HttpResult *result) {
+    int tries;
+
+    for (tries = 1; !http_get(url, sink, context, 0, result); tries++) {
+        if (result->status || tries == 3 || ui_cancelled()) return FALSE;
+        Sleep(UPDATE_RETRY_MS);
+    }
+    return TRUE;
+}
+
 int update_check(const char *asset, const WCHAR *exe, UpdateInfo *info, char *error, size_t room) {
     Text feed = {NULL, 0, 0};
     HttpResult result;
@@ -163,7 +176,7 @@ int update_check(const char *asset, const WCHAR *exe, UpdateInfo *info, char *er
     char ours[65];
     BOOL read;
 
-    if (!http_get(UPDATE_FEED, collect, &feed, 0, &result) || !feed.data) {
+    if (!fetch(UPDATE_FEED, collect, &feed, &result) || !feed.data) {
         text_format(error, room, "%s", result.error[0] ? result.error : "no answer");
         free(feed.data);
         return UPDATE_FAILED;
@@ -211,7 +224,7 @@ BOOL update_install(const UpdateInfo *info, const WCHAR *exe, char *error, size_
         return FALSE;
     }
     br_sha256_init(&d.hash);
-    fetched = http_get(info->url, to_file, &d, 0, &result);
+    fetched = fetch(info->url, to_file, &d, &result);
     br_sha256_out(&d.hash, digest);
     hex(digest, got);
     if (fetched) {
