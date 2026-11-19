@@ -342,6 +342,7 @@ static BOOL side_by_side(const char *dll) {
 
 static BOOL always_ours(const char *function, const char *module) {
     if (!strcmp(function, "VerifyVersionInfoW")) return !strcmp(module, "robloxstudiobeta.exe");
+    if (!strcmp(function, "SendMessageW") || !strcmp(function, "RegisterClassExW")) return !strcmp(module, "qwindows.dll");
     return !strcmp(function, "GetAddrInfoExW");
 }
 

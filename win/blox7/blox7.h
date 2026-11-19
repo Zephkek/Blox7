@@ -60,6 +60,7 @@ struct Settings {
   std::wstring font;
   std::wstring window_title;
   std::wstring window_icon;
+  bool self_update = true;
 };
 
 enum class DeviceKind { kPhone, kTablet, kPc, kConsole };
@@ -134,6 +135,9 @@ std::wstring logs_dir(const Paths& paths);
 std::wstring widen(const std::string& text);
 std::string narrow(const std::wstring& text);
 bool write_all(const std::wstring& path, const std::string& text);
+
+void tidy_update(const Paths& paths);
+bool update_self(const Paths& paths);
 
 int run_launcher(HINSTANCE instance, int show);
 int render_ui(const std::wstring& dir);

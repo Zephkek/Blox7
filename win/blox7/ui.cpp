@@ -30,6 +30,7 @@ constexpr wchar_t kMainClass[] = L"Blox7.Launcher";
 constexpr wchar_t kDialogClass[] = L"Blox7.Settings";
 constexpr UINT kUnpackProgress = WM_APP + 1;
 constexpr UINT kUnpackDone = WM_APP + 2;
+constexpr UINT kSelfUpdated = WM_APP + 3;
 constexpr UINT_PTR kAnimTimer = 1;
 constexpr UINT_PTR kWatchTimer = 2;
 constexpr UINT_PTR kCaretTimer = 3;
@@ -139,6 +140,7 @@ enum Control : int {
   kCaptureRate,
   kCaptureQuality,
   kCaptureEncoder,
+  kSelfUpdate,
 };
 
 constexpr int option_id(Control control, size_t option) { return kOptionFirst + control * 100 + static_cast<int>(option); }
@@ -239,6 +241,7 @@ struct App {
   std::wstring shader_status;
   bool shader_error = false;
   std::wstring mod_error[4];
+  HANDLE single = nullptr;
 
   PROCESS_INFORMATION child{};
   bool window_seen = false;
@@ -1465,6 +1468,11 @@ void page_about(const D2D1_RECT_F& page) {
     const std::wstring notices = g.paths.runtime + L"\\THIRD-PARTY-NOTICES.txt";
     ShellExecuteW(g.dialog.hwnd, L"open", notices.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
   });
+  y += 28;
+  checkbox(kSelfUpdate, x, y, w, g.pending.self_update, L"Get new versions of Blox7 as they come out", [] {
+    g.pending.self_update = !g.pending.self_update;
+    mark_dirty();
+  });
 
   const float before = text_width(L"Made with ", g.fonts.body), after = text_width(L" by Zeph", g.fonts.body);
   const float left = std::round(x + (w - before - 11 - after) / 2), cy = page.bottom - kMargin - 15;
@@ -1926,6 +1934,25 @@ void close_settings() {
   DestroyWindow(g.dialog.hwnd);
 }
 
+void restart_if_idle() {
+  if (g.dialog.hwnd || g.child.hProcess || g.stage != Stage::Ready) return;
+  std::wstring command = L"\"" + g.paths.exe + L"\"";
+  STARTUPINFOW startup{};
+  startup.cb = sizeof startup;
+  PROCESS_INFORMATION process{};
+  if (g.single) {
+    ReleaseMutex(g.single);
+    CloseHandle(g.single);
+  }
+  if (!CreateProcessW(g.paths.exe.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) {
+    g.single = CreateMutexW(nullptr, TRUE, L"Local\\Blox7.Launcher");
+    return;
+  }
+  CloseHandle(process.hThread);
+  CloseHandle(process.hProcess);
+  DestroyWindow(g.main.hwnd);
+}
+
 void start_unpack() {
   g.stage = Stage::Unpacking;
   g.unpacked = 0;
@@ -2290,6 +2317,9 @@ LRESULT handle(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case kUnpackProgress:
       InvalidateRect(hwnd, nullptr, FALSE);
       return 0;
+    case kSelfUpdated:
+      restart_if_idle();
+      return 0;
     case kUnpackDone: {
       std::wstring* error = reinterpret_cast<std::wstring*>(lp);
       if (error->empty()) {
@@ -2587,7 +2617,7 @@ int render_ui(const std::wstring& dir) {
 }
 
 int run_launcher(HINSTANCE instance, int show) {
-  HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\Blox7.Launcher");
+  HANDLE single = g.single = CreateMutexW(nullptr, TRUE, L"Local\\Blox7.Launcher");
   if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
     if (HWND other = FindWindowW(kMainClass, nullptr)) {
       ShowWindow(other, SW_RESTORE);
@@ -2600,6 +2630,7 @@ int run_launcher(HINSTANCE instance, int show) {
     return 1;
   }
   g.paths = resolve_paths();
+  tidy_update(g.paths);
   read_machine();
   refresh_info();
   refresh_join_links(g.paths);
@@ -2634,6 +2665,9 @@ int run_launcher(HINSTANCE instance, int show) {
   else std::thread([] {
     prepare_data(g.paths);
     remove_old_runtimes(g.paths);
+  }).detach();
+  if (g.settings.self_update) std::thread([hwnd] {
+    if (update_self(g.paths)) PostMessageW(hwnd, kSelfUpdated, 0, 0);
   }).detach();
 
   MSG msg;

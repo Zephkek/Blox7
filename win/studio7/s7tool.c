@@ -32,6 +32,8 @@ static int usage(void) {
     print("s7tool unbind <studio folder> --layer <folder>");
     print("s7tool check <studio folder> [--system <folder>]");
     print("s7tool links on|off|show");
+    print("s7tool mods show|apply|undo");
+    print("s7tool mods arrow|hand|font|icon <file or nothing>");
     print("s7tool remove");
     return 2;
 }
@@ -174,6 +176,48 @@ static int links(int argc, WCHAR **argv) {
     return 0;
 }
 
+static int mods(int argc, WCHAR **argv) {
+    static const WCHAR *names[MOD_COUNT] = {L"arrow", L"hand", L"font", L"icon"};
+    Paths paths;
+    WCHAR value[MAX_PATH], studio[MAX_PATH];
+    char version[96];
+    int i, done;
+
+    if (argc < 3 || !paths_init(&paths)) return usage();
+    for (i = 0; i < MOD_COUNT; i++) {
+        if (wcscmp(argv[2], names[i])) continue;
+        mods_set(&paths, i, argc > 3 ? argv[3] : NULL);
+        mods_get(&paths, i, value);
+        printf("%ls = %ls\n", names[i], value);
+        return 0;
+    }
+    if (!wcscmp(argv[2], L"show")) {
+        for (i = 0; i < MOD_COUNT; i++) {
+            mods_get(&paths, i, value);
+            printf("%ls = %ls\n", names[i], value);
+        }
+        mods_folder(&paths, value);
+        printf("folder = %ls\n", value);
+        return 0;
+    }
+    if (!studio_current(&paths, version, sizeof(version))) {
+        print("FAILED (no Studio is installed here)");
+        return 1;
+    }
+    if (!wcscmp(argv[2], L"apply")) {
+        done = mods_apply(&paths, version);
+        printf("%d\n", done);
+        return done < 0;
+    }
+    if (!wcscmp(argv[2], L"undo")) {
+        studio_folder(&paths, version, studio);
+        done = mods_undo(studio);
+        print(done ? "ok" : "FAILED (a replaced file is in use)");
+        return !done;
+    }
+    return usage();
+}
+
 static int remove_all(void) {
     Paths paths;
     BOOL ok = paths_init(&paths) && studio_remove(&paths);
@@ -191,6 +235,7 @@ int wmain(int argc, WCHAR **argv) {
     if (!wcscmp(argv[1], L"latest")) return latest();
     if (!wcscmp(argv[1], L"remove")) return remove_all();
     if (!wcscmp(argv[1], L"links")) return links(argc, argv);
+    if (!wcscmp(argv[1], L"mods")) return mods(argc, argv);
     if (!wcscmp(argv[1], L"get")) return get(argc, argv);
     if (!wcscmp(argv[1], L"unpack")) {
         problems = unpack(argc, argv);

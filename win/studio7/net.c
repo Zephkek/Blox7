@@ -368,7 +368,8 @@ static BOOL split_url(const char *url, char *host, size_t host_room, const char 
     return TRUE;
 }
 
-BOOL http_get(const char *url, HttpSink sink, void *context, ULONG64 resume_from, HttpResult *result) {
+static BOOL get_once(const char *url, HttpSink sink, void *context, ULONG64 resume_from, HttpResult *result, char *moved,
+                     size_t moved_room) {
     Link *l = calloc(1, sizeof(Link));
     char host[256], request[2400], head[8192], *port;
     const char *path, *value;
@@ -411,8 +412,18 @@ BOOL http_get(const char *url, HttpSink sink, void *context, ULONG64 resume_from
     result->length = remaining;
     value = header(head, "Transfer-Encoding");
     chunked = value && !_strnicmp(value, "chunked", 7);
+    value = header(head, "Location");
+    if (value && (result->status == 301 || result->status == 302 || result->status == 303 || result->status == 307 ||
+                  result->status == 308)) {
+        size_t n = 0;
+
+        while (value[n] && value[n] != '\r' && value[n] != '\n' && n + 1 < moved_room) n++;
+        memcpy(moved, value, n);
+        moved[n] = 0;
+        goto done;
+    }
     if (result->status != 200 && result->status != 206) {
-        text_format(result->error, sizeof(result->error), "%s answered %d for %s", host, result->status, path);
+        text_format(result->error, sizeof(result->error), "%s answered %d for %.200s", host, result->status, path);
         goto done;
     }
     if (resume_from && result->status != 206) {
@@ -470,4 +481,22 @@ done:
     link_close(l);
     free(l);
     return ok;
+}
+
+BOOL http_get(const char *url, HttpSink sink, void *context, ULONG64 resume_from, HttpResult *result) {
+    char next[2048], moved[2048];
+    int hop;
+
+    memset(result, 0, sizeof(*result));
+    if (strlen(url) >= sizeof(next)) return FALSE;
+    strcpy(next, url);
+    for (hop = 0; hop < 6; hop++) {
+        moved[0] = 0;
+        if (get_once(next, sink, context, resume_from, result, moved, sizeof(moved))) return TRUE;
+        if (!moved[0]) return FALSE;
+        if (!strncmp(next, "https://", 8) && strncmp(moved, "https://", 8)) break;
+        strcpy(next, moved);
+    }
+    text_format(result->error, sizeof(result->error), "%.80s sent the request somewhere it cannot follow", url);
+    return FALSE;
 }

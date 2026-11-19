@@ -593,7 +593,7 @@ EXPORTS
     RedrawWindow = user32.RedrawWindow @2103
     RegisterClassA = user32.RegisterClassA @2104
     RegisterClassExA = user32.RegisterClassExA @2105
-    RegisterClassExW = user32.RegisterClassExW @2106
+    RegisterClassExW = s7_RegisterClassExW @2106
     RegisterClassW = user32.RegisterClassW @2107
     RegisterClipboardFormatA = user32.RegisterClipboardFormatA @2108
     RegisterClipboardFormatW = user32.RegisterClipboardFormatW @2109
@@ -640,7 +640,7 @@ EXPORTS
     SendMessageCallbackW = user32.SendMessageCallbackW @2150
     SendMessageTimeoutA = user32.SendMessageTimeoutA @2151
     SendMessageTimeoutW = user32.SendMessageTimeoutW @2152
-    SendMessageW = user32.SendMessageW @2153
+    SendMessageW = s7_SendMessageW @2153
     SendNotifyMessageA = user32.SendNotifyMessageA @2154
     SendNotifyMessageW = user32.SendNotifyMessageW @2155
     SetActiveWindow = user32.SetActiveWindow @2156

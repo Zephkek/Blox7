@@ -136,7 +136,7 @@ EXPORTS
     MFStartup = mfplat.MFStartup @135
     MFStreamDescriptorProtectMediaType = mfplat.MFStreamDescriptorProtectMediaType @136
     MFTEnum = mfplat.MFTEnum @137
-    MFTEnumEx = mfplat.MFTEnumEx @138
+    MFTEnumEx = s7_MFTEnumEx @138
     MFTGetInfo = mfplat.MFTGetInfo @139
     MFTRegister = mfplat.MFTRegister @140
     MFTRegisterLocal = mfplat.MFTRegisterLocal @141

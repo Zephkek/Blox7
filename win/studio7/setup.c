@@ -467,7 +467,7 @@ static BOOL download_all(const Paths *paths, const char *version, const Package 
     return TRUE;
 }
 
-static void remove_tree(const WCHAR *dir) {
+void tree_remove(const WCHAR *dir) {
     WCHAR pattern[MAX_PATH], path[MAX_PATH];
     WIN32_FIND_DATAW found;
     HANDLE find;
@@ -481,7 +481,7 @@ static void remove_tree(const WCHAR *dir) {
             if (found.dwFileAttributes & FILE_ATTRIBUTE_READONLY) SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL);
             if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) DeleteFileW(path);
             else if (found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) RemoveDirectoryW(path);
-            else remove_tree(path);
+            else tree_remove(path);
         } while (FindNextFileW(find, &found));
         FindClose(find);
     }
@@ -577,7 +577,7 @@ static int install(const Paths *paths, const Release *release, char *error, size
         ui_progress(0);
         if (download_all(paths, release->version, packages, count, error, room)) {
             ui_status("Unpacking...");
-            remove_tree(job.to);
+            tree_remove(job.to);
             started = GetTickCount();
             if (install_unpack(&job, packages, count, &stats)) {
                 note("unpacked %ld files, %.0f MB in %.1f s", stats.files, (double)stats.bytes / 1048576.0,
@@ -597,8 +597,8 @@ static int install(const Paths *paths, const Release *release, char *error, size
         refuse(paths, release->version);
         text_format(error, room, "Roblox Studio %s does not work with this Studio7 yet", release->name);
     }
-    if (result != SETUP_OK && count) remove_tree(job.to);
-    if (result == SETUP_OK || missing > 0) remove_tree(paths->downloads);
+    if (result != SETUP_OK && count) tree_remove(job.to);
+    if (result == SETUP_OK || missing > 0) tree_remove(paths->downloads);
     if (result != SETUP_OK && ui_cancelled()) return SETUP_STOPPED;
     ui_progress(1.0);
     return result;
@@ -623,7 +623,7 @@ static int each_version(const Paths *paths, const char *keep, const char *keep_t
             busy++;
         } else if (remove && _stricmp(name, keep) && _stricmp(name, keep_too)) {
             note("removing Studio %s", name);
-            remove_tree(path);
+            tree_remove(path);
         }
     } while (FindNextFileW(find, &found));
     FindClose(find);
@@ -750,6 +750,7 @@ BOOL run_start(const Paths *paths, const WCHAR *arguments, Run *run) {
     if (!studio_ready(paths, run->version)) return FALSE;
     state_get(paths, L"name", run->name, sizeof(run->name));
     studio_folder(paths, run->version, folder);
+    if (!in_use(folder)) mods_apply(paths, run->version);
     join(exe, folder, S7_STUDIO_EXE);
     room = wcslen(exe) + (arguments ? wcslen(arguments) : 0) + 8;
     command = malloc(sizeof(WCHAR) * room);
@@ -817,7 +818,8 @@ int run_poll(const Paths *paths, Run *run) {
 }
 
 BOOL studio_remove(const Paths *paths) {
-    static const WCHAR *files[] = {L"studio7.ini", L"studio7.log", L"studio7.old.log", L"licenses.txt"};
+    static const WCHAR *files[] = {L"studio7.ini", L"studio7.log", L"studio7.old.log", L"licenses.txt", L"window.ico"};
+    static const WCHAR *empty[] = {L"Mods\\content", L"Mods"};
     WCHAR path[MAX_PATH];
     size_t i;
 
@@ -831,12 +833,16 @@ BOOL studio_remove(const Paths *paths) {
     if (g_log) fclose(g_log);
     g_log = NULL;
     LeaveCriticalSection(&g_log_lock);
-    remove_tree(paths->versions);
-    remove_tree(paths->downloads);
-    remove_tree(paths->layer);
+    tree_remove(paths->versions);
+    tree_remove(paths->downloads);
+    tree_remove(paths->layer);
     for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
         join(path, paths->base, files[i]);
         DeleteFileW(path);
+    }
+    for (i = 0; i < sizeof(empty) / sizeof(empty[0]); i++) {
+        join(path, paths->base, empty[i]);
+        RemoveDirectoryW(path);
     }
     RemoveDirectoryW(paths->base);
     give_turn();

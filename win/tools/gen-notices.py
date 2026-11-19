@@ -32,6 +32,8 @@ PARTS = [
      [f'{SRC}/zlib/contrib/minizip/LICENSE.Info-Zip']),
     ('BoringSSL', 'https://boringssl.googlesource.com/boringssl', 'TLS and cryptography.', [f'{SRC}/boringssl/LICENSE']),
     ('curl', 'https://curl.se', 'HTTP downloads.', [f'{SRC}/curl/COPYING']),
+    ('BearSSL', 'https://bearssl.org', 'TLS for the check for a newer Blox7.exe, inside Blox7.exe. Windows itself '
+     'still decides which certificates are trusted.', [f'{SRC}/bearssl/LICENSE.txt']),
     ('libyaml', 'https://github.com/yaml/libyaml', 'Reading config.yaml.', [f'{SRC}/libyaml/License']),
     ('Capstone', 'https://www.capstone-engine.org', 'Disassembly for the updater\'s compatibility checks.',
      [f'{SRC}/capstone/LICENSE.TXT', f'{SRC}/capstone/LICENSE_LLVM.TXT']),

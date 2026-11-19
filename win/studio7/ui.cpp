@@ -1,6 +1,8 @@
 #include <d2d1.h>
 #include <dwrite.h>
+#include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <wincodec.h>
 
 #include <algorithm>
@@ -28,6 +30,7 @@ constexpr wchar_t kMainClass[] = L"Studio7.Launcher";
 constexpr wchar_t kDialogClass[] = L"Studio7.Settings";
 constexpr UINT kProgress = WM_APP + 1;
 constexpr UINT kJobDone = WM_APP + 2;
+constexpr UINT kSelfUpdated = WM_APP + 3;
 constexpr UINT_PTR kAnimTimer = 1;
 constexpr UINT_PTR kWatchTimer = 2;
 constexpr UINT kAboutCommand = 0x0010;
@@ -69,7 +72,7 @@ uint32_t mix(uint32_t a, uint32_t b, float t) {
 }
 
 enum class Stage { Fresh, Setting, Ready, Starting, Running, Failed, Unsupported };
-enum class Tab { General, About };
+enum class Tab { General, Mods, About };
 enum class Look { Normal, Hot, Pressed, Disabled };
 enum class Cursor { Arrow, Hand };
 enum class Job { Check, Get };
@@ -89,13 +92,23 @@ enum : int {
   kFolderLink,
   kLogLink,
   kLicensesLink,
+  kArrowBrowse,
+  kArrowRemove,
+  kHandBrowse,
+  kHandRemove,
+  kFontBrowse,
+  kFontRemove,
+  kIconBrowse,
+  kIconRemove,
+  kModsLink,
+  kSelfBox,
   kTabFirst = 100,
 };
 
 constexpr struct {
   Tab tab;
   const wchar_t* label;
-} kTabs[] = {{Tab::General, L"General"}, {Tab::About, L"About"}};
+} kTabs[] = {{Tab::General, L"General"}, {Tab::Mods, L"Mods"}, {Tab::About, L"About"}};
 
 struct Spring {
   float value = 0, target = 0;
@@ -169,7 +182,9 @@ struct App {
   bool minimized_by_us = false;
 
   Tab tab = Tab::General;
-  bool dirty = false, pending_updates = true, pending_links = false;
+  bool dirty = false, pending_updates = true, pending_links = false, pending_self = true;
+  std::wstring pending_mods[MOD_COUNT], mod_error[MOD_COUNT];
+  HANDLE single = nullptr;
 };
 
 App& g = *new App;
@@ -808,6 +823,101 @@ void page_general(const D2D1_RECT_F& page) {
               !g.working && g.stage != Stage::Starting && g.stage != Stage::Running, remove_all);
 }
 
+struct ModPicker {
+  const wchar_t* label;
+  int browse, remove;
+  const wchar_t* none;
+  const wchar_t* filter;
+  const wchar_t* title;
+  std::wstring (*check)(const std::wstring&);
+};
+
+const ModPicker kModPickers[MOD_COUNT] = {
+    {L"Arrow cursor:", kArrowBrowse, kArrowRemove, L"Studio's arrow", L"PNG images (*.png)\0*.png\0",
+     L"Pick an arrow cursor (a PNG with the tip in the middle)", check_cursor},
+    {L"Hand cursor:", kHandBrowse, kHandRemove, L"Studio's hand", L"PNG images (*.png)\0*.png\0",
+     L"Pick a hand cursor (a PNG with the fingertip in the middle)", check_cursor},
+    {L"Font:", kFontBrowse, kFontRemove, L"Studio's font", L"Fonts (*.ttf, *.otf)\0*.ttf;*.otf\0",
+     L"Pick a font for Studio's toolbar", check_font},
+    {L"Icon:", kIconBrowse, kIconRemove, L"Studio's icon",
+     L"Icons and pictures (*.ico, *.png)\0*.ico;*.png\0All pictures\0*.ico;*.png;*.bmp;*.gif;*.jpg;*.jpeg;*.tif;*.tiff\0",
+     L"Pick a window icon", check_icon},
+};
+
+bool run_file_dialog(OPENFILENAMEW& dialog) {
+  using DialogFn = BOOL(WINAPI*)(LPOPENFILENAMEW);
+  static HMODULE comdlg = LoadLibraryW(L"comdlg32.dll");
+  const auto run = comdlg ? reinterpret_cast<DialogFn>(GetProcAddress(comdlg, "GetOpenFileNameW")) : nullptr;
+  return run && run(&dialog);
+}
+
+void browse_mod(size_t index) {
+  const ModPicker& picker = kModPickers[index];
+  std::wstring& value = g.pending_mods[index];
+  wchar_t file[MAX_PATH] = {};
+  if (!value.empty()) wcsncpy(file, value.c_str(), MAX_PATH - 1);
+  OPENFILENAMEW dialog{};
+  dialog.lStructSize = sizeof dialog;
+  dialog.hwndOwner = g.dialog.hwnd;
+  dialog.lpstrFilter = picker.filter;
+  dialog.lpstrFile = file;
+  dialog.nMaxFile = MAX_PATH;
+  dialog.lpstrTitle = picker.title;
+  dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER;
+  if (!run_file_dialog(dialog)) return;
+  g.mod_error[index] = picker.check(file);
+  if (!g.mod_error[index].empty()) return;
+  value = file;
+  mark_dirty();
+}
+
+void open_mods_folder() {
+  wchar_t folder[MAX_PATH];
+  mods_folder(&g.paths, folder);
+  SHCreateDirectoryExW(nullptr, (std::wstring(folder) + L"\\content").c_str(), nullptr);
+  ShellExecuteW(g.dialog.hwnd, L"open", folder, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void page_mods(const D2D1_RECT_F& page) {
+  const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18, label = 84;
+  float y = page.top + kMargin;
+  const auto file_row = [&](float row, size_t index) {
+    const ModPicker& picker = kModPickers[index];
+    const std::wstring& value = g.pending_mods[index];
+    const std::wstring& error = g.mod_error[index];
+    text(picker.label, g.fonts.body, rect(ix, row + 4, label, 15), kText);
+    const D2D1_RECT_F box = rect(ix + label, row, iw - label - kButtonWidth * 2 - kGap * 2, kButtonHeight);
+    fill_rect(box, ink(kWhite));
+    stroke_rect(box, 0xABADB3);
+    const size_t slash = value.find_last_of(L"\\/");
+    const std::wstring shown = !error.empty() ? error : value.empty() ? picker.none : value.substr(slash == std::wstring::npos ? 0 : slash + 1);
+    text(shown, g.fonts.field, D2D1::RectF(box.left + 5, box.top, box.right - 5, box.bottom),
+         !error.empty() ? kError : value.empty() ? kDisabled : kText);
+    push_button(picker.browse, rect(box.right + kGap, row, kButtonWidth, kButtonHeight), L"Browse...", true, [index] { browse_mod(index); });
+    push_button(picker.remove, rect(box.right + kGap * 2 + kButtonWidth, row, kButtonWidth, kButtonHeight), L"Remove", !value.empty(),
+                [index] {
+                  g.pending_mods[index].clear();
+                  g.mod_error[index].clear();
+                  mark_dirty();
+                });
+  };
+
+  group(rect(x, y, w, 100), L"Roblox Studio");
+  file_row(y + 16, MOD_ARROW);
+  file_row(y + 44, MOD_HAND);
+  file_row(y + 72, MOD_FONT);
+  y += 100 + kMargin;
+
+  group(rect(x, y, w, 44), L"Window");
+  file_row(y + 16, MOD_ICON);
+  y += 44 + kMargin;
+
+  group(rect(x, y, w, 72), L"Mods folder");
+  text(L"Pictures, fonts and sounds in it replace Studio's own. It's laid out like Studio's folder, starting at content.",
+       g.fonts.paragraph, rect(ix, y + 16, iw, 30), kSecondary);
+  link(kModsLink, ix, y + 48, L"Open the mods folder", open_mods_folder);
+}
+
 void page_about(const D2D1_RECT_F& page) {
   const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2;
   float y = page.top + kMargin;
@@ -828,6 +938,11 @@ void page_about(const D2D1_RECT_F& page) {
   link(kLicensesLink, x + 256, y, L"View licenses", [] {
     wchar_t notices[MAX_PATH];
     if (notices_write(&g.paths, notices)) ShellExecuteW(g.dialog.hwnd, L"open", notices, nullptr, nullptr, SW_SHOWNORMAL);
+  });
+  y += 28;
+  checkbox(kSelfBox, x, y, w, g.pending_self, L"Get new versions of Studio7 as they come out", [] {
+    g.pending_self = !g.pending_self;
+    mark_dirty();
   });
 
   const float before = text_width(L"Made with ", g.fonts.body), after = text_width(L" by Zeph", g.fonts.body);
@@ -883,6 +998,7 @@ void draw_dialog() {
   draw_tabs(strip);
   const D2D1_RECT_F inner = inset(page, 1);
   if (g.tab == Tab::General) page_general(inner);
+  else if (g.tab == Tab::Mods) page_mods(inner);
   else page_about(inner);
   const float by = h - kMargin - kButtonHeight, right = w - kMargin;
   push_button(kApplyButton, rect(right - kButtonWidth, by, kButtonWidth, kButtonHeight), L"Apply", g.dirty, apply_settings);
@@ -916,15 +1032,54 @@ void repaint(Canvas& canvas) {
 void apply_settings() {
   if (!g.dirty) return;
   state_set(&g.paths, L"updates", g.pending_updates ? "" : "off");
+  state_set(&g.paths, L"self", g.pending_self ? "" : "off");
   if (g.pending_links != (links_wanted(&g.paths) != FALSE) && !links_set(&g.paths, g.pending_links)) {
     MessageBoxW(g.dialog.hwnd, L"Studio7 couldn't change who opens Roblox Studio links.", L"Studio7", MB_ICONERROR);
     g.pending_links = links_wanted(&g.paths) != FALSE;
     return;
   }
+  for (int i = 0; i < MOD_COUNT; ++i) {
+    wchar_t now[MAX_PATH], icon[MAX_PATH];
+    mods_get(&g.paths, i, now);
+    if (g.pending_mods[i] == now) continue;
+    if (i == MOD_ICON) {
+      mods_icon(&g.paths, icon);
+      if (g.pending_mods[i].empty()) DeleteFileW(icon);
+      else g.mod_error[i] = save_icon(g.pending_mods[i], icon);
+      if (!g.mod_error[i].empty()) {
+        g.tab = Tab::Mods;
+        repaint(g.dialog);
+        return;
+      }
+    }
+    mods_set(&g.paths, i, g.pending_mods[i].c_str());
+  }
   g.dirty = false;
   refresh_info();
   if (g.automatic) g.updates.clear();
   repaint(g.main);
+}
+
+void restart_if_idle() {
+  if (g.dialog.hwnd || g.working || (g.stage != Stage::Ready && g.stage != Stage::Fresh)) return;
+  wchar_t self[MAX_PATH];
+  const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
+  if (!length || length >= MAX_PATH) return;
+  std::wstring command = L"\"" + std::wstring(self) + L"\"";
+  STARTUPINFOW startup{};
+  startup.cb = sizeof startup;
+  PROCESS_INFORMATION process{};
+  if (g.single) {
+    ReleaseMutex(g.single);
+    CloseHandle(g.single);
+  }
+  if (!CreateProcessW(self, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) {
+    g.single = CreateMutexW(nullptr, TRUE, L"Local\\Studio7.Launcher");
+    return;
+  }
+  CloseHandle(process.hThread);
+  CloseHandle(process.hProcess);
+  DestroyWindow(g.main.hwnd);
 }
 
 void close_settings() {
@@ -1255,6 +1410,9 @@ LRESULT handle(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case kJobDone:
       job_done(reinterpret_cast<Outcome*>(lp));
       return 0;
+    case kSelfUpdated:
+      restart_if_idle();
+      return 0;
     case WM_CLOSE:
       if (c == &g.dialog) {
         close_settings();
@@ -1327,6 +1485,13 @@ void open_settings(Tab tab) {
   }
   g.pending_updates = g.automatic;
   g.pending_links = links_wanted(&g.paths) != FALSE;
+  g.pending_self = self_updates(g.paths);
+  for (int i = 0; i < MOD_COUNT; ++i) {
+    wchar_t file[MAX_PATH];
+    mods_get(&g.paths, i, file);
+    g.pending_mods[i] = file;
+    g.mod_error[i].clear();
+  }
   g.dirty = false;
   g.dialog.draw = draw_dialog;
   HWND hwnd = create_window(g.dialog, kDialogClass, L"Studio7 Settings", WS_POPUP | WS_CAPTION | WS_SYSMENU, WS_EX_DLGMODALFRAME,
@@ -1438,7 +1603,9 @@ int render_ui(const std::wstring& dir) {
     const wchar_t* name;
     Tab tab;
     int hot;
-  } dialogs[] = {{L"settings-general", Tab::General, kCheckButton}, {L"settings-about", Tab::About, kFolderLink}};
+  } dialogs[] = {{L"settings-general", Tab::General, kCheckButton},
+                 {L"settings-mods", Tab::Mods, kFontBrowse},
+                 {L"settings-about", Tab::About, kFolderLink}};
   for (const float scale : {1.0f, 1.5f}) {
     for (const MainShot& shot : mains) {
       g.stage = shot.stage;
@@ -1468,6 +1635,9 @@ int render_ui(const std::wstring& dir) {
     g.version = L"0.748.0.7481526";
     g.updates = L"Up to date";
     g.pending_updates = g.pending_links = true;
+    g.pending_mods[MOD_ARROW] = L"C:\\Mods\\2013\\ArrowFarCursor.png";
+    g.pending_mods[MOD_HAND] = L"C:\\Mods\\2013\\ArrowCursor.png";
+    g.pending_mods[MOD_ICON] = L"C:\\Mods\\2013\\studio-2013.ico";
     for (const DialogShot& shot : dialogs) {
       g.tab = shot.tab;
       g.dialog.springs.clear();
@@ -1487,7 +1657,7 @@ int render_ui(const std::wstring& dir) {
 
 int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::wstring& arguments, bool open_when_ready,
                  const std::wstring& failure) {
-  HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\Studio7.Launcher");
+  HANDLE single = g.single = CreateMutexW(nullptr, TRUE, L"Local\\Studio7.Launcher");
   if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
     if (HWND other = FindWindowW(kMainClass, nullptr)) {
       ShowWindow(other, SW_RESTORE);
@@ -1546,6 +1716,9 @@ int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::ws
     if (g.stage == Stage::Ready) g.updates = L"Checking...";
     start_job(Job::Check, true);
   }
+  std::thread([hwnd] {
+    if (update_self(g.paths)) PostMessageW(hwnd, kSelfUpdated, 0, 0);
+  }).detach();
 
   MSG msg;
   while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

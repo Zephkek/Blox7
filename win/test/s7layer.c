@@ -33,6 +33,26 @@
 #undef GetCurrentInputMessageSource
 #undef GetAddrInfoExCancel
 #undef ProcessPrng
+#define COBJMACROS
+#define MFStartup sdk_MFStartup
+#define MFShutdown sdk_MFShutdown
+#define MFTEnumEx sdk_MFTEnumEx
+#define MFCreateMediaType sdk_MFCreateMediaType
+#define MFCreateSample sdk_MFCreateSample
+#define MFCreateMemoryBuffer sdk_MFCreateMemoryBuffer
+#define MFCreateAlignedMemoryBuffer sdk_MFCreateAlignedMemoryBuffer
+#include <initguid.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mftransform.h>
+#include <mferror.h>
+#undef MFStartup
+#undef MFShutdown
+#undef MFTEnumEx
+#undef MFCreateMediaType
+#undef MFCreateSample
+#undef MFCreateMemoryBuffer
+#undef MFCreateAlignedMemoryBuffer
 #include <process.h>
 #include <stdio.h>
 #include <string.h>
@@ -68,6 +88,13 @@ IMP HRESULT WINAPI WindowsCompareStringOrdinal(HS, HS, INT32 *);
 IMP HRESULT WINAPI RoInitialize(DWORD);
 IMP void WINAPI RoUninitialize(void);
 IMP HRESULT WINAPI RoActivateInstance(HS, void **);
+IMP HRESULT WINAPI MFStartup(ULONG, DWORD);
+IMP HRESULT WINAPI MFShutdown(void);
+IMP HRESULT WINAPI MFTEnumEx(GUID, UINT32, const MFT_REGISTER_TYPE_INFO *, const MFT_REGISTER_TYPE_INFO *, IMFActivate ***, UINT32 *);
+IMP HRESULT WINAPI MFCreateMediaType(IMFMediaType **);
+IMP HRESULT WINAPI MFCreateSample(IMFSample **);
+IMP HRESULT WINAPI MFCreateMemoryBuffer(DWORD, IMFMediaBuffer **);
+IMP HRESULT WINAPI MFCreateAlignedMemoryBuffer(DWORD, DWORD, IMFMediaBuffer **);
 
 static int passed, failed;
 
@@ -602,10 +629,151 @@ static void test_misc(void) {
           at_least(windows, 10, 0, 0), ten_build, eleven, eight, seven);
 }
 
+DEFINE_GUID(LowLatencyMode, 0x9c27891a, 0xed7a, 0x40e1, 0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee);
+
+static HRESULT video_type(IMFMediaType **type, REFGUID format, UINT32 width, UINT32 height, BOOL encoded) {
+    HRESULT hr = MFCreateMediaType(type);
+
+    if (FAILED(hr)) return hr;
+    IMFMediaType_SetGUID(*type, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
+    IMFMediaType_SetGUID(*type, &MF_MT_SUBTYPE, format);
+    IMFMediaType_SetUINT64(*type, &MF_MT_FRAME_SIZE, ((UINT64)width << 32) | height);
+    IMFMediaType_SetUINT32(*type, &MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+    IMFMediaType_SetUINT64(*type, &MF_MT_PIXEL_ASPECT_RATIO, ((UINT64)1 << 32) | 1);
+    IMFMediaType_SetUINT64(*type, &MF_MT_FRAME_RATE, ((UINT64)30 << 32) | 1);
+    if (encoded) {
+        IMFMediaType_SetUINT32(*type, &MF_MT_MPEG2_PROFILE, 77);
+        IMFMediaType_SetUINT32(*type, &MF_MT_AVG_BITRATE, 2000000);
+    }
+    return S_OK;
+}
+
+static BOOL feed(IMFTransform *encoder, DWORD width, DWORD height, int index) {
+    DWORD size = width * height * 3 / 2;
+    IMFMediaBuffer *buffer = NULL;
+    IMFSample *sample = NULL;
+    BYTE *data = NULL;
+    HRESULT hr;
+
+    if (FAILED(MFCreateAlignedMemoryBuffer(size, MF_16_BYTE_ALIGNMENT, &buffer))) return FALSE;
+    IMFMediaBuffer_Lock(buffer, &data, NULL, NULL);
+    memset(data, 40 + index * 9, width * height);
+    memset(data + width * height, 128, size - width * height);
+    IMFMediaBuffer_Unlock(buffer);
+    IMFMediaBuffer_SetCurrentLength(buffer, size);
+    MFCreateSample(&sample);
+    IMFSample_AddBuffer(sample, buffer);
+    IMFSample_SetSampleTime(sample, (LONGLONG)index * 333333);
+    IMFSample_SetSampleDuration(sample, 333333);
+    hr = IMFTransform_ProcessInput(encoder, 0, sample, 0);
+    IMFSample_Release(sample);
+    IMFMediaBuffer_Release(buffer);
+    return SUCCEEDED(hr);
+}
+
+static int collect(IMFTransform *encoder, LONGLONG *bytes) {
+    int packets = 0;
+
+    for (;;) {
+        MFT_OUTPUT_STREAM_INFO info;
+        MFT_OUTPUT_DATA_BUFFER out;
+        IMFMediaBuffer *buffer = NULL;
+        DWORD length = 0, status = 0;
+        HRESULT hr;
+
+        if (FAILED(IMFTransform_GetOutputStreamInfo(encoder, 0, &info))) return -1;
+        memset(&out, 0, sizeof(out));
+        MFCreateSample(&out.pSample);
+        MFCreateMemoryBuffer(info.cbSize ? info.cbSize : 1 << 20, &buffer);
+        IMFSample_AddBuffer(out.pSample, buffer);
+        hr = IMFTransform_ProcessOutput(encoder, 0, 1, &out, &status);
+        if (hr == S_OK) {
+            IMFSample_GetTotalLength(out.pSample, &length);
+            packets++;
+            *bytes += length;
+        }
+        if (out.pEvents) IMFCollection_Release(out.pEvents);
+        IMFSample_Release(out.pSample);
+        IMFMediaBuffer_Release(buffer);
+        if (hr != S_OK) return packets;
+    }
+}
+
+static void test_media(void) {
+    MFT_REGISTER_TYPE_INFO h264 = {MFMediaType_Video, MFVideoFormat_H264};
+    IMFActivate **found = NULL;
+    IMFTransform *encoder = NULL, *again = NULL;
+    IMFAttributes *store = NULL, *second = NULL;
+    IMFMediaType *out = NULL, *in = NULL;
+    IUnknown *unknown = NULL;
+    WCHAR name[200] = L"";
+    UINT32 count = 0, i, length = 0, value = 0, items = 0;
+    LONGLONG bytes = 0;
+    HRESULT hr;
+    int packets = 0, frame;
+
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    hr = MFStartup((0x0002 << 16) | 0x0070, MFSTARTUP_FULL);
+    check(hr == S_OK, "media: start", "hr %08lx", (unsigned long)hr);
+    if (FAILED(hr)) return;
+    hr = MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, 0, NULL, &h264, &found, &count);
+    check(hr == S_OK && count > 0 && found, "media: H.264 encoders listed", "hr %08lx, %u found", (unsigned long)hr, count);
+    if (FAILED(hr) || !count) goto done;
+    hr = IMFActivate_GetString(found[0], &MFT_FRIENDLY_NAME_Attribute, name, 200, &length);
+    IMFActivate_GetCount(found[0], &items);
+    check(hr == S_OK && length > 0 && items > 0, "media: entry answers as itself", "'%ls', %u attributes", name, items);
+    hr = IMFActivate_QueryInterface(found[0], &IID_IUnknown, (void **)&unknown);
+    check(hr == S_OK && unknown == (IUnknown *)found[0], "media: entry identity", "hr %08lx", (unsigned long)hr);
+    if (unknown) IUnknown_Release(unknown);
+    hr = IMFActivate_ActivateObject(found[0], &IID_IMFTransform, (void **)&encoder);
+    check(hr == S_OK && encoder, "media: encoder created", "hr %08lx", (unsigned long)hr);
+    if (FAILED(hr) || !encoder) goto done;
+    hr = IMFTransform_GetAttributes(encoder, &store);
+    check(hr == S_OK && store, "media: encoder has attributes", "hr %08lx", (unsigned long)hr);
+    if (store) {
+        hr = IMFAttributes_SetUINT32(store, &LowLatencyMode, 1);
+        IMFTransform_GetAttributes(encoder, &second);
+        if (second) IMFAttributes_GetUINT32(second, &LowLatencyMode, &value);
+        check(hr == S_OK && value == 1, "media: attributes are kept", "set %08lx, read back %u", (unsigned long)hr, value);
+    }
+    hr = IMFTransform_QueryInterface(encoder, &IID_IMFTransform, (void **)&again);
+    check(hr == S_OK && again == encoder, "media: encoder identity", "hr %08lx", (unsigned long)hr);
+    if (again) IMFTransform_Release(again);
+    video_type(&out, &MFVideoFormat_H264, 640, 480, TRUE);
+    video_type(&in, &MFVideoFormat_IYUV, 640, 480, FALSE);
+    hr = IMFTransform_SetOutputType(encoder, 0, out, 0);
+    if (SUCCEEDED(hr)) hr = IMFTransform_SetInputType(encoder, 0, in, 0);
+    check(hr == S_OK, "media: types accepted", "hr %08lx", (unsigned long)hr);
+    if (SUCCEEDED(hr)) {
+        IMFTransform_ProcessMessage(encoder, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+        IMFTransform_ProcessMessage(encoder, MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+        for (frame = 0; frame < 12 && feed(encoder, 640, 480, frame); frame++) packets += collect(encoder, &bytes);
+        IMFTransform_ProcessMessage(encoder, MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+        IMFTransform_ProcessMessage(encoder, MFT_MESSAGE_COMMAND_DRAIN, 0);
+        packets += collect(encoder, &bytes);
+        check(frame == 12 && packets == 12, "media: 12 frames in, 12 packets out", "%d frames, %d packets, %lld bytes", frame, packets,
+              bytes);
+    }
+
+done:
+    if (in) IMFMediaType_Release(in);
+    if (out) IMFMediaType_Release(out);
+    if (second) IMFAttributes_Release(second);
+    if (store) IMFAttributes_Release(store);
+    if (encoder) IMFTransform_Release(encoder);
+    for (i = 0; i < count; i++) {
+        IMFActivate_ShutdownObject(found[i]);
+        IMFActivate_Release(found[i]);
+    }
+    if (found) CoTaskMemFree(found);
+    MFShutdown();
+    CoUninitialize();
+}
+
 int main(int argc, char **argv) {
     static const struct { const char *name; void (*run)(void); } tests[] = {
         {"wait", test_wait}, {"time", test_time}, {"stack", test_stack}, {"files", test_files},
-        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc},
+        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"media", test_media},
     };
     int i, j;
 

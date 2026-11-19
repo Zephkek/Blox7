@@ -77,3 +77,46 @@ BOOL WINAPI s7_GetCurrentInputMessageSource(InputSource *source) {
     source->origin = 0;
     return TRUE;
 }
+
+static HICON window_icon(WPARAM which) {
+    static HICON icons[2];
+    static volatile LONG state;
+    WCHAR path[MAX_PATH];
+    DWORD length;
+
+    if (InterlockedCompareExchange(&state, 1, 0) == 0) {
+        length = GetModuleFileNameW(NULL, path, MAX_PATH);
+        while (length && path[length - 1] != L'\\') length--;
+        if (length && length + 12 < MAX_PATH) {
+            lstrcpyW(path + length, L"studio7.ico");
+            icons[0] = (HICON)LoadImageW(NULL, path, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+                                         LR_LOADFROMFILE);
+            icons[1] = (HICON)LoadImageW(NULL, path, IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON),
+                                         LR_LOADFROMFILE);
+        }
+        InterlockedExchange(&state, 2);
+    }
+    return state == 2 ? icons[which == ICON_BIG] : NULL;
+}
+
+LRESULT WINAPI s7_SendMessageW(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_SETICON && lparam) {
+        HICON ours = window_icon(wparam);
+        if (ours) lparam = (LPARAM)ours;
+    }
+    return SendMessageW(window, message, wparam, lparam);
+}
+
+ATOM WINAPI s7_RegisterClassExW(const WNDCLASSEXW *wanted) {
+    WNDCLASSEXW ours;
+    HICON big, small;
+
+    if (!wanted || wanted->cbSize != sizeof(ours) || !wanted->hIcon) return RegisterClassExW(wanted);
+    big = window_icon(ICON_BIG);
+    small = window_icon(ICON_SMALL);
+    if (!big) return RegisterClassExW(wanted);
+    ours = *wanted;
+    ours.hIcon = big;
+    if (small) ours.hIconSm = small;
+    return RegisterClassExW(&ours);
+}

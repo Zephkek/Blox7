@@ -777,6 +777,7 @@ Settings load_settings(const Paths& paths) {
   s.font = widen(text("font"));
   s.window_title = widen(text("window_title"));
   s.window_icon = widen(text("window_icon"));
+  s.self_update = text("updates") != "off";
   return s;
 }
 
@@ -890,6 +891,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["font"] = narrow(s.font);
   ini["window_title"] = narrow(s.window_title);
   ini["window_icon"] = narrow(s.window_icon);
+  ini["updates"] = s.self_update ? "" : "off";
   const bool vulkan = s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan";
   set_windows_gpu_preference(paths, !vulkan && !s.gpu.empty() ? windows_gpu_preference(s.gpu) : 0, ini);
   std::wstring links = set_join_links(paths, s.join_links, ini);

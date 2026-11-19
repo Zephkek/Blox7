@@ -15,13 +15,14 @@
 extern "C" {
 #endif
 
-#define S7_VERSION "0.1"
+#define S7_VERSION "0.2"
 #define S7_KEEP L".s7orig"
 #define S7_JOURNAL L"studio7.bind"
 #define S7_READY L"studio7.ready"
 #define S7_ANCHOR "S7Anchor"
 #define S7_KERNEL "s7kernel.dll"
 #define S7_STUDIO_EXE L"RobloxStudioBeta.exe"
+#define S7_ICON L"studio7.ico"
 #define S7_PRINTF(at, first) __attribute__((format(printf, at, first)))
 
 typedef struct {
@@ -160,6 +161,16 @@ int log_tail(const Paths *paths, char lines[][200], int max);
 BOOL layer_unpack(const WCHAR *folder);
 BOOL layer_current(const Paths *paths, const char *version);
 BOOL notices_write(const Paths *paths, WCHAR *file);
+
+enum { MOD_ARROW, MOD_HAND, MOD_FONT, MOD_ICON, MOD_COUNT };
+
+void tree_remove(const WCHAR *dir);
+void mods_folder(const Paths *paths, WCHAR *out);
+void mods_icon(const Paths *paths, WCHAR *out);
+void mods_get(const Paths *paths, int which, WCHAR *out);
+void mods_set(const Paths *paths, int which, const WCHAR *file);
+BOOL mods_undo(const WCHAR *studio);
+int mods_apply(const Paths *paths, const char *version);
 
 BOOL links_wanted(const Paths *paths);
 BOOL links_set(const Paths *paths, BOOL on);

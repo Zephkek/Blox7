@@ -36,6 +36,30 @@ void start_background() {
   CloseHandle(process.hProcess);
 }
 
+bool self_updates(const Paths& paths) {
+  char value[8];
+  state_get(&paths, L"self", value, sizeof value);
+  return strcmp(value, "off") != 0;
+}
+
+bool update_self(const Paths& paths) {
+  wchar_t self[MAX_PATH];
+  if (paths.custom || !windows_seven() || !self_updates(paths)) return false;
+  const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
+  if (!length || length >= MAX_PATH) return false;
+  UpdateInfo info;
+  char error[400] = "";
+  const int answer = update_check("Studio7.exe", self, &info, error, sizeof error);
+  if (answer == UPDATE_FAILED) note("could not look for a newer Studio7: %s", error);
+  if (answer != UPDATE_NEWER) return false;
+  if (!update_install(&info, self, error, sizeof error)) {
+    note("could not get the newer Studio7: %s", error);
+    return false;
+  }
+  note("Studio7.exe replaced by the one published in %s (sha256 %.12s...)", info.tag, info.digest);
+  return true;
+}
+
 std::wstring start_failure(const Run& run) {
   wchar_t text[200];
   if (run.ran) std::swprintf(text, 200, L"It closed right after it started (code 0x%lX).", run.code);
@@ -83,6 +107,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int argc = 0;
   wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (argv && argc == 3 && wcscmp(argv[1], L"--render-ui") == 0) return studio7::render_ui(argv[2]);
+  wchar_t self[MAX_PATH];
+  const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
+  if (length && length < MAX_PATH) update_tidy(self);
   Paths paths;
   if (!paths_init(&paths)) {
     MessageBoxW(nullptr, L"Studio7 could not create its folder under AppData\\Local.", L"Studio7", MB_ICONERROR);
@@ -92,6 +119,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (!studio7::windows_seven()) return 0;
     links_refresh(&paths);
     studio_background(&paths);
+    studio7::update_self(paths);
     return 0;
   }
   std::wstring arguments, failure;
