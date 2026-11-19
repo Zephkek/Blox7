@@ -1,5 +1,5 @@
-"""build.py libc | boot | bridges | bridge-sources | webview | test | blox7 [--clean]"""
-import hashlib, json, os, re, shlex, shutil, subprocess, sys
+"""build.py libc | boot | bridges | bridge-sources | webview | test | blox7 | studio7 [--clean]"""
+import glob, hashlib, json, os, re, shlex, shutil, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -157,7 +157,7 @@ def win_flags(src, libc):
     return flags
 
 
-def compile_all(jobs):
+def compile_all(jobs, cc=CLANG, cxx=CLANGXX):
     """jobs are (src, obj, flags), gives back the objects or stops on the first errors"""
     def up_to_date(src, obj, deps):
         if not os.path.exists(obj) or not os.path.exists(deps):
@@ -183,8 +183,8 @@ def compile_all(jobs):
         if up_to_date(src, obj, deps) and os.path.exists(stamp) and open(stamp).read() == key:
             return None
         os.makedirs(os.path.dirname(obj), exist_ok=True)
-        cc = CLANGXX if src.endswith(('.cpp', '.cc')) else CLANG
-        p = subprocess.run([cc, '-c', src, '-o', obj, '-MMD', '-MF', deps] + flags, capture_output=True, text=True)
+        compiler = cxx if src.endswith(('.cpp', '.cc')) else cc
+        p = subprocess.run([compiler, '-c', src, '-o', obj, '-MMD', '-MF', deps] + flags, capture_output=True, text=True)
         if p.returncode:
             return f'--- {src}\n{p.stderr[-6000:]}'
         open(stamp, 'w').write(key)
@@ -429,9 +429,107 @@ def build_blox7():
     print('built', exe, f'{os.path.getsize(exe) / 1048576:.1f} MB')
 
 
+WIN7 = ['-Wl,--major-subsystem-version,6', '-Wl,--minor-subsystem-version,1', '-Wl,--major-os-version,6',
+        '-Wl,--minor-os-version,1']
+S7_LAYER = (('s7kernel', ('kernel', 'sync', 'time', 'file', 'version', 'crt'), ('kernel32', 'bcrypt', 'ntdll'), 'DllMain'),
+            ('s7user', ('user',), ('user32', 'gdi32', 'kernel32'), ''),
+            ('s7ws2', ('net', 'crt'), ('ws2_32', 'kernel32'), ''),
+            ('s7mf', ('media',), (), ''),
+            ('s7bcp', ('rng',), ('bcrypt',), ''),
+            ('s7rt', ('winrt', 'crt'), ('ole32', 'kernel32'), ''))
+
+
+S7_NOTICES = """Studio7 third-party notices
+
+Studio7 is not affiliated with or endorsed by Roblox Corporation or Microsoft. Roblox and the Roblox logo are
+trademarks of Roblox Corporation. Windows is a trademark of Microsoft. Studio7 does not include Roblox Studio: it
+downloads Roblox's own packages from Roblox's servers and checks each one against the checksums Roblox publishes.
+
+Studio7.exe contains the software below, each under its own license.
+
+ 1. zlib - https://zlib.net
+    Unpacks Roblox's packages.
+
+ 2. BearSSL - https://bearssl.org
+    TLS 1.2 for the downloads. Windows itself still decides which certificates are trusted.
+"""
+
+
+def build_studio7_layer(out):
+    src = os.path.join(WIN, 'studio7', 'layer')
+    os.makedirs(out, exist_ok=True)
+    cc = f'{MINGW}/bin/clang.exe'
+    flags = ['-O2', '-Wall', '-Wextra', '-Werror', '-ffreestanding', '-fno-builtin', '-fno-stack-protector']
+    names = sorted({name for _, parts, _, _ in S7_LAYER for name in parts})
+    objs = dict(zip(names, compile_all([(norm(os.path.join(src, name + '.c')), obj_path(name, 's7layer'), flags)
+                                        for name in names], cc)))
+    primitives = os.path.join(out, 'bcryptprimitives.a')
+    subprocess.check_call([f'{MINGW}/bin/llvm-dlltool.exe', '-m', 'i386:x86-64', '-d', os.path.join(src, 'bcryptprimitives.def'),
+                           '-l', primitives])
+    for dll, parts, libs, entry in S7_LAYER:
+        subprocess.check_call([cc, '-shared', '-nostdlib', f'-Wl,--entry={entry}', '-Wl,--no-insert-timestamp', '-o',
+                               os.path.join(out, dll + '.dll')] + [objs[name] for name in parts] +
+                              [os.path.join(src, dll + '.def'), primitives] + ['-l' + lib for lib in libs] + WIN7)
+
+
+def build_studio7():
+    deps = os.environ.get('BLOX7_DEPS_SRC', 'D:/toolchains/src')
+    src = os.path.join(WIN, 'studio7')
+    gen = os.path.join(OUT, 'studio7')
+    layer = os.path.join(gen, 'layer')
+    cc, cxx = f'{MINGW}/bin/clang.exe', f'{MINGW}/bin/clang++.exe'
+    build_studio7_layer(layer)
+    rule = '=' * 110
+    notices = S7_NOTICES
+    for number, (name, path) in enumerate((('zlib', f'{deps}/zlib/LICENSE'), ('BearSSL', f'{deps}/bearssl/LICENSE.txt')), 1):
+        with open(path, encoding='utf-8', errors='replace') as f:
+            notices += f'\n{rule}\n{number}. {name}\n{rule}\n' + f.read().replace('\r\n', '\n').strip('\n') + '\n'
+    with open(os.path.join(gen, 'licenses.txt'), 'w', encoding='utf-8-sig', newline='\r\n') as f:
+        f.write(notices)
+    res = os.path.join(gen, 'studio7.res.o')
+    subprocess.check_call([f'{MINGW}/bin/llvm-windres.exe', '-I', src, '-I', gen, '-O', 'coff', os.path.join(src, 'studio7.rc'), res])
+
+    includes = [f'-I{deps}/bearssl/inc', f'-I{deps}/zlib']
+    flags = ['-O2', '-Wall', '-Wextra', '-ffunction-sections', '-fdata-sections'] + includes
+    theirs = sorted(norm(p) for p in glob.glob(f'{deps}/bearssl/src/**/*.c', recursive=True))
+    theirs += [f'{deps}/zlib/{name}.c' for name in ('adler32', 'crc32', 'inffast', 'inflate', 'inftrees', 'zutil')]
+    engine = ('bind', 'embed', 'install', 'links', 'net', 'pe', 'setup', 'stub', 'zip')
+    jobs = [(path, obj_path(path, 's7deps'), ['-O2', '-w', '-ffunction-sections', '-fdata-sections', f'-I{deps}/bearssl/src'] + includes)
+            for path in theirs]
+    jobs += [(norm(os.path.join(src, name + '.c')), obj_path(name, 's7'), flags) for name in engine + ('s7tool',)]
+    jobs += [(norm(os.path.join(src, name + '.cpp')), obj_path(name, 's7'), ['-std=c++20', '-municode'] + flags)
+             for name in ('main', 'ui')]
+    objs = compile_all(jobs, cc, cxx)
+    tool, main, ui = objs[-3:]
+    shared = os.path.join(gen, 'shared.rsp')
+    with open(shared, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(f'"{o}"' for o in objs[:-3]))
+    libs = ['-lws2_32', '-lcrypt32', '-ladvapi32', '-lshell32', '-static', '-Wl,--gc-sections', '-Wl,--no-insert-timestamp'] + WIN7
+    release = os.path.join(OUT, 'release')
+    os.makedirs(release, exist_ok=True)
+    exe = os.path.join(release, 'Studio7.exe')
+    try:
+        open(exe, 'ab').close()
+    except PermissionError:
+        exe = os.path.join(release, 'Studio7.new.exe')
+        print('Studio7.exe is running, so this build goes to Studio7.new.exe')
+    subprocess.check_call([cxx, '-municode', '-mwindows', main, ui, f'@{shared}', res, '-o', exe] + libs)
+    print('built', exe, f'{os.path.getsize(exe) / 1024:.0f} KB')
+    subprocess.check_call([cc, '-municode', '-mconsole', tool, f'@{shared}', '-o', os.path.join(gen, 's7tool.exe')] + libs)
+
+    test = os.path.join(gen, 'test')
+    os.makedirs(test, exist_ok=True)
+    dlls = [os.path.join(layer, name + '.dll') for name, _, _, _ in S7_LAYER]
+    for dll in dlls:
+        shutil.copyfile(dll, os.path.join(test, os.path.basename(dll)))
+    subprocess.check_call([cc, '-O2', '-Wall', '-Wextra', '-mconsole', os.path.join(WIN, 'test', 's7layer.c'), '-o',
+                           os.path.join(test, 's7layer.exe')] + dlls + ['-lgdi32', '-static'] + WIN7)
+    print('built', os.path.join(gen, 's7tool.exe'), 'and', os.path.join(test, 's7layer.exe'))
+
+
 if __name__ == '__main__':
     what = sys.argv[1] if len(sys.argv) > 1 else 'libc'
     if '--clean' in sys.argv:
         shutil.rmtree(os.path.join(OUT, 'obj'), ignore_errors=True)
     {'libc': build_libc, 'boot': build_boot, 'bridges': build_bridges, 'bridge-sources': build_bridge_sources, 'webview': build_webview,
-     'blox7': build_blox7}[what]()
+     'blox7': build_blox7, 'studio7': build_studio7}[what]()

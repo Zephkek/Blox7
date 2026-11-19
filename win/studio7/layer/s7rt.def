@@ -1,0 +1,27 @@
+LIBRARY s7rt
+EXPORTS
+    RoInitialize = s7_RoInitialize
+    RoUninitialize = s7_RoUninitialize
+    RoActivateInstance = s7_RoActivateInstance
+    RoGetActivationFactory = s7_RoGetActivationFactory
+    RoRegisterActivationFactories = s7_RoRegisterActivationFactories
+    RoRevokeActivationFactories = s7_RoRevokeActivationFactories
+    RoGetApartmentIdentifier = s7_RoGetApartmentIdentifier
+    RoRegisterForApartmentShutdown = s7_RoRegisterForApartmentShutdown
+    RoUnregisterForApartmentShutdown = s7_RoUnregisterForApartmentShutdown
+    RoOriginateError = s7_RoOriginateError
+    RoOriginateErrorW = s7_RoOriginateErrorW
+    RoTransformError = s7_RoTransformError
+    RoTransformErrorW = s7_RoTransformErrorW
+    GetRestrictedErrorInfo = s7_GetRestrictedErrorInfo
+    SetRestrictedErrorInfo = s7_SetRestrictedErrorInfo
+    RoFailFastWithErrorContext = s7_RoFailFastWithErrorContext
+    WindowsCreateString = s7_WindowsCreateString
+    WindowsCreateStringReference = s7_WindowsCreateStringReference
+    WindowsDeleteString = s7_WindowsDeleteString
+    WindowsDuplicateString = s7_WindowsDuplicateString
+    WindowsGetStringLen = s7_WindowsGetStringLen
+    WindowsGetStringRawBuffer = s7_WindowsGetStringRawBuffer
+    WindowsIsStringEmpty = s7_WindowsIsStringEmpty
+    WindowsStringHasEmbeddedNull = s7_WindowsStringHasEmbeddedNull
+    WindowsCompareStringOrdinal = s7_WindowsCompareStringOrdinal

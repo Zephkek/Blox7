@@ -1,0 +1,9 @@
+LIBRARY s7bcp
+EXPORTS
+    GetAsymmetricEncryptionInterface = bcryptprimitives.GetAsymmetricEncryptionInterface @1
+    GetCipherInterface = bcryptprimitives.GetCipherInterface @2
+    GetHashInterface = bcryptprimitives.GetHashInterface @3
+    GetRngInterface = bcryptprimitives.GetRngInterface @4
+    GetSecretAgreementInterface = bcryptprimitives.GetSecretAgreementInterface @5
+    GetSignatureInterface = bcryptprimitives.GetSignatureInterface @6
+    ProcessPrng = s7_ProcessPrng @1006

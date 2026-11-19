@@ -1,0 +1,40 @@
+#include <winver.h>
+
+1 ICON "studio7.ico"
+1 24 "studio7.manifest"
+S7KERNEL.DLL RCDATA "layer/s7kernel.dll"
+S7USER.DLL RCDATA "layer/s7user.dll"
+S7WS2.DLL RCDATA "layer/s7ws2.dll"
+S7MF.DLL RCDATA "layer/s7mf.dll"
+S7BCP.DLL RCDATA "layer/s7bcp.dll"
+S7RT.DLL RCDATA "layer/s7rt.dll"
+NOTICES RCDATA "licenses.txt"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "Zeph"
+      VALUE "FileDescription", "Studio7 - Roblox Studio ported back to Windows 7"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "InternalName", "Studio7"
+      VALUE "LegalCopyright", "Copyright 2026 Zeph. Not affiliated with Roblox Corporation."
+      VALUE "OriginalFilename", "Studio7.exe"
+      VALUE "ProductName", "Studio7"
+      VALUE "ProductVersion", "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

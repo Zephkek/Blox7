@@ -1,5 +1,6 @@
 """draws the blox7 icon (roblox tilt, win7 flag colors, a bit of gloss) into a multi-size .ico
-usage: blox7-icon.py <out.ico> [<preview.png>]"""
+usage: blox7-icon.py <out.ico> [<preview.png>] [--studio]
+--studio draws studio7's icon instead, same tile in four blues"""
 import sys
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -7,6 +8,10 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 SIZES = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
 LIGHT = ((247, 134, 92), (180, 223, 94), (90, 191, 243), (255, 219, 104))
 DEEP = ((216, 57, 26), (91, 165, 38), (14, 108, 195), (238, 157, 14))
+if '--studio' in sys.argv:
+    sys.argv.remove('--studio')
+    LIGHT = ((154, 220, 255), (98, 192, 255), (74, 163, 245), (60, 123, 217))
+    DEEP = ((72, 178, 242), (30, 143, 230), (21, 105, 199), (14, 71, 161))
 
 
 def vertical(size, top, bottom, y0, y1):
