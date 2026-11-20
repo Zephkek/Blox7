@@ -23,7 +23,7 @@ Roblox Studio wants Windows 10 as well, and on Windows 7 it doesn't start on its
 Studio that Windows 10 and 11 get and fills in the functions Windows 7 is missing.
 
 <p align="center">
-  <img src="docs/studio7.jpg" alt="Roblox Studio running on Windows 7">
+  <img src="docs/studio7.jpg‎" alt="Roblox Studio running on Windows 7">
 </p>
 
 ## Download
