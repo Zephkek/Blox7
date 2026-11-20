@@ -1997,6 +1997,19 @@ void ConfigureWebView(Surface* surface) {
             return S_OK;
           }),
       &token);
+  web_view->add_FrameNavigationStarting(
+      MakeHandler<ICoreWebView2NavigationStartingEventHandler, ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*>(
+          [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+            LPWSTR uri = nullptr;
+            args->get_Uri(&uri);
+            std::string target = TakeString(uri);
+            if (IsRobloxLaunchLink(target)) {
+              args->put_Cancel(TRUE);
+              HandleExternalUri(&target);
+            }
+            return S_OK;
+          }),
+      &token);
   WebView18* web_view18 = nullptr;
   if (SUCCEEDED(web_view->QueryInterface(kIidWebView18, reinterpret_cast<void**>(&web_view18))) &&
       web_view18 != nullptr) {

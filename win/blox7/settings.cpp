@@ -626,7 +626,10 @@ std::wstring set_join_links(const Paths& paths, bool on, std::map<std::string, s
 
 const CLSID kWicFactory = {0xcacaf262, 0x9370, 0x4615, {0xa1, 0x3b, 0x9f, 0x55, 0x39, 0xda, 0x4c, 0x0a}};
 const GUID kPngContainer = {0x1b7cfaf4, 0x713f, 0x473c, {0xbb, 0xcd, 0x61, 0x37, 0x42, 0x5f, 0xae, 0xaf}};
+const GUID kIcoContainer = {0xa3a860c4, 0x338f, 0x4c17, {0x91, 0x9a, 0xfb, 0xa4, 0xb5, 0x62, 0x8f, 0x21}};
 const GUID kBgra = {0x6fddc324, 0x4e03, 0x4bfe, {0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x0f}};
+const GUID kPremultipliedBgra = {0x6fddc324, 0x4e03, 0x4bfe, {0xb1, 0x85, 0x3d, 0x77, 0x76, 0x8d, 0xc9, 0x10}};
+const UINT kIconSizes[] = {16, 20, 24, 32, 40, 48, 64, 256};
 
 template <class T>
 void release(T*& p) {
@@ -657,8 +660,72 @@ std::wstring with_image(const std::wstring& file,
   return error;
 }
 
-std::wstring save_icon_png(const std::wstring& source, const std::wstring& target) {
-  return with_image(source, [&target](IWICImagingFactory* wic, IWICBitmapDecoder* decoder) -> std::wstring {
+bool square(IWICImagingFactory* wic, IWICBitmapSource* picture, UINT size, std::vector<uint8_t>* pixels) {
+  UINT w = 0, h = 0;
+  if (FAILED(picture->GetSize(&w, &h)) || !w || !h) return false;
+  const double fit = static_cast<double>(size) / std::max(w, h);
+  const UINT fw = std::clamp<UINT>(static_cast<UINT>(std::lround(w * fit)), 1, size);
+  const UINT fh = std::clamp<UINT>(static_cast<UINT>(std::lround(h * fit)), 1, size);
+  IWICFormatConverter* premultiplied = nullptr;
+  IWICBitmapScaler* scaler = nullptr;
+  IWICFormatConverter* straight = nullptr;
+  std::vector<uint8_t> fitted(static_cast<size_t>(fw) * fh * 4);
+  const bool ok = SUCCEEDED(wic->CreateFormatConverter(&premultiplied)) &&
+                  SUCCEEDED(premultiplied->Initialize(picture, kPremultipliedBgra, WICBitmapDitherTypeNone, nullptr, 0,
+                                                      WICBitmapPaletteTypeCustom)) &&
+                  SUCCEEDED(wic->CreateBitmapScaler(&scaler)) &&
+                  SUCCEEDED(scaler->Initialize(premultiplied, fw, fh, WICBitmapInterpolationModeFant)) &&
+                  SUCCEEDED(wic->CreateFormatConverter(&straight)) &&
+                  SUCCEEDED(straight->Initialize(scaler, kBgra, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom)) &&
+                  SUCCEEDED(straight->CopyPixels(nullptr, fw * 4, static_cast<UINT>(fitted.size()), fitted.data()));
+  release(straight);
+  release(scaler);
+  release(premultiplied);
+  if (!ok) return false;
+  pixels->assign(static_cast<size_t>(size) * size * 4, 0);
+  const UINT left = (size - fw) / 2, top = (size - fh) / 2;
+  for (UINT y = 0; y < fh; ++y)
+    std::memcpy(pixels->data() + (static_cast<size_t>(top + y) * size + left) * 4, fitted.data() + static_cast<size_t>(y) * fw * 4,
+                static_cast<size_t>(fw) * 4);
+  return true;
+}
+
+void put16(std::string* out, uint16_t value) { out->append(reinterpret_cast<const char*>(&value), 2); }
+void put32(std::string* out, uint32_t value) { out->append(reinterpret_cast<const char*>(&value), 4); }
+
+std::string icon_file(IWICImagingFactory* wic, IWICBitmapSource* picture) {
+  const size_t count = std::size(kIconSizes);
+  std::string directory, images;
+  put16(&directory, 0);
+  put16(&directory, 1);
+  put16(&directory, static_cast<uint16_t>(count));
+  for (const UINT size : kIconSizes) {
+    std::vector<uint8_t> pixels;
+    if (!square(wic, picture, size, &pixels)) return {};
+    const uint32_t mask_row = ((size + 31) / 32) * 4;
+    std::string image;
+    put32(&image, 40);
+    put32(&image, size);
+    put32(&image, size * 2);
+    put16(&image, 1);
+    put16(&image, 32);
+    for (int i = 0; i < 6; ++i) put32(&image, 0);
+    for (UINT y = size; y-- > 0;) image.append(reinterpret_cast<const char*>(pixels.data()) + static_cast<size_t>(y) * size * 4, size * 4);
+    image.append(static_cast<size_t>(mask_row) * size, '\0');
+    directory.push_back(static_cast<char>(size == 256 ? 0 : size));
+    directory.push_back(static_cast<char>(size == 256 ? 0 : size));
+    put16(&directory, 0);
+    put16(&directory, 1);
+    put16(&directory, 32);
+    put32(&directory, static_cast<uint32_t>(image.size()));
+    put32(&directory, static_cast<uint32_t>(6 + count * 16 + images.size()));
+    images += image;
+  }
+  return directory + images;
+}
+
+std::wstring save_window_icon(const std::wstring& source, const std::wstring& stem) {
+  return with_image(source, [&](IWICImagingFactory* wic, IWICBitmapDecoder* decoder) -> std::wstring {
     UINT frames = 0, best = 0, best_area = 0;
     decoder->GetFrameCount(&frames);
     for (UINT i = 0; i < frames; ++i) {
@@ -681,7 +748,7 @@ std::wstring save_icon_png(const std::wstring& source, const std::wstring& targe
     bool ok = SUCCEEDED(decoder->GetFrame(best, &frame)) && SUCCEEDED(frame->GetSize(&w, &h));
     const double fit = std::min(1.0, 256.0 / std::max(w, h));
     const UINT fw = std::max(1L, std::lround(w * fit)), fh = std::max(1L, std::lround(h * fit));
-    const std::wstring fresh = target + L".new";
+    const std::wstring png = stem + L".png", fresh = png + L".new";
     ok = ok && SUCCEEDED(wic->CreateBitmapScaler(&scaler)) &&
          SUCCEEDED(scaler->Initialize(frame, fw, fh, WICBitmapInterpolationModeFant)) &&
          SUCCEEDED(wic->CreateFormatConverter(&converter)) &&
@@ -696,8 +763,11 @@ std::wstring save_icon_png(const std::wstring& source, const std::wstring& targe
     release(stream);
     release(converter);
     release(scaler);
+    GUID format{};
+    std::string ico;
+    if (ok) ico = SUCCEEDED(decoder->GetContainerFormat(&format)) && format == kIcoContainer ? read_all(source) : icon_file(wic, frame);
     release(frame);
-    if (ok && MoveFileExW(fresh.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) return {};
+    if (!ico.empty() && MoveFileExW(fresh.c_str(), png.c_str(), MOVEFILE_REPLACE_EXISTING) && write_all(stem + L".ico", ico)) return {};
     DeleteFileW(fresh.c_str());
     return L"Blox7 couldn't save the window icon.";
   });
@@ -966,9 +1036,9 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
   export_file(L"BLOX7_CURSOR_HAND_FILE", s.cursor_hand);
   export_file(L"BLOX7_FONT_FILE", s.font);
   SetEnvironmentVariableW(L"BLOX7_WIN_TITLE", s.window_title.empty() ? nullptr : s.window_title.c_str());
-  const std::wstring icon = paths.home + L"\\window-icon.png";
-  if (!s.window_icon.empty() && save_icon_png(s.window_icon, icon).empty())
-    SetEnvironmentVariableW(L"BLOX7_WINDOW_ICON_FILE", widen(posix_path(icon)).c_str());
+  const std::wstring icon = paths.home + L"\\window-icon";
+  if (!s.window_icon.empty() && save_window_icon(s.window_icon, icon).empty())
+    SetEnvironmentVariableW(L"BLOX7_WINDOW_ICON_FILE", widen(posix_path(icon + L".png")).c_str());
   if (s.aero_off && os_info().windows7()) {
     using EnableComposition = HRESULT(WINAPI*)(UINT);
     HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
