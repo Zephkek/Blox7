@@ -129,7 +129,7 @@ std::string posix_path(const std::wstring& path);
 std::wstring roblox_version(const Paths& paths);
 std::wstring graphics_backend(const Paths& paths);
 UpdateState update_state(const Paths& paths);
-std::vector<std::wstring> log_tail(const Paths& paths, size_t count);
+std::vector<std::wstring> log_tail(const Paths& paths, size_t count, FILETIME* written = nullptr);
 std::wstring logs_dir(const Paths& paths);
 
 std::wstring widen(const std::string& text);

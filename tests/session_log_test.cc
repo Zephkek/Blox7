@@ -92,8 +92,7 @@ TEST(SessionLogTest, CapturesBothStreamsAndUpdatesLatest) {
 
   ASSERT_TRUE(std::filesystem::is_regular_file(session_path));
   ASSERT_TRUE(std::filesystem::exists(latest_path));
-  EXPECT_EQ(std::filesystem::canonical(latest_path),
-            std::filesystem::canonical(session_path));
+  EXPECT_TRUE(std::filesystem::equivalent(latest_path, session_path));
   EXPECT_TRUE(std::regex_match(
       session_path.filename().string(),
       std::regex(
@@ -139,8 +138,8 @@ TEST(SessionLogTest, PreservesSessionsStartedInTheSameSecond) {
   EXPECT_TRUE(std::filesystem::is_regular_file(second));
   EXPECT_EQ(second.stem().string().substr(second.stem().string().size() - 2),
             "-2");
-  EXPECT_EQ(std::filesystem::canonical(paths.logs_root() / "latest.log"),
-            std::filesystem::canonical(second));
+  EXPECT_TRUE(
+      std::filesystem::equivalent(paths.logs_root() / "latest.log", second));
 }
 
 TEST(SessionLogTest, SkipsIsolatedCanary) {

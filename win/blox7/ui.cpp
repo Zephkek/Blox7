@@ -141,6 +141,7 @@ enum Control : int {
   kCaptureQuality,
   kCaptureEncoder,
   kSelfUpdate,
+  kDateLink,
 };
 
 constexpr int option_id(Control control, size_t option) { return kOptionFirst + control * 100 + static_cast<int>(option); }
@@ -224,6 +225,7 @@ struct App {
   std::wstring version, backend, detail;
   bool vulkan_driver = true;
   std::vector<std::wstring> error_lines;
+  std::wstring wrong_date;
   DWORD exit_code = 0;
   bool details = false;
   float clock = 0;
@@ -915,6 +917,27 @@ std::wstring headline() {
   }
 }
 
+std::wstring wrong_clock_date(const std::vector<std::wstring>& lines) {
+  bool refused = false;
+  for (const std::wstring& line : lines)
+    if (line.find(L"certificate is not yet valid") != std::wstring::npos) refused = true;
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(GetModuleHandleW(nullptr));
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const BYTE*>(dos) + dos->e_lfanew);
+  const DWORD linked = nt->FileHeader.TimeDateStamp;
+  FILETIME now;
+  GetSystemTimeAsFileTime(&now);
+  const ULONG64 ticks = (static_cast<ULONG64>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+  const ULONG64 built = static_cast<ULONG64>(linked) * 10000000 + 116444736000000000ull;
+  if (!refused && !(linked && ticks + 864000000000ull < built)) return {};
+  SYSTEMTIME local;
+  GetLocalTime(&local);
+  static const wchar_t* const kMonths[] = {L"January", L"February", L"March",     L"April",   L"May",      L"June",
+                                           L"July",    L"August",   L"September", L"October", L"November", L"December"};
+  wchar_t date[40];
+  std::swprintf(date, 40, L"%u %ls %u", local.wDay, kMonths[(local.wMonth + 11) % 12], local.wYear);
+  return date;
+}
+
 std::wstring status_line() {
   wchar_t line[160];
   switch (g.stage) {
@@ -924,7 +947,9 @@ std::wstring status_line() {
     case Stage::Launching: return g.detail.empty() ? L"Waiting for Roblox's window..." : g.detail;
     case Stage::Running: return g.detail.empty() ? L"Close Roblox to come back here." : g.detail;
     case Stage::Failed:
-      std::swprintf(line, 160, L"It exited with code %lu. Try OpenGL ES in Settings if it keeps happening.", g.exit_code);
+      if (!g.wrong_date.empty()) return L"Windows says it's " + g.wrong_date + L". Set the right date and try again.";
+      if (g.backend != L"Vulkan") std::swprintf(line, 160, L"It exited with code %lu.", g.exit_code);
+      else std::swprintf(line, 160, L"It exited with code %lu. Try OpenGL ES in Settings if it keeps happening.", g.exit_code);
       return line;
     default: return g.detail;
   }
@@ -933,6 +958,7 @@ std::wstring status_line() {
 float main_content_height() {
   float h = 101;
   if (!status_line().empty()) h += 20;
+  if (g.stage == Stage::Failed && !g.wrong_date.empty()) h += 20;
   if (busy()) h += 22;
   if (g.stage == Stage::Failed && g.details) h += 11 + 16 + 15 * static_cast<float>(std::max<size_t>(1, g.error_lines.size())) + 7 + 15;
   return h;
@@ -978,6 +1004,12 @@ void draw_main() {
   const std::wstring status = status_line();
   if (!status.empty()) {
     text(status, g.fonts.body, rect(x, y, tw, 15), g.stage == Stage::Failed ? kError : kText);
+    y += 20;
+  }
+  if (g.stage == Stage::Failed && !g.wrong_date.empty()) {
+    link(kDateLink, x, y, L"Open the Date and Time settings", [] {
+      ShellExecuteW(g.main.hwnd, L"open", L"control.exe", L"timedate.cpl", nullptr, SW_SHOWNORMAL);
+    });
     y += 20;
   }
   if (busy()) {
@@ -1988,6 +2020,7 @@ bool child_has_window() {
 
 void launch() {
   if (!can_play()) return;
+  g.wrong_date.clear();
   if (!runtime_ready(g.paths)) {
     start_unpack();
     return;
@@ -2060,7 +2093,9 @@ void watch_child() {
     g.exit_code = code;
     if (!g.window_seen && code != 0) {
       g.stage = Stage::Failed;
-      g.error_lines = log_tail(g.paths, 10);
+      FILETIME written{};
+      g.error_lines = log_tail(g.paths, 10, &written);
+      g.wrong_date = wrong_clock_date(CompareFileTime(&written, &g.launched) >= 0 ? g.error_lines : std::vector<std::wstring>());
     } else {
       g.stage = Stage::Ready;
       g.detail = g.window_seen ? L"Roblox closed. See you next time." : L"Roblox closed before it opened a window.";
@@ -2555,7 +2590,8 @@ int render_ui(const std::wstring& dir) {
                {L"main-unpacking", Stage::Unpacking, false, 0},
                {L"main-launching", Stage::Launching, false, 0},
                {L"main-running", Stage::Running, false, 0},
-               {L"main-failed", Stage::Failed, true, kDetailsButton}};
+               {L"main-failed", Stage::Failed, true, kDetailsButton},
+               {L"main-clock", Stage::Failed, false, 0}};
   struct DialogShot {
     const wchar_t* name;
     Tab tab;
@@ -2579,6 +2615,7 @@ int render_ui(const std::wstring& dir) {
       g.unpacked = 0.42;
       g.clock = 0.9f;
       g.exit_code = 1;
+      g.wrong_date = wcscmp(shot.name, L"main-clock") == 0 ? L"1 January 2018" : L"";
       g.detail = shot.stage == Stage::Launching ? L"Checking for a newer Roblox..." : L"";
       g.main.springs.clear();
       g.main.hot = shot.hot;

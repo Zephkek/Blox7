@@ -151,8 +151,8 @@ bool UpdateLatestLink(const std::filesystem::path& logs_root,
   const std::filesystem::path target =
       std::filesystem::path("sessions") / session.filename();
   (void)unlink(temporary.c_str());
-  if (symlink(target.c_str(), temporary.c_str()) != 0) {
-    if (link(session.c_str(), temporary.c_str()) != 0) {
+  if (link(session.c_str(), temporary.c_str()) != 0) {
+    if (symlink(target.c_str(), temporary.c_str()) != 0) {
       *warning =
           "cannot update latest.log: " + std::string(std::strerror(errno));
       return false;

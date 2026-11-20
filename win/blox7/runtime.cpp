@@ -628,7 +628,7 @@ UpdateState update_state(const Paths& paths) {
 
 std::wstring logs_dir(const Paths& paths) { return blox7_dir(paths, L".local\\state\\blox7\\logs"); }
 
-std::vector<std::wstring> log_tail(const Paths& paths, size_t count) {
+std::vector<std::wstring> log_tail(const Paths& paths, size_t count, FILETIME* written) {
   const std::wstring dir = logs_dir(paths) + L"\\sessions";
   WIN32_FIND_DATAW found;
   HANDLE search = FindFirstFileW((dir + L"\\*.log").c_str(), &found);
@@ -642,6 +642,7 @@ std::vector<std::wstring> log_tail(const Paths& paths, size_t count) {
     }
   } while (FindNextFileW(search, &found));
   FindClose(search);
+  if (written) *written = newest_time;
   std::vector<std::wstring> lines;
   for (const std::wstring& line : lines_of(widen(read_file(dir + L"\\" + newest, 256 << 10)))) {
     std::wstring lower = line;
