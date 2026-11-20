@@ -121,7 +121,11 @@ namespace {
 constexpr std::size_t kMaximumHybridIdentifierBytes = 128;
 constexpr std::size_t kMaximumCallbackIdentifierBytes = 1024;
 constexpr char kFallbackRobloxVersion[] = "2.725.1142";
+#if defined(_WIN32)
+constexpr char kUserAgentEngine[] = "AppleWebKit/537.36";
+#else
 constexpr char kUserAgentEngine[] = "AppleWebKit/605.1.15";
+#endif
 constexpr char kBridgeSource[] = R"JS(
 (() => {
   "use strict";
@@ -248,32 +252,13 @@ std::string BuildRobloxAppUserAgentTokens() {
           ? std::string_view(configured_version)
           : std::string_view(kFallbackRobloxVersion);
   return "ROBLOX Android App " + std::string(version) +
-         " Phone Hybrid()  GooglePlayStore RobloxApp/" + std::string(version) +
+         " Tablet Hybrid()  GooglePlayStore RobloxApp/" + std::string(version) +
          " (GlobalDist; GooglePlayStore)";
 }
 
 std::string BuildRobloxAndroidUserAgent() {
   return "Mozilla/5.0 " + std::string(kUserAgentEngine) + " (KHTML, like Gecko)  " +
          BuildRobloxAppUserAgentTokens();
-}
-
-std::string BuildRobloxAppUserAgent(const AndroidDeviceInfo& device) {
-  std::string model = device.model.rfind(device.manufacturer, 0) == 0
-                          ? device.model
-                          : device.manufacturer + " " + device.model;
-  if (!model.empty() && model[0] >= 'a' && model[0] <= 'z') model[0] = static_cast<char>(model[0] - 'a' + 'A');
-  std::string clean;
-  for (std::size_t i = 0; i < model.size(); i++) {
-    const unsigned char c = static_cast<unsigned char>(model[i]);
-    if (c >= 0x80 && c < 0xc0) continue;
-    clean.push_back(c <= 31 || c >= 127 ? '_' : static_cast<char>(c));
-  }
-  char device_block[512];
-  std::snprintf(device_block, sizeof device_block, "(%lluMB; %dx%d; %dx%d; %dx%d; %s; %s)",
-                device.total_memory_mb, device.display_width, device.display_height, device.xdpi,
-                device.ydpi, device.width_dp, device.height_dp, clean.c_str(), device.release.c_str());
-  return "Mozilla/5.0 " + std::string(device_block) +
-         " AppleWebKit/537.36 (KHTML, like Gecko)  " + BuildRobloxAppUserAgentTokens();
 }
 
 bool IsBrowserLoginUrl(std::string_view url) {
@@ -289,6 +274,20 @@ bool IsBrowserLoginUrl(std::string_view url) {
        g_ascii_strcasecmp(path, "/login/") == 0);
   g_uri_unref(parsed);
   return browser_login;
+}
+
+bool IsRobloxChallengePage(std::string_view url) {
+  GUri* parsed = g_uri_parse(std::string(url).c_str(), G_URI_FLAGS_NONE, nullptr);
+  if (parsed == nullptr) return false;
+  const char* host = g_uri_get_host(parsed);
+  const char* path = g_uri_get_path(parsed);
+  const bool challenge =
+      EvaluateNavigationUri(std::string(url).c_str()).allowed && host != nullptr &&
+      (g_ascii_strcasecmp(host, "www.roblox.com") == 0 ||
+       g_ascii_strcasecmp(host, "roblox.com") == 0) && path != nullptr &&
+      g_str_has_prefix(path, "/challenge/");
+  g_uri_unref(parsed);
+  return challenge;
 }
 
 bool IsEssentialWebResource(const char* uri) {

@@ -316,23 +316,6 @@ TEST(WebViewHelperPolicyTest, UserAgentTracksValidatedPayloadVersion) {
   EXPECT_EQ(BuildRobloxAppUserAgentTokens(),
             "ROBLOX Android App 2.999.42 Tablet Hybrid()  GooglePlayStore "
             "RobloxApp/2.999.42 (GlobalDist; GooglePlayStore)");
-  AndroidDeviceInfo device;
-  device.total_memory_mb = 8191;
-  device.display_width = 2560;
-  device.display_height = 1440;
-  device.xdpi = device.ydpi = 160;
-  device.width_dp = 2560;
-  device.height_dp = 1440;
-  device.manufacturer = "Microsoft";
-  device.model = "Windows 11 PC";
-  device.release = "15";
-  EXPECT_EQ(BuildRobloxAppUserAgent(device),
-            "Mozilla/5.0 (8191MB; 2560x1440; 160x160; 2560x1440; Microsoft Windows 11 PC; 15) "
-            "AppleWebKit/537.36 (KHTML, like Gecko)  ROBLOX Android App 2.999.42 Tablet "
-            "Hybrid()  GooglePlayStore RobloxApp/2.999.42 (GlobalDist; GooglePlayStore)");
-  device.manufacturer = "google";
-  device.model = "google Pixel\x01 7";
-  EXPECT_NE(BuildRobloxAppUserAgent(device).find("; Google Pixel_ 7; 15)"), std::string::npos);
 }
 
 TEST(WebViewHelperPolicyTest, KeepsNativeUserAgentForVerificationRoutes) {
@@ -350,6 +333,22 @@ TEST(WebViewHelperPolicyTest, KeepsNativeUserAgentForVerificationRoutes) {
            "https://example.org/login", "http://www.roblox.com/login",
        }) {
     EXPECT_FALSE(IsBrowserLoginUrl(url)) << url;
+  }
+}
+
+TEST(WebViewHelperPolicyTest, OpensChallengePagesAsTheApp) {
+  for (const char* url : {
+           "https://www.roblox.com/challenge/cdn/hybrid?generic-challenge-type=captchav2&app-type=android",
+           "https://roblox.com/challenge/cdn/hybrid",
+       }) {
+    EXPECT_TRUE(IsRobloxChallengePage(url)) << url;
+  }
+  for (const char* url : {
+           "https://www.roblox.com/login", "https://www.roblox.com/games/606849621",
+           "https://www.roblox.com/challengex", "http://www.roblox.com/challenge/cdn/hybrid",
+           "https://apis.roblox.com/challenge/cdn/hybrid", "https://example.org/challenge/cdn/hybrid",
+       }) {
+    EXPECT_FALSE(IsRobloxChallengePage(url)) << url;
   }
 }
 

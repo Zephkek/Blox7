@@ -42,20 +42,8 @@ const char* AndroidBridgeSource();
 std::string BuildRobloxAppUserAgentTokens();
 std::string BuildRobloxAndroidUserAgent();
 
-struct AndroidDeviceInfo {
-  unsigned long long total_memory_mb = 0;
-  int display_width = 0;
-  int display_height = 0;
-  int xdpi = 0;
-  int ydpi = 0;
-  int width_dp = 0;
-  int height_dp = 0;
-  std::string manufacturer;
-  std::string model;
-  std::string release;
-};
-std::string BuildRobloxAppUserAgent(const AndroidDeviceInfo& device);
 bool IsBrowserLoginUrl(std::string_view url);
+bool IsRobloxChallengePage(std::string_view url);
 bool IsEssentialWebResource(const char* uri);
 std::string BoundedLogToken(const char* value, std::string_view fallback);
 UriPolicyResult EvaluateNavigationUri(const char* uri);

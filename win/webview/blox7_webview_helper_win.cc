@@ -2,7 +2,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <commctrl.h>
 #include <shellapi.h>
 
 #include <algorithm>
@@ -57,256 +56,6 @@ constexpr char kAndroidBridge[] = R"JS(
       value: bridge, enumerable: true, writable: false, configurable: false
     });
   } catch (_) {}
-})();
-)JS";
-
-// pages see the phone the app runs on, set up at document start in every frame before any page script
-constexpr char kPhoneIdentity[] = R"JS(
-(() => {
-  "use strict";
-  const define = (object, name, value) => {
-    try { Object.defineProperty(object, name, { get: () => value, configurable: true }); return true; }
-    catch (_) { return false; }
-  };
-  try {
-    const chromeObject = window.chrome;
-    if (chromeObject && chromeObject.webview !== undefined) {
-      try { delete chromeObject.webview; } catch (_) {}
-      if (chromeObject.webview !== undefined) {
-        try {
-          const hiddenChrome = new Proxy(chromeObject, {
-            get(target, property, receiver) {
-              return property === "webview" ? undefined : Reflect.get(target, property, receiver);
-            },
-            has(target, property) {
-              return property === "webview" ? false : Reflect.has(target, property);
-            },
-            getOwnPropertyDescriptor(target, property) {
-              return property === "webview" ? undefined : Reflect.getOwnPropertyDescriptor(target, property);
-            },
-            ownKeys(target) {
-              return Reflect.ownKeys(target).filter((key) => key !== "webview");
-            }
-          });
-          Object.defineProperty(window, "chrome", { value: hiddenChrome, configurable: true, writable: true });
-        } catch (_) {}
-      }
-    }
-  } catch (_) {}
-  try {
-    Object.defineProperty(Navigator.prototype, "platform", { get: () => "Linux armv81", configurable: true });
-  } catch (_) {
-    try { Object.defineProperty(navigator, "platform", { get: () => "Linux armv81", configurable: true }); } catch (_) {}
-  }
-  define(navigator, "hardwareConcurrency", 8);
-  define(navigator, "deviceMemory", 8);
-  define(navigator, "maxTouchPoints", 5);
-  define(navigator, "webdriver", false);
-  define(navigator, "pdfViewerEnabled", false);
-  define(navigator, "vendorSub", "");
-  define(navigator, "productSub", "20030107");
-  const emptyPlugins = { length: 0, item: () => null, namedItem: () => null, refresh: () => {} };
-  try { Object.defineProperty(navigator, "plugins", { get: () => emptyPlugins, configurable: true }); } catch (_) {}
-  try { Object.defineProperty(navigator, "mimeTypes", { get: () => emptyPlugins, configurable: true }); } catch (_) {}
-  try {
-    const connection = {};
-    Object.defineProperties(connection, {
-      effectiveType: { get: () => "4g", enumerable: true },
-      rtt: { get: () => 50, enumerable: true },
-      downlink: { get: () => 1.45, enumerable: true },
-      saveData: { get: () => false, enumerable: true },
-      type: { get: () => "wifi", enumerable: true },
-      onchange: { value: null, writable: true, enumerable: true }
-    });
-    Object.defineProperty(navigator, "connection", { get: () => connection, configurable: true });
-  } catch (_) {}
-  try {
-    Object.defineProperty(navigator, "languages", {
-      get: () => ["en-US", "en-GB", "ar-TN", "ar", "en", "fr", "ru"], configurable: true
-    });
-  } catch (_) {}
-  define(window, "outerWidth", 384);
-  define(window, "outerHeight", 823);
-  define(window, "screenX", 0);
-  define(window, "screenY", 0);
-  define(window, "orientation", 0);
-  define(window.screen, "availTop", 0);
-  define(window.screen, "availLeft", 0);
-  define(window.screen, "orientation", { angle: 0, type: "portrait-primary", onchange: null });
-  if (window.visualViewport) {
-    define(window.visualViewport, "width", 384);
-    define(window.visualViewport, "height", 823);
-    define(window.visualViewport, "scale", 1);
-  }
-  if (!("ontouchstart" in window)) {
-    try { Object.defineProperty(window, "ontouchstart", { value: null, configurable: true, writable: true }); } catch (_) {}
-  }
-  try { if (window.performance && "memory" in window.performance) delete window.performance.memory; } catch (_) {}
-  const patchedWebGL = new WeakSet();
-  const patchWebGL = (prototype) => {
-    if (!prototype || patchedWebGL.has(prototype)) return;
-    const original = prototype.getParameter;
-    if (typeof original !== "function") return;
-    patchedWebGL.add(prototype);
-    // A Proxy around the native function keeps Function.prototype.toString reporting native code;
-    // assigning a plain wrapper is itself a fingerprint.
-    prototype.getParameter = new Proxy(original, {
-      apply(target, self, args) {
-        switch (args[0]) {
-          case 0x1F00: return "WebKit";
-          case 0x1F01: return "WebKit WebGL";
-          case 0x9245: return "Google Inc. (Samsung Electronics Co., Ltd.)";
-          case 0x9246: return "ANGLE (Samsung Electronics Co. Ltd., ANGLE ((Samsung Xclipse 920) on Vulkan 1.3.279), OpenGL ES 3.2)";
-          default: return Reflect.apply(target, self, args);
-        }
-      }
-    });
-  };
-  try { patchWebGL(window.WebGLRenderingContext && window.WebGLRenderingContext.prototype); } catch (_) {}
-  try { patchWebGL(window.WebGL2RenderingContext && window.WebGL2RenderingContext.prototype); } catch (_) {}
-  try {
-    const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-    const hover = window.matchMedia && window.matchMedia("(hover: hover)").matches;
-    if (window.matchMedia && (!coarse || hover)) {
-      const originalMatchMedia = window.matchMedia.bind(window);
-      const fakeList = (query, matches) => ({
-        media: query, matches, onchange: null,
-        addListener: () => {}, removeListener: () => {},
-        addEventListener: () => {}, removeEventListener: () => {},
-        dispatchEvent: () => false
-      });
-      window.matchMedia = function (query) {
-        const text = String(query);
-        if (text.includes("pointer") || text.includes("hover")) {
-          let matches = true;
-          if (text.includes("(pointer: fine)")) matches = false;
-          if (text.includes("(hover: hover)")) matches = false;
-          return fakeList(text, matches);
-        }
-        return originalMatchMedia(query);
-      };
-    }
-  } catch (_) {}
-  // Android WebView has no mouse cursor; HUMAN's challenge draws its own touch indicator. Hide
-  // WebView2's arrow everywhere in the page so the touch UI never carries a desktop pointer. The
-  // helper's window guard below also swallows hover moves; this covers frames and cursor changes.
-  const hideCursor = () => {
-    try {
-      const style = document.createElement("style");
-      style.textContent = "*,*::before,*::after{cursor:none!important}";
-      (document.head || document.documentElement).appendChild(style);
-    } catch (_) {}
-  };
-  if (document.head) hideCursor();
-  else document.addEventListener("DOMContentLoaded", hideCursor, { once: true });
-})();
-)JS";
-
-// opt-in diagnostic, only with BLOX7_WEBVIEW_IDENTITY_PROBE
-constexpr char kIdentityProbe[] = R"JS(
-(() => {
-  "use strict";
-  if (!window.chrome || !window.chrome.webview) return;
-  const webview = window.chrome.webview;
-  const probe = () => {
-    try {
-      const canvas = document.createElement("canvas");
-      const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-      const gl2 = document.createElement("canvas").getContext("webgl2");
-      const debug = gl && gl.getExtension("WEBGL_debug_renderer_info");
-      const debug2 = gl2 && gl2.getExtension("WEBGL_debug_renderer_info");
-      const chromeObject = window.chrome;
-      const fontNames = ["sans-serif-thin", "ARNO PRO", "Agency FB", "Arabic Typesetting", "Arial Unicode MS", "AvantGarde Bk BT", "BankGothic Md BT", "Batang", "Bitstream Vera Sans Mono", "Calibri", "Century", "Century Gothic", "Clarendon", "EUROSTILE", "Franklin Gothic", "Futura Bk BT", "Futura Md BT", "GOTHAM", "Gill Sans", "HELV", "Haettenschweiler", "Helvetica Neue", "Humanst521 BT", "Leelawadee", "Letter Gothic", "Levenim MT", "Lucida Bright", "Lucida Sans", "Menlo", "MS Mincho", "MS Outlook", "MS Reference Specialty", "MS UI Gothic", "MT Extra", "MYRIAD PRO", "Marlett", "Meiryo UI", "Microsoft Uighur", "Minion Pro", "Monotype Corsiva", "PMingLiU", "Pristina", "SCRIPTINA", "Segoe UI Light", "Serifa", "SimHei", "Small Fonts", "Staccato222 BT", "TRAJAN PRO", "Univers CE 55 Medium", "Vrinda", "ZWAdobeF"];
-      const fontGenerics = ["monospace", "sans-serif", "serif"];
-      const fontBody = document.body || document.documentElement;
-      const addFontSpan = (family) => {
-        const span = document.createElement("span");
-        span.textContent = "mmMwWLliI0O&1";
-        span.style.cssText = "position:absolute;top:0;left:0;font-size:48px;font-family:" + family;
-        fontBody.appendChild(span);
-        return span;
-      };
-      const fontBase = {};
-      const fontBaseSpans = fontGenerics.map(addFontSpan);
-      fontGenerics.forEach((g, i) => { fontBase[g] = fontBaseSpans[i].offsetWidth; });
-      const fontsPresent = [];
-      for (const name of fontNames) {
-        const spans = fontGenerics.map((g) => addFontSpan('"' + name + '",' + g));
-        if (spans.some((s, i) => s.offsetWidth !== fontBase[fontGenerics[i]])) fontsPresent.push(name);
-        spans.forEach((s) => s.remove());
-      }
-      fontBaseSpans.forEach((s) => s.remove());
-      const glParams = {};
-      if (gl) {
-        for (const name of ["MAX_TEXTURE_SIZE", "MAX_VERTEX_UNIFORM_VECTORS", "MAX_TEXTURE_IMAGE_UNITS",
-                            "MAX_VERTEX_TEXTURE_IMAGE_UNITS", "MAX_COMBINED_TEXTURE_IMAGE_UNITS",
-                            "MAX_RENDERBUFFER_SIZE", "ALIASED_LINE_WIDTH_RANGE", "ALIASED_POINT_SIZE_RANGE",
-                            "MAX_SAMPLES", "MAX_3D_TEXTURE_SIZE", "MAX_ARRAY_TEXTURE_LAYERS"]) {
-          const pname = gl[name];
-          if (typeof pname !== "number") continue;
-          try { glParams[name] = gl.getParameter(pname); } catch (_) {}
-        }
-      }
-      const message = {
-        ua: navigator.userAgent.slice(0, 180),
-        appVersion: navigator.appVersion.slice(0, 180),
-        platform: navigator.platform,
-        touch: navigator.maxTouchPoints,
-        ontouch: "ontouchstart" in window,
-        coarse: window.matchMedia("(pointer: coarse)").matches,
-        hover: window.matchMedia("(hover: hover)").matches,
-        dark: window.matchMedia("(prefers-color-scheme: dark)").matches,
-        media: (() => {
-          const out = {};
-          for (const q of ["(any-hover: hover)", "(any-pointer: coarse)", "(any-pointer: fine)", "(dynamic-range: high)",
-                           "(forced-colors: active)", "(hover: hover)", "(hover: none)", "(pointer: coarse)",
-                           "(pointer: fine)", "(pointer: none)", "(prefers-color-scheme: dark)",
-                           "(prefers-color-scheme: light)", "(prefers-reduced-motion: reduce)"]) {
-            try { out[q] = window.matchMedia(q).matches; } catch (_) {}
-          }
-          try { const m = window.matchMedia("(prefers-color-scheme: dark)"); m.addEventListener("change", () => {}); out.listener = "ok"; }
-          catch (e) { out.listener = String(e); }
-          return out;
-        })(),
-        width: window.innerWidth, height: window.innerHeight,
-        outerWidth: window.outerWidth, outerHeight: window.outerHeight,
-        screen: [screen.width, screen.height, screen.availWidth, screen.availHeight],
-        dpr: window.devicePixelRatio,
-        hardware: navigator.hardwareConcurrency, memory: navigator.deviceMemory,
-        webdriver: navigator.webdriver, plugins: navigator.plugins.length,
-        pdf: navigator.pdfViewerEnabled,
-        connection: navigator.connection && navigator.connection.effectiveType,
-        languages: navigator.languages,
-        timezone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { return null; } })(),
-        chromeKeys: (() => { try { return Object.keys(chromeObject || {}); } catch (_) { return []; } })(),
-        bluetooth: !!navigator.bluetooth, getBattery: !!navigator.getBattery,
-        chromeWebview: !!(chromeObject && chromeObject.webview),
-        chromeWebviewOwn: !!(chromeObject && Object.getOwnPropertyNames(chromeObject).includes("webview")),
-        glVendor: gl && debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : null,
-        glRenderer: gl && debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : null,
-        gl2Vendor: gl2 && debug2 ? gl2.getParameter(debug2.UNMASKED_VENDOR_WEBGL) : null,
-        gl2Renderer: gl2 && debug2 ? gl2.getParameter(debug2.UNMASKED_RENDERER_WEBGL) : null,
-        glVersion: gl ? gl.getParameter(gl.VERSION) : null,
-        glShading: gl ? gl.getParameter(gl.SHADING_LANGUAGE_VERSION) : null,
-        glExtensions: gl ? (gl.getSupportedExtensions() || []).slice(0, 50) : null,
-        glParams,
-        fontsPresent,
-        uad: navigator.userAgentData ? {
-          mobile: navigator.userAgentData.mobile,
-          platform: navigator.userAgentData.platform,
-          brands: navigator.userAgentData.brands
-        } : null
-      };
-      webview.postMessage({ handler: "__blox7_identity_probe", message });
-      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
-        navigator.userAgentData.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion", "fullVersionList"])
-          .then((high) => webview.postMessage({ handler: "__blox7_identity_probe", message: { high } }))
-          .catch(() => {});
-      }
-    } catch (_) {}
-  };
-  if (document.readyState === "complete") setTimeout(probe, 0);
-  else window.addEventListener("load", probe, { once: true });
 })();
 )JS";
 
@@ -883,7 +632,8 @@ void TraceNetwork(ICoreWebView2* web_view) {
   });
   TraceDevToolsEvent(web_view, L"Network.loadingFinished", [](ICoreWebView2* view, const nlohmann::json& p) {
     const std::string id = p.value("requestId", std::string());
-    const nlohmann::json known = g_trace.requests[id];
+    const auto found = g_trace.requests.find(id);
+    const nlohmann::json known = found != g_trace.requests.end() ? found->second : nlohmann::json::object();
     if (SkipBody(known.value("mime", std::string())) || p.value("encodedDataLength", 0.0) > 64.0 * 1024 * 1024) return;
     const std::wstring query = Wide(nlohmann::json{{"requestId", id}}.dump());
     view->CallDevToolsProtocolMethod(
@@ -1812,9 +1562,6 @@ void OnBridgeMessage(Surface* surface, ICoreWebView2WebMessageReceivedEventArgs*
       return;
     }
     command = value.get<std::string>();
-  } else if (handler == "__blox7_identity_probe") {
-    Log("identity probe: %s", value.dump().c_str());
-    return;
   } else {
     return;
   }
@@ -1910,8 +1657,6 @@ LRESULT CALLBACK SurfaceProc(HWND window, UINT message, WPARAM wparam, LPARAM lp
   return DefWindowProcW(window, message, wparam, lparam);
 }
 
-bool IsDesktopProfile();
-
 Surface* CreateSurfaceWindow(bool primary, HWND owner) {
   auto* surface = new Surface;
   surface->primary = primary;
@@ -1924,14 +1669,10 @@ Surface* CreateSurfaceWindow(bool primary, HWND owner) {
   MONITORINFO monitor{sizeof monitor};
   GetMonitorInfoW(MonitorFromWindow(over_game ? g_app.owner : nullptr, MONITOR_DEFAULTTOPRIMARY), &monitor);
   const RECT& work = monitor.rcWork;
-  // the SM-S908B's css viewport, 384x823 dp
-  RECT rect = {0, 0, MulDiv(384, dpi, 96), MulDiv(823, dpi, 96)};
-  if (IsDesktopProfile()) {
-    const int room_w = over_game ? game.right - game.left : work.right - work.left;
-    const int room_h = over_game ? game.bottom - game.top : work.bottom - work.top;
-    rect.right = std::max(MulDiv(960, dpi, 96), room_w * 4 / 5);
-    rect.bottom = std::max(MulDiv(640, dpi, 96), room_h * 4 / 5);
-  }
+  const int room_w = over_game ? game.right - game.left : work.right - work.left;
+  const int room_h = over_game ? game.bottom - game.top : work.bottom - work.top;
+  RECT rect = {0, 0, std::max(MulDiv(960, dpi, 96), room_w * 4 / 5),
+               std::max(MulDiv(640, dpi, 96), room_h * 4 / 5)};
   AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
   int width = std::min<int>(rect.right - rect.left, work.right - work.left);
   int height = std::min<int>(rect.bottom - rect.top, work.bottom - work.top);
@@ -2103,6 +1844,7 @@ void WatchNetwork(ICoreWebView2* web_view) {
     announced = true;
     Log("network probe: HUMAN collector and /v2/captcha requests enabled");
   }
+  web_view->CallDevToolsProtocolMethod(L"Network.enable", L"{}", nullptr);
   ICoreWebView2DevToolsProtocolEventReceiver* receiver = nullptr;
   if (SUCCEEDED(web_view->GetDevToolsProtocolEventReceiver(L"Network.requestWillBeSent", &receiver)) &&
       receiver != nullptr) {
@@ -2189,44 +1931,6 @@ void WatchNetwork(ICoreWebView2* web_view) {
   }
 }
 
-void ApplyBrowserIdentity(ICoreWebView2* web_view);
-void ApplyTouchEmulation(ICoreWebView2* web_view);
-bool IsDesktopProfile();
-blox7::webview::AndroidDeviceInfo RuntimeAndroidDevice();
-std::string DeviceGeometryScript(const blox7::webview::AndroidDeviceInfo& device);
-std::string DeviceFingerprintScript();
-bool FingerprintEnabled();
-
-// a phone has no hover, and webview2 still makes pointer events out of hover moves, so they stop here
-constexpr UINT_PTR kWebViewInputSubclass = 1;
-
-LRESULT CALLBACK WebViewInputProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
-                                  UINT_PTR subclass_id, DWORD_PTR) {
-  if (message == WM_MOUSEMOVE) {
-    constexpr WPARAM kButtons = MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2;
-    if ((wparam & kButtons) == 0) return 0;
-  } else if (message == WM_SETCURSOR) {
-    SetCursor(nullptr);
-    return TRUE;
-  } else if (message == WM_NCDESTROY) {
-    RemoveWindowSubclass(window, WebViewInputProc, subclass_id);
-  }
-  return DefSubclassProc(window, message, wparam, lparam);
-}
-
-BOOL CALLBACK SubclassWebViewChild(HWND child, LPARAM) {
-  wchar_t name[128] = {};
-  GetClassNameW(child, name, 128);
-  if (wcsstr(name, L"Chrome_WidgetWin") == nullptr && wcsstr(name, L"WebView2") == nullptr) return TRUE;
-  const BOOL installed = SetWindowSubclass(child, WebViewInputProc, kWebViewInputSubclass, 0);
-  Log("webview input: %ls hover guard %s", name, installed ? "on" : "unavailable");
-  return TRUE;
-}
-
-void GuardWebViewInput(Surface* surface) {
-  if (surface != nullptr && surface->window != nullptr) EnumChildWindows(surface->window, SubclassWebViewChild, 0);
-}
-
 std::string LinkScheme(const std::string& uri) {
   std::string scheme = uri.substr(0, std::min(uri.find(':'), std::size_t{32}));
   for (char& c : scheme) {
@@ -2268,33 +1972,16 @@ void ConfigureWebView(Surface* surface) {
     settings->Release();
   }
   WatchConsole(web_view);
-  if (IsDesktopProfile()) {
-    web_view->CallDevToolsProtocolMethod(L"Network.enable", L"{}", nullptr);
-  } else {
-    ApplyBrowserIdentity(web_view);
-  }
   WatchNetwork(web_view);
-  if (!IsDesktopProfile()) {
+  if (g_app.app_user_agent) {
     const std::wstring bridge = Wide(kAndroidBridge);
     web_view->AddScriptToExecuteOnDocumentCreated(bridge.c_str(), nullptr);
-    if (getenv("BLOX7_WEBVIEW_IDENTITY_PROBE") != nullptr) {
-      const std::wstring probe = Wide(kIdentityProbe);
-      web_view->AddScriptToExecuteOnDocumentCreated(probe.c_str(), nullptr);
-    }
-    const std::wstring identity = Wide(kPhoneIdentity);
-    web_view->AddScriptToExecuteOnDocumentCreated(identity.c_str(), nullptr);
-    const std::wstring geometry = Wide(DeviceGeometryScript(RuntimeAndroidDevice()));
-    web_view->AddScriptToExecuteOnDocumentCreated(geometry.c_str(), nullptr);
-    const std::string fingerprint = FingerprintEnabled() ? DeviceFingerprintScript() : std::string();
-    if (!fingerprint.empty()) {
-      web_view->AddScriptToExecuteOnDocumentCreated(Wide(fingerprint).c_str(), nullptr);
-    }
   }
 
   EventRegistrationToken token;
   web_view->add_NavigationStarting(
       MakeHandler<ICoreWebView2NavigationStartingEventHandler, ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*>(
-          [](ICoreWebView2* view, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+          [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
             LPWSTR uri = nullptr;
             args->get_Uri(&uri);
             std::string target = TakeString(uri);
@@ -2306,8 +1993,6 @@ void ConfigureWebView(Surface* surface) {
               } else {
                 Log("navigation blocked scheme=%s host=%s", policy.scheme.c_str(), policy.host.c_str());
               }
-            } else if (!IsDesktopProfile()) {
-              ApplyTouchEmulation(view);
             }
             return S_OK;
           }),
@@ -2346,10 +2031,6 @@ void ConfigureWebView(Surface* surface) {
             }
             UpdateDomainTitle(surface);
             RequestRobloxCookie();
-            if (!IsDesktopProfile()) {
-              ApplyTouchEmulation(view);
-              GuardWebViewInput(surface);
-            }
             return S_OK;
           }),
       &token);
@@ -2447,7 +2128,6 @@ void AttachWebView(Surface* surface, std::function<void(Surface*)> ready) {
                     ConfigureWebView(surface);
                     ResizeToWindow(surface);
                     controller->put_IsVisible(TRUE);
-                    if (!IsDesktopProfile()) GuardWebViewInput(surface);
                     FocusPage(surface);
                     ready(surface);
                     return S_OK;
@@ -2472,14 +2152,18 @@ bool RuntimeInstalled() {
 }
 
 // 7, 8 and 8.1 stop at webview2 109, so those get pointed at the update catalog
-void ExplainMissingRuntime() {
+OSVERSIONINFOW WindowsVersion() {
   using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
   OSVERSIONINFOW os{};
   os.dwOSVersionInfoSize = sizeof os;
   if (const auto get = reinterpret_cast<RtlGetVersionFn>(
           reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"))))
     get(&os);
-  const bool old_windows = os.dwMajorVersion < 10;
+  return os;
+}
+
+void ExplainMissingRuntime() {
+  const bool old_windows = WindowsVersion().dwMajorVersion < 10;
   const std::wstring text = std::wstring(L"Signing in needs Microsoft Edge WebView2, and it isn't installed.\n\n") +
                             (old_windows ? L"This version of Windows needs WebView2 Runtime 109, the last one made for it.\n\n"
                                          : L"") +
@@ -2503,378 +2187,9 @@ bool IsUsableUserAgent(const std::string& agent) {
   return !agent.empty() && agent.size() <= 1024 && !HasControlBytes(agent) && agent.find('"') == std::string::npos;
 }
 
-std::string EnvironmentOr(const char* name, const char* fallback) {
-  const char* value = getenv(name);
-  return value != nullptr && *value != '\0' ? std::string(value) : std::string(fallback);
-}
-
 bool IsDesktopProfile() {
   const char* device_class = getenv("BLOX7_DEVICE_CLASS");
   return device_class != nullptr && strcmp(device_class, "pc") == 0;
-}
-
-bool FingerprintEnabled() {
-  const char* value = getenv("BLOX7_WEBVIEW_FINGERPRINT");
-  return value == nullptr || strcmp(value, "0") != 0;
-}
-
-int EnvironmentInt(const char* name, int fallback) {
-  const char* value = getenv(name);
-  if (value == nullptr || *value == '\0') return fallback;
-  char* end = nullptr;
-  const long parsed = strtol(value, &end, 10);
-  return end != value && *end == '\0' && parsed > 0 && parsed <= 100000 ? static_cast<int>(parsed) : fallback;
-}
-
-unsigned long long EnvironmentMemory(const char* name, unsigned long long fallback) {
-  const char* value = getenv(name);
-  if (value == nullptr || *value == '\0') return fallback;
-  char* end = nullptr;
-  const unsigned long long parsed = strtoull(value, &end, 10);
-  return end != value && *end == '\0' && parsed > 0 ? parsed : fallback;
-}
-
-blox7::webview::AndroidDeviceInfo RuntimeAndroidDevice() {
-  blox7::webview::AndroidDeviceInfo device;
-  device.total_memory_mb = EnvironmentMemory("BLOX7_DEVICE_TOTAL_MEMORY_MB", 10515);
-  device.display_width = EnvironmentInt("BLOX7_DEVICE_DISPLAY_WIDTH", 1440);
-  device.display_height = EnvironmentInt("BLOX7_DEVICE_DISPLAY_HEIGHT", 3088);
-  device.xdpi = EnvironmentInt("BLOX7_DEVICE_XDPI", 501);
-  device.ydpi = EnvironmentInt("BLOX7_DEVICE_YDPI", 499);
-  device.width_dp = EnvironmentInt("BLOX7_DEVICE_WIDTH_DP", 384);
-  device.height_dp = EnvironmentInt("BLOX7_DEVICE_HEIGHT_DP", 823);
-  device.manufacturer = EnvironmentOr("BLOX7_DEVICE_MANUFACTURER", "samsung");
-  device.model = EnvironmentOr("BLOX7_DEVICE_MODEL", "SM-S908B");
-  device.release = EnvironmentOr("BLOX7_DEVICE_RELEASE", "16");
-  return device;
-}
-
-std::string DeviceGeometryScript(const blox7::webview::AndroidDeviceInfo& device) {
-  const int width = device.width_dp > 0 ? device.width_dp : 384;
-  const int height = device.height_dp > 0 ? device.height_dp : 823;
-  const double dpr = device.width_dp > 0 && device.display_width > 0
-                         ? static_cast<double>(device.display_width) / device.width_dp
-                         : 3.75;
-  char script[2048];
-  snprintf(script, sizeof script,
-           "(()=>{\"use strict\";const define=(o,n,v)=>{try{Object.defineProperty(o,n,{get:()=>v,configurable:true});return true;}catch(_){return false;}};"
-           "const w=%d,h=%d,dpr=%.6f;"
-           "define(window,'outerWidth',w);define(window,'outerHeight',h);"
-           "define(window.screen,'width',w);define(window.screen,'height',h);"
-           "define(window.screen,'availWidth',w);define(window.screen,'availHeight',h);"
-           "define(window.screen,'availTop',0);define(window.screen,'availLeft',0);"
-           "if(window.visualViewport){define(window.visualViewport,'width',w);define(window.visualViewport,'height',h);define(window.visualViewport,'scale',1);}"
-           "})();",
-           width, height, dpr);
-  return script;
-}
-
-std::string LoadDeviceFingerprintJson() {
-  static const std::string profile = [] {
-    wchar_t path[MAX_PATH];
-    if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) return std::string();
-    std::wstring root(path);
-    for (int i = 0; i < 3; i++) {
-      const std::size_t slash = root.find_last_of(L'\\');
-      if (slash == std::wstring::npos) return std::string();
-      root.resize(slash);
-    }
-    FILE* file = _wfopen((root + L"\\share\\blox7\\metadata\\device_fingerprints.json").c_str(), L"rb");
-    if (file == nullptr) return std::string();
-    std::string text;
-    char buffer[4096];
-    for (std::size_t n; (n = fread(buffer, 1, sizeof buffer, file)) > 0;) text.append(buffer, n);
-    fclose(file);
-    const nlohmann::json all = nlohmann::json::parse(text, nullptr, false);
-    if (!all.is_object()) return std::string();
-    const char* name = getenv("BLOX7_DEVICE_PROFILE");
-    if (name == nullptr || *name == '\0' || !all.contains(name)) return std::string();
-    return all[name].dump();
-  }();
-  return profile;
-}
-
-std::string DeviceFingerprintScript() {
-  const std::string profile = LoadDeviceFingerprintJson();
-  if (profile.empty()) return {};
-  return std::string(R"JS(
-(() => {
-  "use strict";
-  const p = )JS") + profile + R"JS(;
-  if (!p) return;
-  const define = (object, name, value) => {
-    try { Object.defineProperty(object, name, { get: () => value, configurable: true }); return true; }
-    catch (_) { return false; }
-  };
-  const nav = p.navigator || {};
-  for (const [key, value] of Object.entries({
-    hardwareConcurrency: nav.hardwareConcurrency, deviceMemory: nav.deviceMemory,
-    maxTouchPoints: nav.maxTouchPoints, pdfViewerEnabled: nav.pdfViewerEnabled,
-    language: nav.language, languages: nav.languages, platform: nav.platform,
-    vendor: nav.vendor, productSub: nav.productSub, appName: nav.appName,
-    appVersion: nav.appVersion, doNotTrack: nav.doNotTrack
-  })) if (value !== undefined && value !== null) define(navigator, key, value);
-  // The phone's timezone, not the Windows host's: both APIs the challenged pages read.
-  if (p.timezone) {
-    try {
-      const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
-      Intl.DateTimeFormat.prototype.resolvedOptions = new Proxy(resolvedOptions, {
-        apply(target, self, args) {
-          const options = Reflect.apply(target, self, args);
-          options.timeZone = p.timezone;
-          return options;
-        }
-      });
-    } catch (_) {}
-  }
-  if (typeof p.timezone_offset_minutes === "number") {
-    try {
-      Date.prototype.getTimezoneOffset = new Proxy(Date.prototype.getTimezoneOffset,
-        { apply() { return p.timezone_offset_minutes; } });
-    } catch (_) {}
-  }
-  // Android Chrome exposes only loadTimes and csi; WebView2's other chrome keys are desktop tells.
-  if (window.chrome && p.chrome && Array.isArray(p.chrome.keys)) {
-    try {
-      const allowed = new Set(p.chrome.keys);
-      const originalChrome = window.chrome;
-      const shapedChrome = new Proxy(originalChrome, {
-        get(target, property, receiver) {
-          if (property === "webview" || !allowed.has(property)) return undefined;
-          return Reflect.get(target, property, receiver);
-        },
-        has(target, property) { return property !== "webview" && allowed.has(property); },
-        ownKeys() { return p.chrome.keys.slice(); },
-        getOwnPropertyDescriptor(target, property) {
-          if (property === "webview" || !allowed.has(property)) return undefined;
-          return Reflect.getOwnPropertyDescriptor(target, property);
-        }
-      });
-      Object.defineProperty(window, "chrome", { value: shapedChrome, configurable: true, writable: true });
-    } catch (_) {}
-  }
-  const connectionInfo = (p.navigator && p.navigator.connection) || null;
-  if (connectionInfo) {
-    try {
-      const connection = { type: "wifi", onchange: null };
-      for (const key of ["effectiveType", "rtt", "downlink", "saveData"]) {
-        if (connectionInfo[key] !== undefined) {
-          Object.defineProperty(connection, key, { get: () => connectionInfo[key], enumerable: true });
-        }
-      }
-      Object.defineProperty(navigator, "connection", { get: () => connection, configurable: true });
-    } catch (_) {}
-  }
-  if (p.navigator && p.navigator.bluetooth && !navigator.bluetooth) {
-    try {
-      const bluetooth = {
-        getAvailability: () => Promise.resolve(false),
-        requestDevice: () => Promise.reject(new DOMException("requestDevice is not available", "NotFoundError")),
-        addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false
-      };
-      Object.defineProperty(navigator, "bluetooth", { get: () => bluetooth, configurable: true });
-    } catch (_) {}
-  }
-  if (p.navigator && p.navigator.getBattery && !navigator.getBattery) {
-    try {
-      const level = p.navigator.battery && typeof p.navigator.battery.level === "number"
-                        ? p.navigator.battery.level : 1;
-      const charging = !p.navigator.battery || p.navigator.battery.charging !== false;
-      const manager = {
-        charging, level, chargingTime: 0, dischargingTime: Infinity,
-        onchargingchange: null, onchargingtimechange: null, ondischargingtimechange: null, onlevelchange: null,
-        addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false
-      };
-      Object.defineProperty(navigator, "getBattery",
-        { value: () => Promise.resolve(manager), configurable: true, writable: true });
-    } catch (_) {}
-  }
-  // Android's empty PluginArray/MimeTypeArray are real interface objects, not plain objects. The
-  // identity script's own properties are removed so the prototype's native-shaped getters apply.
-  try { delete navigator.plugins; delete navigator.mimeTypes; } catch (_) {}
-  const emptyArray = (prototype) => {
-    if (!prototype) return null;
-    const array = Object.create(prototype);
-    Object.defineProperties(array, {
-      length: { value: 0 },
-      item: { value: () => null },
-      namedItem: { value: () => null },
-      refresh: { value: () => {} }
-    });
-    return array;
-  };
-  try {
-    if (window.PluginArray) Object.defineProperty(Navigator.prototype, "plugins",
-      { get: () => emptyArray(PluginArray.prototype), configurable: true });
-    if (window.MimeTypeArray) Object.defineProperty(Navigator.prototype, "mimeTypes",
-      { get: () => emptyArray(MimeTypeArray.prototype), configurable: true });
-  } catch (_) {}
-  for (const prototype of [window.Document && Document.prototype, window.Element && Element.prototype,
-                           window.HTMLElement && HTMLElement.prototype]) {
-    if (!prototype) continue;
-    for (const name of ["ontouchstart", "ontouchmove", "ontouchend", "ontouchcancel", "ontouchforcechange"]) {
-      if (name in prototype) continue;
-      try { Object.defineProperty(prototype, name, { value: null, writable: true, configurable: true }); } catch (_) {}
-    }
-  }
-  // Android has almost none of the fonts in the browser font probes; the host Windows fonts must
-  // measure like the generic fallback. The getter is a Proxy around the native one, so its toString
-  // stays native, and a hidden family's width/height comes from the same text in the generic family.
-  const hiddenFonts = new Set((p.fonts && p.fonts.hidden) || []);
-  if (hiddenFonts.size && window.HTMLElement) {
-    try {
-      const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
-      const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-      const measurements = new Map();
-      const genericMetric = (element, generic, height) => {
-        const size = (element.style && element.style.fontSize) || "48px";
-        const text = element.textContent || "mmMwWLliI0O&1";
-        const key = generic + "|" + size + "|" + height + "|" + text;
-        if (measurements.has(key)) return measurements.get(key);
-        const probe = document.createElement("span");
-        probe.textContent = text;
-        probe.style.cssText = "position:absolute;top:0;left:0;visibility:hidden;font-size:" + size +
-                              ";font-family:" + generic;
-        (document.body || document.documentElement).appendChild(probe);
-        const value = height ? heightDescriptor.get.call(probe) : widthDescriptor.get.call(probe);
-        probe.remove();
-        measurements.set(key, value);
-        return value;
-      };
-      const wrapMetric = (descriptor, height) => new Proxy(descriptor.get, {
-        apply(target, self) {
-          try {
-            const family = self.style && self.style.fontFamily;
-            if (family) {
-              for (const name of hiddenFonts) {
-                if (family.indexOf(name) === -1) continue;
-                const match = family.match(/(monospace|sans-serif|serif)\s*$/i);
-                if (match) return genericMetric(self, match[1].toLowerCase(), height);
-              }
-            }
-          } catch (_) {}
-          return Reflect.apply(target, self, []);
-        }
-      });
-      Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-        get: wrapMetric(widthDescriptor, false), configurable: widthDescriptor.configurable,
-        enumerable: widthDescriptor.enumerable
-      });
-      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-        get: wrapMetric(heightDescriptor, true), configurable: heightDescriptor.configurable,
-        enumerable: heightDescriptor.enumerable
-      });
-    } catch (_) {}
-  }
-  // WebGL through Proxies around the native functions: vendor, renderer, version, extensions and the
-  // capability parameters are the profile's; Function.prototype.toString still reports native code.
-  const applyGL = (prototype, data) => {
-    if (!prototype || !data || typeof prototype.getParameter !== "function") return;
-    const originalParameter = prototype.getParameter;
-    const originalExtensions = prototype.getSupportedExtensions;
-    const parameters = new Map();
-    const constant = (name) => {
-      const value = prototype[name] !== undefined ? prototype[name] : (window.WebGLRenderingContext || {})[name];
-      return typeof value === "number" ? value : undefined;
-    };
-    for (const [name, value] of Object.entries(data.params || {})) {
-      const pname = constant(name); if (pname !== undefined) parameters.set(pname, value);
-    }
-    for (const [name, value] of Object.entries({ VENDOR: data.vendor, RENDERER: data.renderer,
-                                                 VERSION: data.version,
-                                                 SHADING_LANGUAGE_VERSION: data.shading_language_version })) {
-      const pname = constant(name); if (pname !== undefined && value !== undefined) parameters.set(pname, value);
-    }
-    if (data.unmasked_vendor !== undefined) parameters.set(0x9245, data.unmasked_vendor);
-    if (data.unmasked_renderer !== undefined) parameters.set(0x9246, data.unmasked_renderer);
-    prototype.getParameter = new Proxy(originalParameter, {
-      apply(target, self, args) {
-        const key = args[0] & 0xFFFFFFFF;
-        if (!parameters.has(key)) return Reflect.apply(target, self, args);
-        const original = Reflect.apply(target, self, args);
-        const value = parameters.get(key);
-        if (Array.isArray(value)) {
-          if (original instanceof Float32Array) return new Float32Array(value);
-          if (original instanceof Int32Array) return new Int32Array(value);
-          if (original instanceof Uint32Array) return new Uint32Array(value);
-        }
-        return value;
-      }
-    });
-    if (typeof originalExtensions === "function" && Array.isArray(data.extensions) && data.extensions.length) {
-      prototype.getSupportedExtensions = new Proxy(originalExtensions, {
-        apply() { return data.extensions.slice(); }
-      });
-    }
-  };
-  applyGL(window.WebGLRenderingContext && WebGLRenderingContext.prototype, p.webgl1);
-  applyGL(window.WebGL2RenderingContext && WebGL2RenderingContext.prototype, p.webgl2);
-})();
-)JS";
-}
-
-void ApplyTouchEmulation(ICoreWebView2* web_view) {
-  web_view->CallDevToolsProtocolMethod(L"Emulation.setTouchEmulationEnabled",
-                                       L"{\"enabled\":true,\"maxTouchPoints\":5}", nullptr);
-  web_view->CallDevToolsProtocolMethod(L"Emulation.setEmitTouchEventsForMouse",
-                                       L"{\"enabled\":true,\"configuration\":\"mobile\"}", nullptr);
-}
-
-void ApplyBrowserIdentity(ICoreWebView2* web_view) {
-  const blox7::webview::AndroidDeviceInfo device = RuntimeAndroidDevice();
-  const std::string user_agent = blox7::webview::BuildRobloxAppUserAgent(device);
-  const auto brand = [](const char* name, const char* version) {
-    return nlohmann::json{{"brand", name}, {"version", version}};
-  };
-  const nlohmann::json metadata = {
-      {"brands", nlohmann::json::array({brand("Not:A-Brand", "8"), brand("Chromium", "156"),
-                                       brand("Android WebView", "156")})},
-      {"fullVersionList", nlohmann::json::array({brand("Not:A-Brand", "8.0.0.0"),
-                                                brand("Chromium", "156.0.8078.47"),
-                                                brand("Android WebView", "156.0.8078.47")})},
-      {"fullVersion", "156.0.8078.47"},
-      {"platform", "Android"},
-      {"platformVersion", "16.0.0"},
-      {"architecture", "arm"},
-      {"model", device.model},
-      {"mobile", true},
-      {"bitness", "64"},
-      {"wow64", false},
-      {"formFactors", nlohmann::json::array({"Mobile"})}};
-  const nlohmann::json override = {
-      {"userAgent", user_agent},
-      {"acceptLanguage", "en-US,en-GB;q=0.9,en;q=0.8,ar-TN;q=0.7,ar;q=0.6,fr;q=0.5,ru;q=0.4"},
-      // armv81 with a one, not an l
-      {"platform", "Linux armv81"},
-      {"userAgentMetadata", metadata}};
-  const int width = device.width_dp > 0 ? device.width_dp : 384;
-  const int height = device.height_dp > 0 ? device.height_dp : 823;
-  const double dpr = device.width_dp > 0 && device.display_width > 0
-                         ? static_cast<double>(device.display_width) / device.width_dp
-                         : 3.75;
-  const nlohmann::json metrics = {
-      {"width", width}, {"height", height}, {"deviceScaleFactor", dpr}, {"mobile", true},
-      {"screenWidth", width}, {"screenHeight", height}, {"positionX", 0}, {"positionY", 0},
-      {"screenOrientation", {{"type", "portraitPrimary"}, {"angle", 0}}}};
-  web_view->CallDevToolsProtocolMethod(L"Network.enable", L"{}", nullptr);
-  web_view->CallDevToolsProtocolMethod(L"Network.setUserAgentOverride", Wide(override.dump()).c_str(), nullptr);
-  web_view->CallDevToolsProtocolMethod(
-      L"Network.setExtraHTTPHeaders",
-      L"{\"headers\":{\"Accept-Language\":\"en-US,en-GB;q=0.9,en;q=0.8,ar-TN;q=0.7,ar;q=0.6,fr;q=0.5,ru;q=0.4\"}}",
-      nullptr);
-  web_view->CallDevToolsProtocolMethod(L"Emulation.setDeviceMetricsOverride", Wide(metrics.dump()).c_str(), nullptr);
-  web_view->CallDevToolsProtocolMethod(
-      L"Emulation.setEmulatedMedia",
-      L"{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"dark\"},"
-      L"{\"name\":\"dynamic-range\",\"value\":\"standard\"}]}",
-      nullptr);
-  ApplyTouchEmulation(web_view);
-  web_view->CallDevToolsProtocolMethod(L"Emulation.setLocaleOverride", L"{\"locale\":\"en-US\"}", nullptr);
-  const std::string app_version = user_agent.rfind("Mozilla/", 0) == 0 ? user_agent.substr(8) : user_agent;
-  const std::string app_version_script =
-      "(()=>{try{Object.defineProperty(navigator,\"appVersion\",{get:()=>" + nlohmann::json(app_version).dump() +
-      ",configurable:true});}catch(_){}})();";
-  web_view->AddScriptToExecuteOnDocumentCreated(Wide(app_version_script).c_str(), nullptr);
 }
 
 void CreatePageBrowser(const std::wstring& user_agent_argument) {
@@ -2915,25 +2230,127 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
   if (FAILED(started)) WebView2StartFailed(started);
 }
 
+std::string BrowserUserAgentKey() {
+  const wchar_t* folder = g_app.runtime_folder.empty() ? nullptr : g_app.runtime_folder.c_str();
+  LPWSTR version = nullptr;
+  if (g_browser_version == nullptr || FAILED(g_browser_version(folder, &version)) || version == nullptr) return {};
+  const OSVERSIONINFOW os = WindowsVersion();
+  return TakeString(version) + " " + std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) +
+         "." + std::to_string(os.dwBuildNumber);
+}
+
+std::wstring UserAgentCachePath() { return g_app.data_directory + L"\\user-agent.txt"; }
+
+std::string CachedBrowserUserAgent(const std::string& key) {
+  if (key.empty()) return {};
+  FILE* file = _wfopen(UserAgentCachePath().c_str(), L"rb");
+  if (file == nullptr) return {};
+  char text[2048];
+  const std::size_t n = fread(text, 1, sizeof text, file);
+  fclose(file);
+  const std::string_view all(text, n);
+  const std::size_t newline = all.find('\n');
+  if (newline == std::string_view::npos || all.substr(0, newline) != key) return {};
+  std::string agent(all.substr(newline + 1));
+  while (!agent.empty() && (agent.back() == '\n' || agent.back() == '\r')) agent.pop_back();
+  return IsUsableUserAgent(agent) ? agent : std::string();
+}
+
+void CacheBrowserUserAgent(const std::string& key, const std::string& agent) {
+  if (key.empty()) return;
+  if (FILE* file = _wfopen(UserAgentCachePath().c_str(), L"wb")) {
+    fprintf(file, "%s\n%s\n", key.c_str(), agent.c_str());
+    fclose(file);
+  }
+}
+
+std::string UserAgentOf(ICoreWebView2Controller* controller) {
+  std::string agent;
+  ICoreWebView2* view = nullptr;
+  ICoreWebView2Settings* settings = nullptr;
+  ICoreWebView2Settings2* settings2 = nullptr;
+  LPWSTR text = nullptr;
+  if (SUCCEEDED(controller->get_CoreWebView2(&view)) && view != nullptr && SUCCEEDED(view->get_Settings(&settings)) &&
+      settings != nullptr &&
+      SUCCEEDED(settings->QueryInterface(IID_ICoreWebView2Settings2, reinterpret_cast<void**>(&settings2))) &&
+      settings2 != nullptr && SUCCEEDED(settings2->get_UserAgent(&text))) {
+    agent = TakeString(text);
+  }
+  SafeRelease(&settings2);
+  SafeRelease(&settings);
+  SafeRelease(&view);
+  return agent;
+}
+
+void ReadBrowserUserAgent(std::function<void(std::string)> done) {
+  SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", nullptr);
+  const HRESULT started = g_create_environment(
+      g_app.runtime_folder.empty() ? nullptr : g_app.runtime_folder.c_str(),
+      (g_app.data_directory + L"\\ua-probe").c_str(), nullptr,
+      MakeHandler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, HRESULT, ICoreWebView2Environment*>(
+          [done](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
+            if (FAILED(result) || environment == nullptr || g_app.primary == nullptr || g_app.terminating) {
+              done({});
+              return S_OK;
+            }
+            environment->AddRef();
+            environment->CreateCoreWebView2Controller(
+                g_app.primary->window,
+                MakeHandler<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, HRESULT,
+                            ICoreWebView2Controller*>(
+                    [done, environment](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                      const bool ready = SUCCEEDED(result) && controller != nullptr;
+                      const std::string agent = ready ? UserAgentOf(controller) : std::string();
+                      if (controller != nullptr) controller->Close();
+                      environment->Release();
+                      done(agent);
+                      return S_OK;
+                    }));
+            return S_OK;
+          }));
+  if (FAILED(started)) done({});
+}
+
+void WithBrowserUserAgent(std::function<void(std::string)> done) {
+  if (!RuntimeInstalled()) {
+    done({});
+    return;
+  }
+  const std::string key = BrowserUserAgentKey();
+  if (std::string cached = CachedBrowserUserAgent(key); !cached.empty()) {
+    done(cached);
+    return;
+  }
+  ReadBrowserUserAgent([key, done](std::string agent) {
+    if (!IsUsableUserAgent(agent)) agent.clear();
+    if (!agent.empty()) CacheBrowserUserAgent(key, agent);
+    done(agent);
+  });
+}
+
 void StartWebView2(const std::string& first_url) {
-  (void)first_url;
   if (g_app.webview2_requested || g_app.terminating) return;
   g_app.webview2_requested = true;
-  if (IsDesktopProfile()) {
+  if (IsDesktopProfile() && !blox7::webview::IsRobloxChallengePage(first_url)) {
     g_app.app_user_agent = false;
     Log("starting WebView2 with the desktop user agent");
     CreatePageBrowser(L"");
     return;
   }
   g_app.app_user_agent = true;
-  const std::string agent = blox7::webview::BuildRobloxAppUserAgent(RuntimeAndroidDevice());
-  if (!IsUsableUserAgent(agent)) {
-    g_app.startup_failed = true;
-    BeginTermination("the phone's user agent cannot be passed to WebView2");
-    return;
-  }
-  Log("starting WebView2 with the phone user agent: %s", agent.c_str());
-  CreatePageBrowser(Wide("--user-agent=\"" + agent + "\""));
+  WithBrowserUserAgent([](std::string browser) {
+    if (g_app.terminating) return;
+    const std::string agent = browser.empty()
+                                  ? blox7::webview::BuildRobloxAndroidUserAgent()
+                                  : browser + "  " + blox7::webview::BuildRobloxAppUserAgentTokens();
+    if (!IsUsableUserAgent(agent)) {
+      g_app.startup_failed = true;
+      BeginTermination("the app's user agent cannot be passed to WebView2");
+      return;
+    }
+    Log("starting WebView2 with the app user agent: %s", agent.c_str());
+    CreatePageBrowser(Wide("--user-agent=\"" + agent + "\""));
+  });
 }
 
 void ApplyControl(const ControlCommand& command) {
