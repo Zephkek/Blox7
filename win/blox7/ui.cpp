@@ -142,6 +142,7 @@ enum Control : int {
   kCaptureEncoder,
   kSelfUpdate,
   kDateLink,
+  kAeroOff,
 };
 
 constexpr int option_id(Control control, size_t option) { return kOptionFirst + control * 100 + static_cast<int>(option); }
@@ -1258,6 +1259,16 @@ void page_performance(const D2D1_RECT_F& page) {
     g.pending.threaded_rendering = !g.pending.threaded_rendering;
     mark_dirty();
   });
+  y += 96 + kMargin;
+
+  if (!g.os.windows7()) return;
+  group(rect(x, y, w, 64), L"Screen sharing");
+  checkbox(kAeroOff, ix, y + 16, iw, g.pending.aero_off, L"Turn off Aero while Roblox runs", [] {
+    g.pending.aero_off = !g.pending.aero_off;
+    mark_dirty();
+  });
+  text(L"Discord and browsers can share the screen without making Roblox stutter.", g.fonts.body, rect(ix, y + 40, iw, 15),
+       kSecondary);
 }
 
 void add_flag() {
@@ -2605,6 +2616,7 @@ int render_ui(const std::wstring& dir) {
                  {L"settings-captures", Tab::Captures, kVideosFolder, -1},
                  {L"settings-captures-open", Tab::Captures, kPopupFirst + 1, kCaptureSize},
                  {L"settings-performance", Tab::Performance, kOkButton, -1},
+                 {L"settings-performance-win7", Tab::Performance, kAeroOff, -1},
                  {L"settings-flags", Tab::Flags, kFlagRowFirst + 3, -1},
                  {L"settings-device", Tab::Device, option_id(kProfile, 1), -1},
                  {L"settings-about", Tab::About, kDataLink, -1}};
@@ -2627,7 +2639,11 @@ int render_ui(const std::wstring& dir) {
       written += render_canvas(wic, g.main, scale, dir + file);
     }
     g.stage = Stage::Ready;
+    const OsInfo machine = g.os;
     for (const DialogShot& shot : dialogs) {
+      const bool seven = wcscmp(shot.name, L"settings-performance-win7") == 0;
+      g.os = seven ? OsInfo{6, 1, 7601} : machine;
+      g.pending.aero_off = seven;
       g.tab = shot.tab;
       g.dialog.springs.clear();
       g.dialog.hot = shot.hot;

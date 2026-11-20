@@ -778,6 +778,7 @@ Settings load_settings(const Paths& paths) {
   s.window_title = widen(text("window_title"));
   s.window_icon = widen(text("window_icon"));
   s.self_update = text("updates") != "off";
+  s.aero_off = text("aero") == "off";
   return s;
 }
 
@@ -892,6 +893,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["window_title"] = narrow(s.window_title);
   ini["window_icon"] = narrow(s.window_icon);
   ini["updates"] = s.self_update ? "" : "off";
+  ini["aero"] = s.aero_off ? "off" : "";
   const bool vulkan = s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan";
   set_windows_gpu_preference(paths, !vulkan && !s.gpu.empty() ? windows_gpu_preference(s.gpu) : 0, ini);
   std::wstring links = set_join_links(paths, s.join_links, ini);
@@ -967,6 +969,12 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
   const std::wstring icon = paths.home + L"\\window-icon.png";
   if (!s.window_icon.empty() && save_icon_png(s.window_icon, icon).empty())
     SetEnvironmentVariableW(L"BLOX7_WINDOW_ICON_FILE", widen(posix_path(icon)).c_str());
+  if (s.aero_off && os_info().windows7()) {
+    using EnableComposition = HRESULT(WINAPI*)(UINT);
+    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+    const auto enable = dwm ? reinterpret_cast<EnableComposition>(GetProcAddress(dwm, "DwmEnableComposition")) : nullptr;
+    if (enable) enable(0);
+  }
 }
 
 std::wstring refresh_shader(const Paths& paths, const std::wstring& source, bool* rebuilt) {

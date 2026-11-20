@@ -61,6 +61,7 @@ struct Settings {
   std::wstring window_title;
   std::wstring window_icon;
   bool self_update = true;
+  bool aero_off = false;
 };
 
 enum class DeviceKind { kPhone, kTablet, kPc, kConsole };
