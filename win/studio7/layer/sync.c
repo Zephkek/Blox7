@@ -2,6 +2,7 @@
 
 NTSYSAPI LONG NTAPI NtWaitForKeyedEvent(HANDLE event, PVOID key, BOOLEAN alertable, PLARGE_INTEGER timeout);
 NTSYSAPI LONG NTAPI NtReleaseKeyedEvent(HANDLE event, PVOID key, BOOLEAN alertable, PLARGE_INTEGER timeout);
+NTSYSAPI BOOLEAN NTAPI RtlDllShutdownInProgress(void);
 
 enum { QUEUED, SLEEPING, WOKEN };
 
@@ -115,7 +116,7 @@ static void wake(const void *address, BOOL all) {
     Waiter *w, *next, *taken = NULL, **tail = &taken;
 
     __sync_synchronize();
-    if (!b->waiting) return;
+    if (!b->waiting || RtlDllShutdownInProgress()) return;
     AcquireSRWLockExclusive(&b->lock);
     for (w = b->first; w; w = next) {
         next = w->next;
@@ -140,4 +141,12 @@ VOID WINAPI s7_WakeByAddressSingle(PVOID address) {
 
 VOID WINAPI s7_WakeByAddressAll(PVOID address) {
     wake(address, TRUE);
+}
+
+VOID WINAPI s7_WakeConditionVariable(PCONDITION_VARIABLE variable) {
+    if (!RtlDllShutdownInProgress()) WakeConditionVariable(variable);
+}
+
+VOID WINAPI s7_WakeAllConditionVariable(PCONDITION_VARIABLE variable) {
+    if (!RtlDllShutdownInProgress()) WakeAllConditionVariable(variable);
 }

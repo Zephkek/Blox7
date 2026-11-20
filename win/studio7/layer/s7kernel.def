@@ -1302,8 +1302,8 @@ EXPORTS
     WaitForThreadpoolWorkCallbacks = kernel32.WaitForThreadpoolWorkCallbacks @1301
     WaitNamedPipeA = kernel32.WaitNamedPipeA @1302
     WaitNamedPipeW = kernel32.WaitNamedPipeW @1303
-    WakeAllConditionVariable = kernel32.WakeAllConditionVariable @1304
-    WakeConditionVariable = kernel32.WakeConditionVariable @1305
+    WakeAllConditionVariable = s7_WakeAllConditionVariable @1304
+    WakeConditionVariable = s7_WakeConditionVariable @1305
     WerGetFlags = kernel32.WerGetFlags @1306
     WerRegisterFile = kernel32.WerRegisterFile @1307
     WerRegisterMemoryBlock = kernel32.WerRegisterMemoryBlock @1308

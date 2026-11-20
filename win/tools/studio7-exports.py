@@ -9,12 +9,12 @@ LAYER = os.path.join(os.path.dirname(HERE), 'studio7', 'layer')
 OURS = {
     'kernel32': ('s7kernel', ['WaitOnAddress', 'WakeByAddressSingle', 'WakeByAddressAll', 'GetSystemTimePreciseAsFileTime',
                               'GetCurrentThreadStackLimits', 'CreateFile2', 'CopyFile2', 'PrefetchVirtualMemory',
-                              'VerifyVersionInfoW'], ['S7Anchor']),
+                              'VerifyVersionInfoW'], ['S7Anchor'], ['WakeAllConditionVariable', 'WakeConditionVariable']),
     'user32': ('s7user', ['GetDpiForWindow', 'GetDpiForSystem', 'GetSystemMetricsForDpi', 'AdjustWindowRectExForDpi',
-                          'GetCurrentInputMessageSource'], []),
-    'ws2_32': ('s7ws2', ['GetAddrInfoExW', 'GetAddrInfoExCancel', 'GetAddrInfoExOverlappedResult'], []),
-    'mfplat': ('s7mf', ['MFCreateDXGIDeviceManager', 'MFCreateDXGISurfaceBuffer'], []),
-    'bcryptprimitives': ('s7bcp', ['ProcessPrng'], []),
+                          'GetCurrentInputMessageSource'], [], ['RegisterClassExW', 'SendMessageW']),
+    'ws2_32': ('s7ws2', ['GetAddrInfoExW', 'GetAddrInfoExCancel', 'GetAddrInfoExOverlappedResult'], [], []),
+    'mfplat': ('s7mf', ['MFCreateDXGIDeviceManager', 'MFCreateDXGISurfaceBuffer'], [], ['MFTEnumEx']),
+    'bcryptprimitives': ('s7bcp', ['ProcessPrng'], [], []),
 }
 
 
@@ -47,16 +47,17 @@ def exports(path):
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    for dll, (shim, added, plain) in OURS.items():
+    for dll, (shim, added, plain, replaced) in OURS.items():
         real = exports(os.path.join(sys.argv[1], dll + '.dll'))
         lines = [f'LIBRARY {shim}', 'EXPORTS']
-        lines += [f'    {name} = {dll}.{name} @{ordinal}' for name, ordinal in real if name not in added]
+        lines += [f'    {name} = {"s7_" if name in replaced else dll + "."}{name} @{ordinal}' for name, ordinal in real
+                  if name not in added]
         free = max(ordinal for _, ordinal in real) + 1000
         lines += [f'    {name} = s7_{name} @{free + i}' for i, name in enumerate(added)]
         lines += [f'    {name} @{free + len(added) + i}' for i, name in enumerate(plain)]
         with open(os.path.join(LAYER, shim + '.def'), 'w', encoding='ascii', newline='\n') as f:
             f.write('\n'.join(lines) + '\n')
-        print(f'{shim}.def: {len(real)} names from {dll}.dll, {len(added)} of our own')
+        print(f'{shim}.def: {len(real)} names from {dll}.dll, {len(added) + len(replaced)} of our own')
 
 
 if __name__ == '__main__':

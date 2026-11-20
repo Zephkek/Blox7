@@ -297,6 +297,81 @@ static void test_wait(void) {
     check(1, "wait: wake with nobody waiting", "%.1f ns each", ms * 0.1);
 }
 
+static SRWLOCK g_exit_lock = SRWLOCK_INIT;
+static CONDITION_VARIABLE g_exit_cv = CONDITION_VARIABLE_INIT;
+static volatile LONG g_exit_word;
+static VOID(WINAPI *g_exit_wake)(PVOID);
+static PVOID g_exit_target;
+
+static unsigned __stdcall exit_sleeper(void *arg) {
+    (void)arg;
+    AcquireSRWLockExclusive(&g_exit_lock);
+    for (;;) SleepConditionVariableSRW(&g_exit_cv, &g_exit_lock, INFINITE, 0);
+    return 0;
+}
+
+static unsigned __stdcall exit_waiter(void *arg) {
+    LONG zero = 0;
+
+    (void)arg;
+    for (;;) WaitOnAddress(&g_exit_word, &zero, sizeof(zero), INFINITE);
+    return 0;
+}
+
+static void NTAPI exit_callback(PVOID module, DWORD reason, PVOID reserved) {
+    (void)module;
+    (void)reserved;
+    if (reason == DLL_PROCESS_DETACH && g_exit_wake) g_exit_wake(g_exit_target);
+}
+
+extern const IMAGE_TLS_DIRECTORY _tls_used;
+__attribute__((used)) static const void *const g_exit_tls = &_tls_used;
+__attribute__((section(".CRT$XLB"), used)) static const PIMAGE_TLS_CALLBACK g_exit_callback = exit_callback;
+
+static void exit_child(const char *kind) {
+    if (!strcmp(kind, "cv")) {
+        g_exit_wake = (VOID(WINAPI *)(PVOID))GetProcAddress(GetModuleHandleA("s7kernel.dll"), "WakeConditionVariable");
+        g_exit_target = &g_exit_cv;
+        CloseHandle((HANDLE)_beginthreadex(NULL, 0, exit_sleeper, NULL, 0, NULL));
+    } else {
+        g_exit_wake = WakeByAddressAll;
+        g_exit_target = (PVOID)&g_exit_word;
+        CloseHandle((HANDLE)_beginthreadex(NULL, 0, exit_waiter, NULL, 0, NULL));
+    }
+    Sleep(300);
+    ExitProcess(0x51);
+}
+
+static void exit_case(const char *kind, const char *what) {
+    char self[MAX_PATH], command[MAX_PATH + 32];
+    STARTUPINFOA startup;
+    PROCESS_INFORMATION process;
+    DWORD code = 0, waited;
+    double start;
+
+    GetModuleFileNameA(NULL, self, MAX_PATH);
+    snprintf(command, sizeof(command), "\"%s\" --exit-wake %s", self, kind);
+    memset(&startup, 0, sizeof(startup));
+    startup.cb = sizeof(startup);
+    if (!CreateProcessA(self, command, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process)) {
+        check(0, what, "could not start a child (error %lu)", GetLastError());
+        return;
+    }
+    start = now_ms();
+    waited = WaitForSingleObject(process.hProcess, 15000);
+    if (waited != WAIT_OBJECT_0) TerminateProcess(process.hProcess, 1);
+    GetExitCodeProcess(process.hProcess, &code);
+    check(waited == WAIT_OBJECT_0 && code == 0x51, what, waited == WAIT_OBJECT_0 ? "ended %.0f ms after it started, code 0x%lX" :
+          "still exiting 15 s later, stopped", now_ms() - start, code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+}
+
+static void test_exit(void) {
+    exit_case("cv", "exit: wake a dead cv waiter");
+    exit_case("address", "exit: wake a dead address waiter");
+}
+
 static volatile LONG g_time_bad;
 
 static unsigned __stdcall time_reader(void *arg) {
@@ -773,10 +848,11 @@ done:
 int main(int argc, char **argv) {
     static const struct { const char *name; void (*run)(void); } tests[] = {
         {"wait", test_wait}, {"time", test_time}, {"stack", test_stack}, {"files", test_files},
-        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"media", test_media},
+        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"media", test_media}, {"exit", test_exit},
     };
     int i, j;
 
+    if (argc == 3 && !strcmp(argv[1], "--exit-wake")) exit_child(argv[2]);
     for (i = 0; i < (int)(sizeof(tests) / sizeof(tests[0])); i++) {
         int wanted = argc < 2;
         for (j = 1; j < argc; j++) wanted |= !strcmp(argv[j], tests[i].name);
