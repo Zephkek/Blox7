@@ -828,10 +828,33 @@ int main(int argc, char* argv[]) {
                 << (std::string_view(quality) == "high" ? " (memory savers off)" : "")
                 << '\n';
     }
+    blox7::runtime::FrameRatePolicy frame_rate =
+        runtime_config.config.frame_rate();
+    const std::optional<int> roblox_cap =
+        blox7::runtime::RobloxFramerateCapFor(frame_rate);
+    std::string frame_rate_error;
+    if (blox7::runtime::SyncRobloxFramerateCap(
+            paths.android_data_root() / "files" / "appData",
+            paths.state_root() / "roblox-framerate-cap", roblox_cap,
+            &frame_rate_error)) {
+      frame_rate.held_by_roblox_setting = roblox_cap.has_value();
+    } else {
+      std::cerr << "  [runtime] Roblox frame-rate setting unchanged: "
+                << frame_rate_error << '\n';
+    }
+    if (frame_rate.held_by_roblox_setting) {
+      std::cout << "  [runtime] frame-rate cap=" << *roblox_cap
+                << " via Roblox FramerateCap vsync="
+                << runtime_config.config.vsync_mode() << '\n';
+    } else if (frame_rate.mode ==
+               blox7::runtime::FrameRateLimitMode::kUnlimited) {
+      std::cout << "  [runtime] frame-rate mode=unlimited scheduler_target="
+                << blox7::runtime::kMaximumSupportedRobloxSchedulerFps
+                << " vsync=" << runtime_config.config.vsync_mode() << '\n';
+    }
     std::string client_settings_overrides;
     if (!blox7::runtime::MergeRuntimeClientSettingsOverrides(
-            runtime_config.config.frame_rate(),
-            runtime_config.config.performance(), fflags.json,
+            frame_rate, runtime_config.config.performance(), fflags.json,
             &client_settings_overrides, &command_line_error)) {
       std::cerr << "[FATAL] Cannot apply runtime client-settings policy: "
                 << command_line_error << '\n';
@@ -901,14 +924,6 @@ int main(int argc, char* argv[]) {
                    "counts under Roblox client-settings control\n";
     }
   }
-  if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
-      runtime_config.config.frame_rate().mode ==
-          blox7::runtime::FrameRateLimitMode::kUnlimited) {
-    std::cout << "  [runtime] frame-rate mode=unlimited scheduler_target="
-              << blox7::runtime::kMaximumSupportedRobloxSchedulerFps
-              << " vsync=" << runtime_config.config.vsync_mode() << '\n';
-  }
-
   const libc_shim::HostCaBundleResolution ca_bundle =
       libc_shim::ResolveHostCaBundle();
   if (ca_bundle.status == libc_shim::HostCaBundleStatus::kInvalidOverride) {
