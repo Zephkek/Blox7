@@ -463,3 +463,34 @@ void gles_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, G
   tex_note(format | 0x30000u, (unsigned long long)w * (unsigned long long)h * (unsigned long long)d * tex_pixel_bytes(format, type),
            start);
 }
+
+static int g_window_srgb;
+
+void gles_window_current(void) {
+  static int checked;
+  if (checked) return;
+  checked = 1;
+  GLint encoding = GL_LINEAR, count = 0;
+  int control = 0;
+  glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK, GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, &encoding);
+  glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+  for (GLint i = 0; i < count && !control; i++) {
+    const GLubyte* name = glGetStringi(GL_EXTENSIONS, (GLuint)i);
+    control = name && !strcmp((const char*)name, "GL_EXT_sRGB_write_control");
+  }
+  for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; i++) {
+  }
+  if (encoding != GL_SRGB) return;
+  fprintf(stderr, control ? "[gles] the driver made the window sRGB, frames go to it as they are\n"
+                          : "[gles] the driver made the window sRGB and can't turn that off, colors will look washed out\n");
+  if (!control) return;
+  g_window_srgb = 1;
+  glDisable(GL_FRAMEBUFFER_SRGB_EXT);
+}
+
+void gles_bind_framebuffer(void (BRIDGE_MS* real)(GLenum, GLuint), GLenum target, GLuint framebuffer) {
+  real(target, framebuffer);
+  if (!g_window_srgb || target == GL_READ_FRAMEBUFFER) return;
+  if (framebuffer) glEnable(GL_FRAMEBUFFER_SRGB_EXT);
+  else glDisable(GL_FRAMEBUFFER_SRGB_EXT);
+}

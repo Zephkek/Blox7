@@ -23,8 +23,9 @@ BRIDGE_EXPORT void glBindBuffer(GLenum a0, GLuint a1) {
   p_glBindBuffer(a0, a1);
 }
 static void (BRIDGE_MS *p_glBindFramebuffer)(GLenum, GLuint);
+void gles_bind_framebuffer(void (BRIDGE_MS *)(GLenum, GLuint), GLenum a0, GLuint a1);
 BRIDGE_EXPORT void glBindFramebuffer(GLenum a0, GLuint a1) {
-  p_glBindFramebuffer(a0, a1);
+  gles_bind_framebuffer(p_glBindFramebuffer, a0, a1);
 }
 static void (BRIDGE_MS *p_glBindRenderbuffer)(GLenum, GLuint);
 BRIDGE_EXPORT void glBindRenderbuffer(GLenum a0, GLuint a1) {

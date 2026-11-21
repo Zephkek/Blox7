@@ -7,6 +7,7 @@ extern __attribute__((visibility("hidden"))) void* bridge_module_kEntries;
 
 void gles_bridge_resolve(void* (*lookup)(const char*));
 void* gles_bridge_resolve_export(const char* name);
+void gles_window_current(void);
 
 static void* real(const char* name) { return __w32_pe_symbol(bridge_module_kEntries, name); }
 
@@ -154,7 +155,9 @@ BRIDGE_EXPORT SDL_GLContext SDL_GL_CreateContext(SDL_Window* window) {
 BRIDGE_EXPORT bool SDL_GL_MakeCurrent(SDL_Window* window, SDL_GLContext context) {
   static bool (BRIDGE_MS *make_current)(SDL_Window*, SDL_GLContext);
   if (!make_current) make_current = (bool (BRIDGE_MS*)(SDL_Window*, SDL_GLContext))real("SDL_GL_MakeCurrent");
-  return make_current(window, context);
+  const bool ok = make_current(window, context);
+  if (ok && context) gles_window_current();
+  return ok;
 }
 
 BRIDGE_EXPORT bool SDL_GL_SwapWindow(SDL_Window* window) {
