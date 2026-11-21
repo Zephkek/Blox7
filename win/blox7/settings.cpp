@@ -1,3 +1,4 @@
+#include <d3d10.h>
 #include <dxgi1_6.h>
 #include <mfapi.h>
 #include <shlobj.h>
@@ -814,6 +815,7 @@ Settings load_settings(const Paths& paths) {
 
   if (const auto quality = ini.find("quality"); quality != ini.end()) s.quality = widen(quality->second);
   if (const auto gpu = ini.find("gpu"); gpu != ini.end()) s.gpu = widen(gpu->second);
+  if (const auto vulkan = ini.find("vulkan_on_modded_driver"); vulkan != ini.end()) s.vulkan_on_modded_driver = vulkan->second == "on";
   if (const auto links = ini.find("join_links"); links != ini.end()) s.join_links = !links->second.empty();
   if (const auto scale = ini.find("render_scale"); scale != ini.end() && !scale->second.empty())
     s.render_scale = std::clamp(atoi(scale->second.c_str()), 50, 100);
@@ -936,6 +938,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   auto ini = read_ini(ini_path(paths));
   ini["quality"] = narrow(s.quality);
   ini["gpu"] = narrow(s.gpu);
+  ini["vulkan_on_modded_driver"] = s.vulkan_on_modded_driver ? "on" : "";
   ini["refresh_rate"] = s.refresh_rate > 0 ? std::to_string(s.refresh_rate) : "";
   ini["render_scale"] = s.render_scale < 100 ? std::to_string(s.render_scale) : "";
   ini["profile"] = profile;
@@ -984,8 +987,9 @@ void refresh_join_links(const Paths& paths) {
 
 void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
   Settings s = load_settings(paths);
-  // no vulkan driver (most intel gpus on win7): this launch runs opengl es, the saved choice stays
-  if (!vulkan_driver && (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan")) {
+  // no vulkan driver (most intel gpus on win7) or a modded win7 driver: this launch runs opengl es, the saved choice stays
+  if ((!vulkan_driver && (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan")) ||
+      vulkan_held_back(s)) {
     s.backend = L"opengl";
     SetEnvironmentVariableW(L"BLOX7_GRAPHICS_BACKEND", L"opengl");
   }
@@ -1381,6 +1385,58 @@ std::vector<GpuChoice> gpu_choices() {
   }
   factory->Release();
   return gpus;
+}
+
+namespace {
+
+struct AdapterDriver {
+  std::wstring id;
+  bool modded = false;
+};
+
+bool newer_than_windows7_drivers(UINT vendor, const LARGE_INTEGER& version) {
+  const int major = HIWORD(version.HighPart), build = HIWORD(version.LowPart), revision = LOWORD(version.LowPart);
+  if (vendor == 0x10de) return (build - 10) * 10000 + revision >= 48000;
+  if (vendor == 0x1002) return major >= 30;
+  return false;
+}
+
+std::vector<AdapterDriver> adapter_drivers() {
+  std::vector<AdapterDriver> adapters;
+  HMODULE dxgi = LoadLibraryW(L"dxgi.dll");
+  using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
+  const auto create = dxgi ? reinterpret_cast<CreateFactory>(GetProcAddress(dxgi, "CreateDXGIFactory1")) : nullptr;
+  IDXGIFactory1* factory = nullptr;
+  if (!create || FAILED(create(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory)))) return adapters;
+  IDXGIAdapter1* adapter = nullptr;
+  for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
+    DXGI_ADAPTER_DESC1 desc{};
+    LARGE_INTEGER version{};
+    if (SUCCEEDED(adapter->GetDesc1(&desc)) && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) &&
+        (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &version)) ||
+         SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(ID3D10Device), &version)))) {
+      wchar_t id[16];
+      std::swprintf(id, 16, L"%04x:%04x", desc.VendorId, desc.DeviceId);
+      adapters.push_back({id, newer_than_windows7_drivers(desc.VendorId, version)});
+    }
+    adapter->Release();
+  }
+  factory->Release();
+  return adapters;
+}
+
+}  // namespace
+
+bool modded_windows7_driver(const std::wstring& gpu) {
+  if (!os_info().windows7()) return false;
+  static const std::vector<AdapterDriver> adapters = adapter_drivers();
+  return std::any_of(adapters.begin(), adapters.end(),
+                     [&gpu](const AdapterDriver& adapter) { return adapter.modded && (gpu.empty() || adapter.id == gpu); });
+}
+
+bool vulkan_held_back(const Settings& s) {
+  return (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan") &&
+         !s.vulkan_on_modded_driver && modded_windows7_driver(s.gpu);
 }
 
 }  // namespace blox7

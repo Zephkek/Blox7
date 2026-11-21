@@ -30,6 +30,7 @@ struct UpdateState {
 
 struct Settings {
   std::wstring backend = L"direct-vulkan";
+  bool vulkan_on_modded_driver = false;
   std::wstring frame_rate_limit = L"-1";
   std::wstring vsync = L"auto";
   std::wstring present_mode = L"auto";
@@ -92,6 +93,8 @@ using Progress = std::function<void(double fraction)>;
 Settings load_settings(const Paths& paths);
 std::wstring save_settings(const Paths& paths, const Settings& settings);
 bool vulkan_installed();
+bool modded_windows7_driver(const std::wstring& gpu);
+bool vulkan_held_back(const Settings& settings);
 void apply_launch_settings(const Paths& paths, bool vulkan_driver = vulkan_installed());
 void refresh_join_links(const Paths& paths);
 std::vector<DeviceChoice> device_choices();

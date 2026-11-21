@@ -640,6 +640,7 @@ void refresh_info() {
   g.vulkan_driver = vulkan_installed();
   g.backend = graphics_backend(g.paths);
   if (g.backend == L"Vulkan" && !g.vulkan_driver) g.backend = L"OpenGL ES (no Vulkan driver)";
+  else if (g.backend == L"Vulkan" && vulkan_held_back(load_settings(g.paths))) g.backend = L"OpenGL ES (modded Windows 7 driver)";
 }
 
 size_t index_of(const std::vector<std::wstring>& values, const std::wstring& value) {
@@ -650,7 +651,7 @@ bool uses_vulkan(const std::wstring& backend) {
   return backend == L"direct-vulkan" || backend == L"vulkan" || backend == L"native-vulkan";
 }
 
-bool runs_vulkan(const std::wstring& backend) { return uses_vulkan(backend) && g.vulkan_driver; }
+bool runs_vulkan(const Settings& s) { return uses_vulkan(s.backend) && g.vulkan_driver && !vulkan_held_back(s); }
 
 bool uses_gles(const std::wstring& backend) {
   return backend == L"opengl" || backend == L"gles" || backend == L"system" || backend == L"auto";
@@ -991,7 +992,7 @@ void draw_main() {
   text(headline(), g.fonts.instruction, rect(x, 9, tw, 22), kInstruction);
   const std::pair<const wchar_t*, std::wstring> facts[] = {
       {L"Renderer:", g.backend},
-      {L"Quality:", quality_name(g.settings.quality) + (runs_vulkan(g.settings.backend) && g.settings.render_scale < 100
+      {L"Quality:", quality_name(g.settings.quality) + (runs_vulkan(g.settings) && g.settings.render_scale < 100
                                                          ? L", " + std::to_wstring(g.settings.render_scale) + L"% resolution"
                                                          : L"")},
       {L"Device:", device_name(g.settings.device)}};
@@ -1082,14 +1083,19 @@ void page_graphics(const D2D1_RECT_F& page) {
   const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18;
   float y = page.top + kMargin;
   const bool vulkan = uses_vulkan(g.pending.backend);
+  const bool held_back = vulkan_held_back(g.pending);
   group(rect(x, y, w, 68), L"Renderer");
-  const wchar_t* vulkan_label = g.vulkan_driver ? L"Vulkan (recommended, fastest)" : L"Vulkan (no Vulkan driver found)";
-  radio(kRenderer, 0, ix, y + 16, iw, vulkan, vulkan_label, [] {
+  const wchar_t* vulkan_label = !g.vulkan_driver ? L"Vulkan (no Vulkan driver found)"
+                                : modded_windows7_driver(g.pending.gpu) ? L"Vulkan (modded Windows 7 driver, may not draw)"
+                                : L"Vulkan (recommended, fastest)";
+  radio(kRenderer, 0, ix, y + 16, iw, vulkan && !held_back, vulkan_label, [] {
     g.pending.backend = L"direct-vulkan";
+    g.pending.vulkan_on_modded_driver = modded_windows7_driver(g.pending.gpu);
     mark_dirty();
   });
-  radio(kRenderer, 1, ix, y + 40, iw, !vulkan && uses_gles(g.pending.backend), L"OpenGL ES (for drivers that trip over Vulkan)", [] {
+  radio(kRenderer, 1, ix, y + 40, iw, held_back || (!vulkan && uses_gles(g.pending.backend)), L"OpenGL ES (for drivers that trip over Vulkan)", [] {
     g.pending.backend = L"opengl";
+    g.pending.vulkan_on_modded_driver = false;
     mark_dirty();
   });
   y += 68 + kMargin;
@@ -1106,11 +1112,11 @@ void page_graphics(const D2D1_RECT_F& page) {
   for (size_t i = 0; i < std::size(scales); ++i)
     if (scales[i] == g.pending.render_scale) scale = i;
   combo_row(L"Resolution:", ix, y + 42, 64, 120, kRenderScale, {L"Native", L"90%", L"80%", L"70%", L"60%", L"50%"}, scale,
-            runs_vulkan(g.pending.backend), [](size_t i) {
+            runs_vulkan(g.pending), [](size_t i) {
               g.pending.render_scale = scales[i];
               mark_dirty();
             });
-  if (runs_vulkan(g.pending.backend) && g.pending.render_scale < 100) {
+  if (runs_vulkan(g.pending) && g.pending.render_scale < 100) {
     const SIZE size = render_size(g.pending);
     text(L"3D at " + std::to_wstring(size.cx) + L" x " + std::to_wstring(size.cy), g.fonts.body,
          rect(ix + 194, y + 46, iw - 194, 15), kSecondary);
@@ -1580,7 +1586,7 @@ void browse_shader() {
 void page_effects(const D2D1_RECT_F& page) {
   const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18;
   float y = page.top + kMargin;
-  const bool vulkan = runs_vulkan(g.pending.backend);
+  const bool vulkan = runs_vulkan(g.pending);
   static const std::vector<std::wstring> presets = {L"off", L"crisp", L"vivid", L"cinematic", L"custom"};
   const float look = vulkan ? 158 : 177;
   group(rect(x, y, w, look), L"Look");
@@ -2060,7 +2066,7 @@ void launch() {
 void watch_shader() {
   static int tick = 0;
   static FILETIME failed{};
-  if (g.stage != Stage::Running || ++tick % 4 || g.settings.shader.empty() || !runs_vulkan(g.settings.backend)) return;
+  if (g.stage != Stage::Running || ++tick % 4 || g.settings.shader.empty() || !runs_vulkan(g.settings)) return;
   WIN32_FILE_ATTRIBUTE_DATA source{};
   if (!GetFileAttributesExW(g.settings.shader.c_str(), GetFileExInfoStandard, &source) ||
       CompareFileTime(&source.ftLastWriteTime, &failed) == 0)
