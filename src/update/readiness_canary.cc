@@ -423,6 +423,7 @@ CanaryResult RunReadinessCanary(const CanaryOptions& options) {
                          "BLOX7_WINDOW_TRACE=1",
                          "BLOX7_EGL_TRACE=1",
                          "BLOX7_REQUIRE_REAL_GRAPHICS=1",
+                         "BLOX7_SHOW_WINDOW_ON_FIRST_SWAP=0",
                          "BLOX7_AUTO_EXIT_AFTER_PRESENT_MS=5000",
                          "BLOX7_STARTUP_THREAD_TIMEOUT_MS=120000",
                      });
