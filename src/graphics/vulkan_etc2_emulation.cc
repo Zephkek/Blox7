@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <immintrin.h>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -153,6 +154,29 @@ unsigned DecodeWorkerCount() {
   return count;
 }
 
+struct StagingMemory {
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  std::uint8_t* mapped = nullptr;
+  bool host_cached = false;
+};
+
+struct StagingHole {
+  VkDeviceSize offset = 0;
+  VkDeviceSize size = 0;
+};
+
+struct StagingBlock {
+  StagingMemory memory;
+  VkDeviceSize used = 0;
+  std::vector<StagingHole> holes;
+};
+
+struct StagingPool {
+  std::mutex mutex;
+  std::vector<StagingBlock> blocks[2];
+};
+
 struct HostDevice {
   VkDevice device = VK_NULL_HANDLE;
   bool emulated = false;
@@ -178,6 +202,7 @@ struct HostDevice {
   PFN_vkAllocateMemory allocate_memory = nullptr;
   PFN_vkGetBufferMemoryRequirements get_buffer_memory_requirements = nullptr;
   std::unique_ptr<Etc2GpuDecoder> gpu;
+  mutable StagingPool staging;
 };
 
 template <typename Function>
@@ -218,9 +243,11 @@ bool IsColorFormat(EtcFormat format) {
 
 struct Staging {
   VkDevice device = VK_NULL_HANDLE;
-  VkBuffer buffer = VK_NULL_HANDLE;
-  VkDeviceMemory memory = VK_NULL_HANDLE;
-  bool host_cached = false;
+  StagingMemory memory;
+  VkDeviceSize offset = 0;
+  VkDeviceSize size = 0;
+  bool host = false;
+  bool dedicated = false;
 };
 
 struct PendingUpload {
@@ -269,8 +296,8 @@ void LogFailure(const char* message) {
   }
 }
 
-bool CreateStaging(const HostDevice& dev, VkDeviceSize size, Staging* staging,
-                   std::uint8_t** mapped) {
+bool CreateStaging(const HostDevice& dev, VkDeviceSize size,
+                   StagingMemory* out) {
   if (dev.create_buffer == nullptr || dev.allocate_memory == nullptr ||
       dev.get_buffer_memory_requirements == nullptr ||
       dev.bind_buffer_memory == nullptr || dev.map_memory == nullptr ||
@@ -326,15 +353,14 @@ bool CreateStaging(const HostDevice& dev, VkDeviceSize size, Staging* staging,
     dev.free_memory(dev.device, memory, nullptr);
     return false;
   }
-  *staging = {dev.device, buffer, memory,
-              (dev.memory.memoryTypes[type].propertyFlags &
-               VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0};
-  *mapped = static_cast<std::uint8_t*>(data);
+  *out = {buffer, memory, static_cast<std::uint8_t*>(data),
+          (dev.memory.memoryTypes[type].propertyFlags &
+           VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0};
   return true;
 }
 
 bool CreateDeviceStaging(const HostDevice& dev, VkDeviceSize size,
-                         Staging* staging) {
+                         StagingMemory* out) {
   if (dev.create_buffer == nullptr || dev.allocate_memory == nullptr ||
       dev.get_buffer_memory_requirements == nullptr ||
       dev.bind_buffer_memory == nullptr || dev.destroy_buffer == nullptr ||
@@ -394,39 +420,177 @@ bool CreateDeviceStaging(const HostDevice& dev, VkDeviceSize size,
     }
     return false;
   }
-  *staging = {dev.device, buffer, memory, false};
+  *out = {buffer, memory, nullptr, false};
   return true;
 }
 
-bool PrepareStaging(const HostDevice& dev, bool gpu, VkDeviceSize total,
-                    Staging* staging, std::vector<PendingUpload>* uploads) {
-  if (gpu && CreateDeviceStaging(dev, total, staging)) {
-    for (PendingUpload& upload : *uploads) {
-      upload.target_buffer = staging->buffer;
+bool CreateMemory(const HostDevice& dev, bool host, VkDeviceSize size,
+                  StagingMemory* out) {
+  return host ? CreateStaging(dev, size, out)
+              : CreateDeviceStaging(dev, size, out);
+}
+
+void DestroyMemory(const HostDevice& dev, const StagingMemory& memory) {
+  if (dev.destroy_buffer != nullptr) {
+    dev.destroy_buffer(dev.device, memory.buffer, nullptr);
+  }
+  if (dev.free_memory != nullptr) {
+    dev.free_memory(dev.device, memory.memory, nullptr);
+  }
+}
+
+bool TakeRange(StagingBlock* block, VkDeviceSize size, VkDeviceSize* offset) {
+  for (auto hole = block->holes.begin(); hole != block->holes.end(); ++hole) {
+    if (hole->size < size) {
+      continue;
     }
+    *offset = hole->offset;
+    hole->offset += size;
+    hole->size -= size;
+    if (hole->size == 0) {
+      block->holes.erase(hole);
+    }
+    block->used += size;
     return true;
   }
-  std::uint8_t* mapped = nullptr;
-  if (!CreateStaging(dev, total, staging, &mapped)) {
+  return false;
+}
+
+void ReturnRange(StagingBlock* block, VkDeviceSize offset, VkDeviceSize size) {
+  std::vector<StagingHole>& holes = block->holes;
+  const auto next = std::find_if(
+      holes.begin(), holes.end(),
+      [offset](const StagingHole& hole) { return hole.offset > offset; });
+  const bool joins_previous =
+      next != holes.begin() &&
+      std::prev(next)->offset + std::prev(next)->size == offset;
+  const bool joins_next = next != holes.end() && offset + size == next->offset;
+  if (joins_previous && joins_next) {
+    std::prev(next)->size += size + next->size;
+    holes.erase(next);
+  } else if (joins_previous) {
+    std::prev(next)->size += size;
+  } else if (joins_next) {
+    next->offset = offset;
+    next->size += size;
+  } else {
+    holes.insert(next, {offset, size});
+  }
+  block->used -= size;
+}
+
+bool AcquireStaging(const HostDevice& dev, bool host, VkDeviceSize bytes,
+                    Staging* staging) {
+  const VkDeviceSize size = (bytes + kEtc2StagingAlignment - 1) /
+                            kEtc2StagingAlignment * kEtc2StagingAlignment;
+  if (size == 0) {
+    return false;
+  }
+  if (size <= kEtc2StagingBlockBytes) {
+    {
+      std::lock_guard<std::mutex> lock(dev.staging.mutex);
+      for (StagingBlock& block : dev.staging.blocks[host]) {
+        VkDeviceSize offset = 0;
+        if (TakeRange(&block, size, &offset)) {
+          *staging = {dev.device, block.memory, offset, size, host, false};
+          return true;
+        }
+      }
+    }
+    StagingBlock block;
+    if (CreateMemory(dev, host, kEtc2StagingBlockBytes, &block.memory)) {
+      block.used = size;
+      if (size < kEtc2StagingBlockBytes) {
+        block.holes.push_back({size, kEtc2StagingBlockBytes - size});
+      }
+      *staging = {dev.device, block.memory, 0, size, host, false};
+      std::lock_guard<std::mutex> lock(dev.staging.mutex);
+      dev.staging.blocks[host].push_back(std::move(block));
+      return true;
+    }
+  }
+  StagingMemory memory;
+  if (!CreateMemory(dev, host, size, &memory)) {
+    return false;
+  }
+  *staging = {dev.device, memory, 0, size, host, true};
+  return true;
+}
+
+void ReleaseStaging(const HostDevice& dev, const Staging& staging) {
+  if (staging.dedicated) {
+    DestroyMemory(dev, staging.memory);
+    return;
+  }
+  std::vector<StagingBlock> idle;
+  {
+    std::lock_guard<std::mutex> lock(dev.staging.mutex);
+    std::vector<StagingBlock>& blocks = dev.staging.blocks[staging.host];
+    const auto owner = std::find_if(
+        blocks.begin(), blocks.end(), [&staging](const StagingBlock& block) {
+          return block.memory.memory == staging.memory.memory;
+        });
+    if (owner == blocks.end()) {
+      return;
+    }
+    ReturnRange(&*owner, staging.offset, staging.size);
+    if (owner->used != 0) {
+      return;
+    }
+    bool kept = false;
+    for (auto block = blocks.begin(); block != blocks.end();) {
+      if (block->used == 0 && kept) {
+        idle.push_back(std::move(*block));
+        block = blocks.erase(block);
+      } else {
+        kept = kept || block->used == 0;
+        ++block;
+      }
+    }
+  }
+  for (const StagingBlock& block : idle) {
+    DestroyMemory(dev, block.memory);
+  }
+}
+
+void ReleaseAllStaging(const HostDevice& dev) {
+  std::vector<StagingBlock> doomed;
+  {
+    std::lock_guard<std::mutex> lock(dev.staging.mutex);
+    for (std::vector<StagingBlock>& blocks : dev.staging.blocks) {
+      for (StagingBlock& block : blocks) {
+        doomed.push_back(std::move(block));
+      }
+      blocks.clear();
+    }
+  }
+  for (const StagingBlock& block : doomed) {
+    DestroyMemory(dev, block.memory);
+  }
+}
+
+template <typename Region>
+bool PrepareStaging(const HostDevice& dev, bool gpu, VkDeviceSize total,
+                    Staging* staging, std::vector<PendingUpload>* uploads,
+                    std::vector<Region>* regions) {
+  const bool host = !gpu || !AcquireStaging(dev, false, total, staging);
+  if (host && !AcquireStaging(dev, true, total, staging)) {
     LogFailure("could not allocate a host-visible staging buffer");
     return false;
   }
   for (PendingUpload& upload : *uploads) {
-    upload.target = mapped + upload.target_offset;
-    upload.target_cached = staging->host_cached;
-    upload.target_buffer = staging->buffer;
-    upload.gpu = false;
+    upload.target_offset += staging->offset;
+    upload.target_buffer = staging->memory.buffer;
+    if (host) {
+      upload.target = staging->memory.mapped + upload.target_offset;
+      upload.target_cached = staging->memory.host_cached;
+      upload.gpu = false;
+    }
+  }
+  for (Region& region : *regions) {
+    region.bufferOffset += staging->offset;
   }
   return true;
-}
-
-void DestroyStaging(const HostDevice& dev, const Staging& staging) {
-  if (dev.destroy_buffer != nullptr) {
-    dev.destroy_buffer(dev.device, staging.buffer, nullptr);
-  }
-  if (dev.free_memory != nullptr) {
-    dev.free_memory(dev.device, staging.memory, nullptr);
-  }
 }
 
 bool ScaledAxis(std::uint32_t base, std::uint32_t scale, std::uint32_t mip,
@@ -949,8 +1113,9 @@ void VulkanEtc2Emulation::DestroyDevice(VkDevice device) {
   }
   if (const HostDevice* dev = state_->Find(device); dev != nullptr) {
     for (const Staging& staging : doomed) {
-      DestroyStaging(*dev, staging);
+      ReleaseStaging(*dev, staging);
     }
+    ReleaseAllStaging(*dev);
   }
   std::lock_guard<std::shared_mutex> lock(state_->devices_mutex);
   for (auto it = state_->queues.begin(); it != state_->queues.end();) {
@@ -1196,11 +1361,11 @@ void VulkanEtc2Emulation::CmdCopyBufferToImage(
     LogFailure("skipped an upload with an unsupported region");
     return;
   }
-  if (!PrepareStaging(*dev, gpu, total, &staging, &uploads)) {
+  if (!PrepareStaging(*dev, gpu, total, &staging, &uploads, &rewritten)) {
     return;
   }
   state_->Record(command_buffer, std::move(uploads), staging);
-  dev->copy_buffer_to_image(command_buffer, staging.buffer, destination,
+  dev->copy_buffer_to_image(command_buffer, staging.memory.buffer, destination,
                             layout, region_count, rewritten.data());
 }
 
@@ -1229,12 +1394,12 @@ void VulkanEtc2Emulation::CmdCopyBufferToImage2(
     LogFailure("skipped an upload with an unsupported region");
     return;
   }
-  if (!PrepareStaging(*dev, gpu, total, &staging, &uploads)) {
+  if (!PrepareStaging(*dev, gpu, total, &staging, &uploads, &rewritten)) {
     return;
   }
   state_->Record(command_buffer, std::move(uploads), staging);
   VkCopyBufferToImageInfo2 host_info = *info;
-  host_info.srcBuffer = staging.buffer;
+  host_info.srcBuffer = staging.memory.buffer;
   host_info.pRegions = rewritten.data();
   dev->copy_buffer_to_image2(command_buffer, &host_info);
 }
@@ -1587,7 +1752,7 @@ void VulkanEtc2Emulation::ReleaseCommandBuffer(VkCommandBuffer command_buffer) {
   }
   for (const Staging& staging : doomed) {
     if (const HostDevice* dev = state_->Find(staging.device); dev != nullptr) {
-      DestroyStaging(*dev, staging);
+      ReleaseStaging(*dev, staging);
     }
   }
 }

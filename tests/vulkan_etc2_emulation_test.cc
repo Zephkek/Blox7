@@ -115,8 +115,13 @@ class VulkanEtc2Test : public ::testing::TestWithParam<bool> {
                                     &region);
   }
 
-  const std::vector<std::uint8_t>& Output(VkCommandBuffer command) const {
-    return memory_bytes.at(bindings.at(recorded.at(command)).first);
+  std::vector<std::uint8_t> Output(VkCommandBuffer command,
+                                   std::size_t size) const {
+    const std::vector<std::uint8_t>& bytes =
+        memory_bytes.at(bindings.at(recorded.at(command)).first);
+    const VkDeviceSize offset = upload_regions.at(command).front().bufferOffset;
+    if (offset + size > bytes.size()) return {};
+    return {bytes.begin() + offset, bytes.begin() + offset + size};
   }
 
   static std::vector<std::uint8_t> Decode(const std::uint8_t* source,
@@ -279,7 +284,7 @@ TEST_P(VulkanEtc2Test, UsesCurrentSourceOnEverySubmission) {
     std::memset(source.data, value, 256 * 256);
     const auto expected = Decode(source.data, 256, 256);
     emulation->PrepareSubmit(VK_NULL_HANDLE, &command, 1);
-    EXPECT_EQ(Output(command), expected);
+    EXPECT_EQ(Output(command, expected.size()), expected);
   }
   emulation->ReleaseCommandBuffer(command);
   EXPECT_FALSE(emulation->HasPendingUploads());
@@ -302,7 +307,7 @@ TEST_P(VulkanEtc2Test, DecodesPaddedRowsAndArrayLayers) {
     expected.insert(expected.end(), decoded.begin(), decoded.end());
   }
   emulation->PrepareSubmit(VK_NULL_HANDLE, &command, 1);
-  EXPECT_EQ(Output(command), expected);
+  EXPECT_EQ(Output(command, expected.size()), expected);
 }
 
 TEST_P(VulkanEtc2Test, HandlesConcurrentSubmissionsOfUnmappedSources) {
@@ -321,7 +326,7 @@ TEST_P(VulkanEtc2Test, HandlesConcurrentSubmissionsOfUnmappedSources) {
   for (const auto command : commands) {
     callers.emplace_back([&, command] {
       emulation->PrepareSubmit(VK_NULL_HANDLE, &command, 1);
-      EXPECT_EQ(Output(command), expected);
+      EXPECT_EQ(Output(command, expected.size()), expected);
     });
   }
   for (auto& caller : callers) caller.join();
@@ -338,7 +343,8 @@ TEST_P(VulkanEtc2Test, RepeatedSecondaryIsDecodedOnce) {
   const VkCommandBuffer repeated[] = {secondary, secondary};
   emulation->CmdExecuteCommands(device, primary, 2, repeated);
   emulation->PrepareSubmit(VK_NULL_HANDLE, &primary, 1);
-  EXPECT_EQ(Output(secondary), Decode(source.data, 256, 256));
+  const auto expected = Decode(source.data, 256, 256);
+  EXPECT_EQ(Output(secondary, expected.size()), expected);
   emulation->ReleaseCommandBuffer(primary);
   emulation->ReleaseCommandBuffer(secondary);
   EXPECT_FALSE(emulation->HasPendingUploads());
@@ -355,7 +361,7 @@ TEST_P(VulkanEtc2Test, UpscalingStillProducesTheSamePixels) {
   const auto decoded = Decode(source.data, 16, 16);
   ResampleRgba(decoded.data(), 16, 16, 64, 64, expected.data());
   emulation->PrepareSubmit(VK_NULL_HANDLE, &command, 1);
-  EXPECT_EQ(Output(command), expected);
+  EXPECT_EQ(Output(command, expected.size()), expected);
 }
 
 TEST_P(VulkanEtc2Test, DefaultPreservesStreamedMipChain) {
@@ -401,7 +407,7 @@ TEST_P(VulkanEtc2Test, DefaultPreservesStreamedMipChain) {
     EXPECT_EQ(uploads[mip].imageExtent.width, 64U >> mip);
     EXPECT_EQ(uploads[mip].imageExtent.height, 64U >> mip);
   }
-  EXPECT_TRUE(Output(command) == expected);
+  EXPECT_TRUE(Output(command, expected.size()) == expected);
 
   const auto larger = CreateImage(128, 128, 1, kMips + 1);
   std::vector<VkImageCopy> copies;
@@ -437,6 +443,44 @@ TEST_P(VulkanEtc2Test, NativeSupportPassesThroughWithoutCpuUploads) {
   EXPECT_EQ(last_image.extent.width, 4U);
   EXPECT_EQ(recorded.at(command), source.buffer);
   EXPECT_FALSE(emulation->HasPendingUploads());
+}
+
+TEST_P(VulkanEtc2Test, HostStagingSharesOneMappedBlockAndKeepsIt) {
+  auto source = CreateSource(16 * 16);
+  std::memset(source.data, 0x44, 16 * 16);
+  const auto expected = Decode(source.data, 16, 16);
+  const auto image = CreateImage(16, 16);
+  const auto first = Handle<VkCommandBuffer>(10);
+  const auto second = Handle<VkCommandBuffer>(11);
+  const unsigned maps = map_calls.load();
+  Record(first, source, image, 16, 16);
+  Record(second, source, image, 16, 16);
+  EXPECT_EQ(map_calls.load() - maps, 1U);
+  ASSERT_EQ(recorded.at(first), recorded.at(second));
+  const VkDeviceMemory block = bindings.at(recorded.at(first)).first;
+  EXPECT_EQ(memory_bytes.at(block).size(), kEtc2StagingBlockBytes);
+  const VkDeviceSize a = upload_regions.at(first)[0].bufferOffset;
+  const VkDeviceSize b = upload_regions.at(second)[0].bufferOffset;
+  EXPECT_EQ(a % kEtc2StagingAlignment, 0U);
+  EXPECT_EQ(b % kEtc2StagingAlignment, 0U);
+  EXPECT_GE(std::max(a, b) - std::min(a, b), expected.size());
+  const VkCommandBuffer both[] = {first, second};
+  emulation->PrepareSubmit(VK_NULL_HANDLE, both, 2);
+  EXPECT_EQ(Output(first, expected.size()), expected);
+  EXPECT_EQ(Output(second, expected.size()), expected);
+  emulation->ReleaseCommandBuffer(first);
+  emulation->ReleaseCommandBuffer(second);
+  EXPECT_FALSE(emulation->HasPendingUploads());
+  ASSERT_EQ(memory_bytes.count(block), 1U);
+  const auto third = Handle<VkCommandBuffer>(12);
+  Record(third, source, image, 16, 16);
+  EXPECT_EQ(bindings.at(recorded.at(third)).first, block);
+  EXPECT_EQ(upload_regions.at(third)[0].bufferOffset, std::min(a, b));
+  EXPECT_EQ(map_calls.load() - maps, 1U);
+  emulation->PrepareSubmit(VK_NULL_HANDLE, &third, 1);
+  EXPECT_EQ(Output(third, expected.size()), expected);
+  emulation->DestroyDevice(device);
+  EXPECT_EQ(memory_bytes.count(block), 0U);
 }
 
 INSTANTIATE_TEST_SUITE_P(HostMemory, VulkanEtc2Test, ::testing::Bool());
@@ -1128,6 +1172,115 @@ TEST_F(VulkanEtc2GpuTest, ResubmissionDecodesTheCurrentSourceAgain) {
   EXPECT_EQ(Dispatches(), 1U);
   emulation->ReleaseCommandBuffer(command);
   EXPECT_FALSE(emulation->HasPendingUploads());
+}
+
+TEST_F(VulkanEtc2GpuTest, ReleasedStagingIsReusedWithoutAllocating) {
+  const auto first = Handle<VkCommandBuffer>(10);
+  const auto second = Handle<VkCommandBuffer>(11);
+  Source a{};
+  Source b{};
+  Upload(first, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 64, 64, 1, &a);
+  Upload(second, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 64, 64, 1, &b);
+  const VkBuffer block = staging_of.at(first);
+  EXPECT_EQ(staging_of.at(second), block);
+  EXPECT_EQ(sizes.at(block), kEtc2StagingBlockBytes);
+  EXPECT_EQ(memory_types.at(bindings.at(block).first), 1U);
+  const VkDeviceSize start = rewritten.at(first)[0].bufferOffset;
+  EXPECT_GE(rewritten.at(second)[0].bufferOffset, start + 64 * 64 * 4);
+  EXPECT_EQ(rewritten.at(second)[0].bufferOffset % kEtc2StagingAlignment, 0U);
+  const std::size_t allocations = memory_types.size();
+  emulation->ReleaseCommandBuffer(first);
+  const auto third = Handle<VkCommandBuffer>(12);
+  Source c{};
+  const auto regions =
+      Upload(third, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 64, 64, 1, &c);
+  EXPECT_EQ(memory_types.size(), allocations);
+  EXPECT_EQ(staging_of.at(third), block);
+  EXPECT_EQ(rewritten.at(third)[0].bufferOffset, start);
+  emulation->PrepareSubmit(graphics, &third, 1);
+  ASSERT_EQ(Dispatches(), 1U);
+  for (const Operation& operation : executed) {
+    if (operation.dispatch) {
+      EXPECT_EQ(operation.buffers[1].buffer, block);
+      EXPECT_EQ(operation.buffers[1].offset + operation.job[8] * 4, start);
+    }
+  }
+}
+
+TEST_F(VulkanEtc2GpuTest, OversizedUploadGetsItsOwnAllocationUntilReleased) {
+  const auto command = Handle<VkCommandBuffer>(10);
+  Source source{};
+  Upload(command, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 2048, 2052, 1, &source);
+  const VkBuffer staging = staging_of.at(command);
+  const VkDeviceSize bytes = VkDeviceSize{2048} * 2052 * 4;
+  ASSERT_GT(bytes, kEtc2StagingBlockBytes);
+  EXPECT_EQ(sizes.at(staging), bytes);
+  EXPECT_EQ(rewritten.at(command)[0].bufferOffset, 0U);
+  const VkDeviceMemory memory = bindings.at(staging).first;
+  EXPECT_EQ(memory_bytes.at(memory).size(), bytes);
+  EXPECT_EQ(memory_types.at(memory), 1U);
+  emulation->ReleaseCommandBuffer(command);
+  EXPECT_EQ(memory_bytes.count(memory), 0U);
+  EXPECT_EQ(sizes.count(staging), 0U);
+}
+
+TEST_F(VulkanEtc2GpuTest, IdleStagingBlocksAreTrimmedBackToOne) {
+  std::vector<VkCommandBuffer> commands;
+  std::vector<VkDeviceMemory> blocks;
+  for (unsigned index = 0; index < 3; ++index) {
+    commands.push_back(Handle<VkCommandBuffer>(10 + index));
+    Source source{};
+    Upload(commands.back(), VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 1600, 1600, 1,
+           &source);
+    blocks.push_back(bindings.at(staging_of.at(commands.back())).first);
+    EXPECT_EQ(memory_bytes.at(blocks.back()).size(), kEtc2StagingBlockBytes);
+  }
+  EXPECT_NE(blocks[0], blocks[1]);
+  EXPECT_NE(blocks[1], blocks[2]);
+  EXPECT_NE(blocks[0], blocks[2]);
+  const auto alive = [this, &blocks] {
+    return std::count_if(blocks.begin(), blocks.end(),
+                         [this](VkDeviceMemory block) {
+                           return memory_bytes.count(block) != 0;
+                         });
+  };
+  emulation->ReleaseCommandBuffer(commands[1]);
+  EXPECT_EQ(alive(), 3);
+  emulation->ReleaseCommandBuffer(commands[2]);
+  EXPECT_EQ(alive(), 2);
+  emulation->ReleaseCommandBuffer(commands[0]);
+  EXPECT_EQ(alive(), 1);
+  const std::size_t allocations = memory_types.size();
+  const auto next = Handle<VkCommandBuffer>(20);
+  Source source{};
+  Upload(next, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 1600, 1600, 1, &source);
+  EXPECT_EQ(memory_types.size(), allocations);
+  EXPECT_EQ(memory_bytes.count(bindings.at(staging_of.at(next)).first), 1U);
+}
+
+TEST_F(VulkanEtc2GpuTest, DestroyDeviceFreesEveryStagingAllocation) {
+  const auto pooled = Handle<VkCommandBuffer>(10);
+  const auto oversized = Handle<VkCommandBuffer>(11);
+  const auto host = Handle<VkCommandBuffer>(12);
+  Source a{};
+  Source b{};
+  Source c{};
+  Upload(pooled, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 64, 64, 3, &a);
+  Upload(oversized, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 2048, 2052, 1, &b);
+  emulation->PrepareSubmit(graphics, &pooled, 1);
+  fail_device_memory = true;
+  Upload(host, VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK, 2048, 2048, 1, &c);
+  EXPECT_EQ(memory_types.at(bindings.at(staging_of.at(host)).first), 0U);
+  EXPECT_EQ(sizes.at(staging_of.at(host)), kEtc2StagingBlockBytes);
+  ASSERT_TRUE(emulation->HasPendingUploads());
+  emulation->DestroyDevice(device);
+  EXPECT_FALSE(emulation->HasPendingUploads());
+  for (const auto& [memory, type] : memory_types) {
+    EXPECT_EQ(memory_bytes.count(memory), 0U) << "type " << type;
+  }
+  for (const auto& [buffer, usage] : usages) {
+    EXPECT_EQ(sizes.count(buffer), 0U) << "usage " << usage;
+  }
 }
 
 }

@@ -30,6 +30,9 @@ inline constexpr std::uint32_t kSmallTextureMaxExtent = 64;
 inline constexpr std::uint32_t kDefaultSmallTextureUpscale = 1;
 std::uint32_t SmallTextureUpscale(const char* value);
 
+inline constexpr VkDeviceSize kEtc2StagingBlockBytes = VkDeviceSize{16} << 20;
+inline constexpr VkDeviceSize kEtc2StagingAlignment = 256;
+
 class VulkanEtc2Emulation final {
  public:
   VulkanEtc2Emulation();
