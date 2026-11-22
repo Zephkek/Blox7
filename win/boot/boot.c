@@ -6,6 +6,7 @@
 
 #include "../include/w32boot.h"
 #include "boot.h"
+#include "isa.h"
 
 #define MAIN_STACK_SIZE (16u << 20)
 
@@ -22,6 +23,7 @@ enum { R_X86_64_GLOB_DAT = 6, R_X86_64_JUMP_SLOT = 7, R_X86_64_RELATIVE = 8 };
 static struct w32boot g_boot;
 static w32_libc_start_fn g_start;
 static int g_exit_code = 1;
+static uintptr_t g_libc_code_lo, g_libc_code_hi;
 
 static const wchar_t *g_product = L"Blox7";
 
@@ -115,6 +117,10 @@ static void map_libc(const wchar_t *path) {
             uint64_t start = ph[i].vaddr & ~0xfffull;
             if (!VirtualProtect(base + start, (size_t)(ph[i].vaddr + ph[i].memsz - start), protection(ph[i].flags), &old))
                 boot_fail(L"could not protect libc.so", GetLastError());
+            if (ph[i].flags & PF_X) {
+                g_libc_code_lo = (uintptr_t)(base + start);
+                g_libc_code_hi = (uintptr_t)(base + ((ph[i].vaddr + ph[i].memsz + 0xfff) & ~0xfffull));
+            }
         }
     FlushInstructionCache(GetCurrentProcess(), base, (size_t)hi);
 
@@ -271,6 +277,7 @@ int boot_run(const wchar_t *bin_dir, int argc, wchar_t **argv) {
     if (!g_boot.argv) boot_fail(L"out of memory", 0);
     for (i = 0; i < argc; i++) g_boot.argv[i] = utf8(argv[i]);
     g_boot.argv[argc] = NULL;
+    isa_start(&g_boot, g_boot.libc_base, g_libc_code_lo, g_libc_code_hi);
 
     thread = CreateThread(NULL, MAIN_STACK_SIZE, main_thread, NULL, 0, NULL);
     if (!thread) boot_fail(L"could not start the main thread", GetLastError());

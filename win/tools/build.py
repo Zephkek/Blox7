@@ -272,7 +272,7 @@ def build_libc():
 def build_boot():
     os.makedirs(OUT, exist_ok=True)
     cmd = [f'{MINGW}/bin/clang.exe', '-O2', '-Wall', '-Wextra', '-municode', '-mwindows', '-o', os.path.join(OUT, 'blox7.exe'),
-           os.path.join(WIN, 'boot', 'blox7.c'), os.path.join(WIN, 'boot', 'boot.c'),
+           os.path.join(WIN, 'boot', 'blox7.c'), os.path.join(WIN, 'boot', 'boot.c'), os.path.join(WIN, 'boot', 'isa.c'),
            '-Wl,--major-subsystem-version,6', '-Wl,--minor-subsystem-version,1',
            '-Wl,--major-os-version,6', '-Wl,--minor-os-version,1', '-static']
     subprocess.check_call(cmd)
@@ -421,6 +421,9 @@ def build_blox7():
     boot = os.path.join(gen, 'boot.o')
     subprocess.check_call([f'{MINGW}/bin/clang.exe', '-O2', '-Wall', '-Wextra', '-c', os.path.join(WIN, 'boot', 'boot.c'),
                            '-o', boot])
+    isa = os.path.join(gen, 'isa.o')
+    subprocess.check_call([f'{MINGW}/bin/clang.exe', '-O2', '-Wall', '-Wextra', '-c', os.path.join(WIN, 'boot', 'isa.c'),
+                           '-o', isa])
     # windows can't tell Blox7.exe from the runtime's blox7.exe, so the launcher gets a folder of its own
     release = os.path.join(OUT, 'release')
     os.makedirs(release, exist_ok=True)
@@ -436,7 +439,7 @@ def build_blox7():
                                                          f'{MINGW}/bin/clang.exe', f'{MINGW}/bin/clang++.exe')))
     cmd = [f'{MINGW}/bin/clang++.exe', '-std=c++20', '-O2', '-Wall', '-Wextra', '-municode', '-mwindows', '-I', gen,
            os.path.join(src, 'main.cpp'), os.path.join(src, 'runtime.cpp'), os.path.join(src, 'settings.cpp'),
-           os.path.join(src, 'ui.cpp'), os.path.join(src, 'update.cpp'), boot, res, f'@{update}',
+           os.path.join(src, 'ui.cpp'), os.path.join(src, 'update.cpp'), boot, isa, res, f'@{update}',
            '-o', exe, '-static', '-lws2_32', '-lcrypt32', '-Wl,--gc-sections', '-Wl,--major-subsystem-version,6',
            '-Wl,--minor-subsystem-version,1', '-Wl,--major-os-version,6', '-Wl,--minor-os-version,1']
     subprocess.check_call(cmd)

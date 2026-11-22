@@ -189,6 +189,7 @@ extern "C" __attribute__((visibility("default"), no_stack_protector)) int __w32_
   w32_stall_start();
   w32_init_loader();
   w32_init_vex();
+  if (boot->size >= sizeof(struct w32boot) && boot->isa_front) boot->isa_front();
   w32_debug("start: files, signals, loader, vex");
 
   int skip = 0;

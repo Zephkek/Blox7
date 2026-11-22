@@ -33,6 +33,8 @@ struct w32boot {
     const void *libc_phdr;
     uint16_t libc_phnum;
     uintptr_t stack_low, stack_high;
+    void (HOSTCALL *isa_front)(void);
+    void (HOSTCALL *isa_code)(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path);
 };
 
 typedef int (ELFCALL *w32_libc_start_fn)(struct w32boot *boot);

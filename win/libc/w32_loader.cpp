@@ -522,6 +522,8 @@ void protect(Object* o) {
     DWORD old;
     if (w32.VirtualProtect(reinterpret_cast<void*>(start), end - start, protection(p.p_flags), &old)) {
       w32_mem_note_run(start, end, o->map_start, protection(p.p_flags));
+      if ((p.p_flags & PF_X) && w32_boot->size >= sizeof(struct w32boot) && w32_boot->isa_code)
+        w32_boot->isa_code(o->base, start, end, o->path);
     } else {
       w32_mem_forget_runs(start, end);
     }
