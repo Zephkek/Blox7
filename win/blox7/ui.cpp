@@ -641,6 +641,7 @@ void refresh_info() {
   g.backend = graphics_backend(g.paths);
   if (g.backend == L"Vulkan" && !g.vulkan_driver) g.backend = L"OpenGL ES (no Vulkan driver)";
   else if (g.backend == L"Vulkan" && vulkan_held_back(load_settings(g.paths))) g.backend = L"OpenGL ES (modded Windows 7 driver)";
+  else if (g.backend == L"OpenGL ES" && load_settings(g.paths).angle) g.backend = L"ANGLE (OpenGL ES on Direct3D 11)";
 }
 
 size_t index_of(const std::vector<std::wstring>& values, const std::wstring& value) {
@@ -652,10 +653,6 @@ bool uses_vulkan(const std::wstring& backend) {
 }
 
 bool runs_vulkan(const Settings& s) { return uses_vulkan(s.backend) && g.vulkan_driver && !vulkan_held_back(s); }
-
-bool uses_gles(const std::wstring& backend) {
-  return backend == L"opengl" || backend == L"gles" || backend == L"system" || backend == L"auto";
-}
 
 std::wstring canonical_device(const std::wstring& device) {
   if (device == L"pc") return L"pc-windows-11";
@@ -727,21 +724,6 @@ void link(int id, float x, float y, const std::wstring& label, std::function<voi
   clickable(id, rect(x, y, w, 15), std::move(action), Cursor::Hand);
 }
 
-void radio_mark(float x, float y, bool checked, float hv) {
-  const D2D1_POINT_2F center = pt(x + 6.5f, y + 6.5f);
-  dot(center, 6, 6, ink(kWhite));
-  dot(center, 4.5f, 4.5f, gradient({{0, 0xCBCFD5}, {1, 0xF6F6F6}}, pt(0, y + 2), pt(0, y + 11)));
-  if (hv > 0.01f) {
-    ID2D1LinearGradientBrush* lit = gradient({{0, 0xB1DFFD}, {1, 0xE9F7FE}}, pt(0, y + 2), pt(0, y + 11));
-    if (lit) lit->SetOpacity(hv);
-    dot(center, 4.5f, 4.5f, lit);
-  }
-  ring(center, 6, ink(mix(0x8E8F8F, 0x3C7FB1, hv)));
-  if (!checked) return;
-  dot(center, 3.2f, 3.2f, gradient({{0, 0x7AA3D6}, {1, 0x1D3A6A}}, pt(0, y + 3.3f), pt(0, y + 9.7f)));
-  dot(pt(x + 5.6f, y + 5.3f), 1.2f, 0.9f, ink(kWhite, 0.7f));
-}
-
 void check_mark(float x, float y, bool checked, float hv) {
   fill_rect(D2D1::RectF(x, y, x + 13, y + 13), ink(kWhite));
   const D2D1_RECT_F inner = D2D1::RectF(x + 2, y + 2, x + 11, y + 11);
@@ -749,15 +731,6 @@ void check_mark(float x, float y, bool checked, float hv) {
   if (hv > 0.01f) fill_vgrad(inner, 0, {{0, 0xB1DFFD}, {1, 0xE9F7FE}}, hv);
   stroke_rect(D2D1::RectF(x, y, x + 13, y + 13), mix(0x8E8F8F, 0x3C7FB1, hv));
   if (checked) path({pt(x + 3, y + 6.8f), pt(x + 5.6f, y + 9.4f), pt(x + 10.2f, y + 3.6f)}, ink(0x33415E), 1.8f, false);
-}
-
-void radio(Control control, size_t index, float x, float y, float w, bool checked, const std::wstring& label,
-           std::function<void()> pick) {
-  const int id = option_id(control, index);
-  const float hv = checked ? 0 : hover(id);
-  radio_mark(x, y + 2, checked, hv);
-  text(label, g.fonts.body, rect(x + 18, y + 1, w - 18, 15), kText);
-  if (!checked) clickable(id, rect(x, y, std::min(w, text_width(label, g.fonts.body) + 22), 17), std::move(pick));
 }
 
 void checkbox(Control control, float x, float y, float w, bool checked, const std::wstring& label, std::function<void()> flip,
@@ -1084,21 +1057,24 @@ void page_graphics(const D2D1_RECT_F& page) {
   float y = page.top + kMargin;
   const bool vulkan = uses_vulkan(g.pending.backend);
   const bool held_back = vulkan_held_back(g.pending);
-  group(rect(x, y, w, 68), L"Renderer");
+  group(rect(x, y, w, 72), L"Renderer");
   const wchar_t* vulkan_label = !g.vulkan_driver ? L"Vulkan (no Vulkan driver found)"
                                 : modded_windows7_driver(g.pending.gpu) ? L"Vulkan (modded Windows 7 driver, may not draw)"
                                 : L"Vulkan (recommended, fastest)";
-  radio(kRenderer, 0, ix, y + 16, iw, vulkan && !held_back, vulkan_label, [] {
-    g.pending.backend = L"direct-vulkan";
-    g.pending.vulkan_on_modded_driver = modded_windows7_driver(g.pending.gpu);
-    mark_dirty();
-  });
-  radio(kRenderer, 1, ix, y + 40, iw, held_back || (!vulkan && uses_gles(g.pending.backend)), L"OpenGL ES (for drivers that trip over Vulkan)", [] {
-    g.pending.backend = L"opengl";
-    g.pending.vulkan_on_modded_driver = false;
-    mark_dirty();
-  });
-  y += 68 + kMargin;
+  const size_t renderer = vulkan && !held_back ? 0 : g.pending.angle ? 2 : 1;
+  combo_row(L"Use:", ix, y + 16, 64, iw - 64, kRenderer, {vulkan_label, L"OpenGL ES", L"ANGLE (OpenGL ES on Direct3D 11)"},
+            renderer, true, [](size_t i) {
+              g.pending.backend = i == 0 ? L"direct-vulkan" : L"opengl";
+              g.pending.vulkan_on_modded_driver = i == 0 && modded_windows7_driver(g.pending.gpu);
+              g.pending.angle = i == 2;
+              mark_dirty();
+            });
+  const wchar_t* renderer_note = renderer == 2   ? L"OpenGL ES through Direct3D 11, for GPUs without OpenGL ES 3.0."
+                                 : renderer == 1 ? L"For drivers that trip over Vulkan; switches to ANGLE when needed."
+                                 : !g.vulkan_driver ? L"No Vulkan driver here, so Roblox runs OpenGL ES."
+                                                    : L"The graphics driver's Vulkan, the fastest way to run Roblox.";
+  text(renderer_note, g.fonts.body, rect(ix, y + 46, iw, 15), kSecondary);
+  y += 72 + kMargin;
 
   static const std::vector<std::wstring> qualities = {L"auto", L"performance", L"balanced", L"high", L"superhq"};
   group(rect(x, y, w, 96), L"Quality");

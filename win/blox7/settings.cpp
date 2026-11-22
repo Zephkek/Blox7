@@ -816,6 +816,7 @@ Settings load_settings(const Paths& paths) {
   if (const auto quality = ini.find("quality"); quality != ini.end()) s.quality = widen(quality->second);
   if (const auto gpu = ini.find("gpu"); gpu != ini.end()) s.gpu = widen(gpu->second);
   if (const auto vulkan = ini.find("vulkan_on_modded_driver"); vulkan != ini.end()) s.vulkan_on_modded_driver = vulkan->second == "on";
+  if (const auto angle = ini.find("angle"); angle != ini.end()) s.angle = angle->second == "on";
   if (const auto links = ini.find("join_links"); links != ini.end()) s.join_links = !links->second.empty();
   if (const auto scale = ini.find("render_scale"); scale != ini.end() && !scale->second.empty())
     s.render_scale = std::clamp(atoi(scale->second.c_str()), 50, 100);
@@ -939,6 +940,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["quality"] = narrow(s.quality);
   ini["gpu"] = narrow(s.gpu);
   ini["vulkan_on_modded_driver"] = s.vulkan_on_modded_driver ? "on" : "";
+  ini["angle"] = s.angle ? "on" : "";
   ini["refresh_rate"] = s.refresh_rate > 0 ? std::to_string(s.refresh_rate) : "";
   ini["render_scale"] = s.render_scale < 100 ? std::to_string(s.render_scale) : "";
   ini["profile"] = profile;
@@ -993,6 +995,7 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
     s.backend = L"opengl";
     SetEnvironmentVariableW(L"BLOX7_GRAPHICS_BACKEND", L"opengl");
   }
+  if (s.angle && (s.backend == L"opengl" || s.backend == L"gles")) SetEnvironmentVariableW(L"BLOX7_ANGLE", L"on");
   apply_owned_flags(paths, s);
   apply_quality(paths, s);
   SetEnvironmentVariableW(L"BLOX7_VULKAN_DEVICE", s.gpu.empty() ? nullptr : s.gpu.c_str());
