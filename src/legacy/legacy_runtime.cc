@@ -383,7 +383,9 @@ struct EngineStartupContext {
 };
 
 
-constexpr size_t kDefaultEngineStackSize = 1024ULL * 1024 * 1024;
+// windows commits a thread stack in full, a 1 gb one failed to start on 4 gb pcs
+// and startup never got near 16 mb
+constexpr size_t kDefaultEngineStackSize = 64ULL * 1024 * 1024;
 constexpr size_t kMinEngineStackSize = 16ULL * 1024 * 1024;
 
 
