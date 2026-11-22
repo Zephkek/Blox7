@@ -261,26 +261,5 @@ AuthSession AuthService::ResolveSession(std::string_view cookie_header,
   return session;
 }
 
-AuthCookieValidation AuthService::ValidateCookie(
-    const std::string& cookie_header) {
-  const AuthSession session = ResolveSession(cookie_header, false);
-  AuthCookieValidation validation;
-  validation.http_status = session.http_status;
-  validation.error = session.error;
-  switch (session.status) {
-    case AuthSessionStatus::kAuthenticated:
-      validation.status = AuthCookieStatus::kValid;
-      break;
-    case AuthSessionStatus::kGuest:
-    case AuthSessionStatus::kInvalid:
-      validation.status = AuthCookieStatus::kInvalid;
-      break;
-    case AuthSessionStatus::kUnavailable:
-      validation.status = AuthCookieStatus::kUnavailable;
-      break;
-  }
-  return validation;
-}
-
 }  // namespace services
 }  // namespace blox7

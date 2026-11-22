@@ -16,11 +16,6 @@
 #include <limits>
 #include <type_traits>
 
-#if defined(__GLIBC__)
-#include <features.h>
-#include <malloc.h>
-#endif
-
 namespace {
 
 extern "C" int __cxa_thread_atexit(void (*destructor)(void*), void* argument,
@@ -57,35 +52,6 @@ bool FillFromGetRandom(unsigned char* output, size_t size) noexcept {
     EntropyFailure();
   }
   return true;
-}
-
-bool ReadTextFile(const char* path, char* output, size_t capacity) noexcept {
-  if (path == nullptr || output == nullptr || capacity < 2) return false;
-
-  int descriptor;
-  do {
-    descriptor = ::open(path, O_RDONLY | O_CLOEXEC);
-  } while (descriptor < 0 && errno == EINTR);
-  if (descriptor < 0) return false;
-
-  ssize_t length;
-  do {
-    length = ::read(descriptor, output, capacity - 1);
-  } while (length < 0 && errno == EINTR);
-  const int read_errno = errno;
-  static_cast<void>(::close(descriptor));
-  if (length <= 0) {
-    errno = read_errno;
-    return false;
-  }
-
-  size_t size = static_cast<size_t>(length);
-  while (size != 0 &&
-         (output[size - 1] == '\n' || output[size - 1] == '\r')) {
-    --size;
-  }
-  output[size] = '\0';
-  return size != 0;
 }
 
 void FillFromUrandom(unsigned char* output, size_t size) noexcept {
@@ -231,24 +197,7 @@ void BionicArc4RandomBuffer(void* buffer, size_t size) noexcept {
 }
 
 BionicMallinfoSnapshot BionicMallinfo() noexcept {
-#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
-#if __GLIBC_PREREQ(2, 33)
-  const struct mallinfo2 host = ::mallinfo2();
-  return {host.arena,    host.ordblks, host.smblks,  host.hblks,
-          host.hblkhd,   host.usmblks, host.fsmblks, host.uordblks,
-          host.fordblks, host.keepcost};
-#endif
-#endif
   return {};
-}
-
-bool BionicMallinfoHasHostTelemetry() noexcept {
-#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
-#if __GLIBC_PREREQ(2, 33)
-  return true;
-#endif
-#endif
-  return false;
 }
 
 void NormalizeBionicSysInfo(struct sysinfo* info) noexcept {
@@ -265,33 +214,6 @@ void NormalizeBionicSysInfo(struct sysinfo* info) noexcept {
 int BionicSysInfo(struct sysinfo* info) noexcept {
   const int result = ::sysinfo(info);
   if (result == 0) NormalizeBionicSysInfo(info);
-  return result;
-}
-
-bool NormalizeLinuxulatorUnameVersion(struct utsname* name,
-                                      const char* linux_version) noexcept {
-  if (name == nullptr || linux_version == nullptr || linux_version[0] == '\0' ||
-      std::strcmp(name->sysname, "Linux") != 0 ||
-      (std::strstr(name->version, "FreeBSD") == nullptr &&
-       std::strstr(name->version, "freebsd.org") == nullptr)) {
-    return false;
-  }
-  const int length = std::snprintf(name->version, sizeof(name->version), "%s",
-                                   linux_version);
-  return length >= 0 && static_cast<size_t>(length) < sizeof(name->version);
-}
-
-int BionicUname(struct utsname* name) noexcept {
-  const int result = ::uname(name);
-  if (result != 0 || name == nullptr) return result;
-
-  const int host_errno = errno;
-  std::array<char, sizeof(name->version)> linux_version{};
-  if (ReadTextFile("/proc/sys/kernel/version", linux_version.data(),
-                   linux_version.size())) {
-    NormalizeLinuxulatorUnameVersion(name, linux_version.data());
-  }
-  errno = host_errno;
   return result;
 }
 
@@ -385,10 +307,6 @@ extern "C" blox7::compat::BionicMallinfoSnapshot blox7_bionic_mallinfo() {
 
 extern "C" int blox7_bionic_sysinfo(struct sysinfo* info) {
   return blox7::compat::BionicSysInfo(info);
-}
-
-extern "C" int blox7_bionic_uname(struct utsname* name) {
-  return blox7::compat::BionicUname(name);
 }
 
 extern "C" uid_t blox7_bionic_getuid() {

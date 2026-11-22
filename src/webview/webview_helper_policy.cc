@@ -1,9 +1,5 @@
 #include "webview/webview_helper_policy.h"
 
-#if !defined(_WIN32)
-#include <glib.h>
-#endif
-
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -12,7 +8,6 @@
 #include <string>
 #include <string_view>
 
-#if defined(_WIN32)
 namespace {
 
 enum GUriFlags { G_URI_FLAGS_NONE = 0 };
@@ -112,7 +107,6 @@ bool g_str_has_prefix(const char* text, const char* prefix) {
 }
 
 }  // namespace
-#endif
 
 namespace blox7 {
 namespace webview {
@@ -121,11 +115,7 @@ namespace {
 constexpr std::size_t kMaximumHybridIdentifierBytes = 128;
 constexpr std::size_t kMaximumCallbackIdentifierBytes = 1024;
 constexpr char kFallbackRobloxVersion[] = "2.725.1142";
-#if defined(_WIN32)
 constexpr char kUserAgentEngine[] = "AppleWebKit/537.36";
-#else
-constexpr char kUserAgentEngine[] = "AppleWebKit/605.1.15";
-#endif
 constexpr char kBridgeSource[] = R"JS(
 (() => {
   "use strict";
@@ -187,27 +177,6 @@ bool ReadBoundedString(const nlohmann::json& object, const char* key,
   return true;
 }
 
-#if !defined(_WIN32)
-bool ExtractBoundedJscString(JSCValue* value, std::string* text) {
-  if (value == nullptr || text == nullptr || !jsc_value_is_string(value)) {
-    return false;
-  }
-  GBytes* bytes = jsc_value_to_string_as_bytes(value);
-  if (bytes == nullptr) {
-    return false;
-  }
-  gsize size = 0;
-  const auto* data = static_cast<const char*>(g_bytes_get_data(bytes, &size));
-  const bool valid =
-      data != nullptr && size != 0 && size <= kMaximumHybridCommandBytes;
-  if (valid) {
-    text->assign(data, size);
-  }
-  g_bytes_unref(bytes);
-  return valid;
-}
-#endif
-
 bool IsRobloxHost(const char* host) {
   if (host == nullptr) {
     return false;
@@ -227,21 +196,6 @@ bool IsRobloxHost(const char* host) {
 }
 
 }  // namespace
-
-bool ShouldDisableWebKitSandbox(std::string_view kernel_version,
-                                const char* sandbox_override) {
-  return sandbox_override == nullptr &&
-         (kernel_version.find("FreeBSD") != std::string_view::npos ||
-          kernel_version.find("freebsd.org") != std::string_view::npos);
-}
-
-bool ShouldDisableWebViewHardwareAcceleration(
-    bool wayland_display, const char* compositing_override) {
-  if (compositing_override != nullptr) {
-    return std::string_view(compositing_override) != "0";
-  }
-  return wayland_display;
-}
 
 const char* AndroidBridgeSource() { return kBridgeSource; }
 
@@ -288,27 +242,6 @@ bool IsRobloxChallengePage(std::string_view url) {
       g_str_has_prefix(path, "/challenge/");
   g_uri_unref(parsed);
   return challenge;
-}
-
-bool IsEssentialWebResource(const char* uri) {
-  if (uri == nullptr) return false;
-  const UriPolicyResult policy = EvaluateNavigationUri(uri);
-  if (!policy.allowed) return false;
-  if (policy.host == "css.rbxcdn.com" || policy.host == "js.rbxcdn.com") {
-    return true;
-  }
-  if (policy.host != "arkoselabs.roblox.com" &&
-      policy.host != "apis.rbxcdn.com") return false;
-  GUri* parsed = g_uri_parse(uri, G_URI_FLAGS_NONE, nullptr);
-  if (parsed == nullptr) return false;
-  const char* path = g_uri_get_path(parsed);
-  const bool essential =
-      path != nullptr &&
-      (policy.host == "apis.rbxcdn.com"
-           ? std::string_view(path) == "/captcha/v1/metadata"
-           : g_str_has_prefix(path, "/v2/") || g_str_has_prefix(path, "/fc/"));
-  g_uri_unref(parsed);
-  return essential;
 }
 
 std::string BoundedLogToken(const char* value, std::string_view fallback) {
@@ -366,37 +299,6 @@ UriPolicyResult EvaluateNavigationUri(const char* uri) {
 const char* CaptchaEventName(CaptchaEventType type) {
   return type == CaptchaEventType::kSuccess ? "CaptchaSuccess" : "CaptchaShown";
 }
-
-#if !defined(_WIN32)
-bool ExtractExecuteRobloxCommand(JSCValue* value, std::string* command) {
-  if (value == nullptr || command == nullptr || !jsc_value_is_object(value)) {
-    return false;
-  }
-  char* serialized = jsc_value_to_json(value, 0);
-  if (serialized == nullptr) {
-    return false;
-  }
-  const std::size_t size = strnlen(serialized, kMaximumHybridCommandBytes + 1);
-  const bool valid = size != 0 && size <= kMaximumHybridCommandBytes;
-  if (valid) {
-    command->assign(serialized, size);
-  }
-  g_free(serialized);
-  return valid;
-}
-
-bool ExtractRobloxWkHybridCommand(JSCValue* value, std::string* command) {
-  if (value == nullptr || command == nullptr || !jsc_value_is_object(value)) {
-    return false;
-  }
-  JSCValue* property = jsc_value_object_get_property(value, "command");
-  const bool extracted = ExtractBoundedJscString(property, command);
-  if (property != nullptr) {
-    g_object_unref(property);
-  }
-  return extracted;
-}
-#endif
 
 bool ParseCaptchaEvent(std::string_view command, CaptchaEvent* event) {
   if (event == nullptr || command.empty() ||

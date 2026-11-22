@@ -234,9 +234,6 @@ class RobloxInputRouter final {
   bool held_key_valid_ = false;
 };
 
-const char* RobloxInputDispatchStateName(RobloxInputDispatchState state);
-const char* RobloxInputEventKindName(RobloxInputEventKind kind);
-
 }  // namespace runtime
 }  // namespace blox7
 

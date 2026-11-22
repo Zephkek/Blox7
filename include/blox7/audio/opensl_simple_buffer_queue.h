@@ -61,8 +61,6 @@ class OpenSlSimpleBufferQueueAdapter final {
   std::shared_ptr<State> state_;
 };
 
-Status OpenSlRecorderSupportStatus();
-
 }  // namespace blox7::audio
 
 #endif  // BLOX7_AUDIO_OPENSL_SIMPLE_BUFFER_QUEUE_H_

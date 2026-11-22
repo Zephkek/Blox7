@@ -10,18 +10,6 @@
 namespace blox7 {
 namespace services {
 
-enum class AuthCookieStatus {
-  kValid,
-  kInvalid,
-  kUnavailable,
-};
-
-struct AuthCookieValidation {
-  AuthCookieStatus status = AuthCookieStatus::kUnavailable;
-  long http_status = 0;
-  std::string error;
-};
-
 enum class AuthSessionStatus {
   kAuthenticated,
   kGuest,
@@ -49,7 +37,6 @@ class AuthService {
   AuthSession ResolveSession(std::string_view cookie_header,
                              bool allow_guest = false);
 
-  AuthCookieValidation ValidateCookie(const std::string& cookie_header);
   static bool HasRoblosecurityCookie(const std::string& cookie_header);
   static std::string ExtractRoblosecurityValue(std::string_view cookie_header);
 

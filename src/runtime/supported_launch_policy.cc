@@ -66,8 +66,6 @@ bool ApplyInstalledResourceDefaults(std::string* error) {
   }
   const std::filesystem::path helper =
       runtime_directory / "blox7_webview_helper.exe";
-  const std::filesystem::path progress_helper =
-      runtime_directory / "blox7_failure_dialog";
   const std::filesystem::path update_helper =
       runtime_directory / "blox7_updater";
   const std::filesystem::path data_directory = prefix / "share/blox7";
@@ -93,7 +91,6 @@ bool ApplyInstalledResourceDefaults(std::string* error) {
       {"BLOX7_UPDATE_HELPER", update_helper},
       {"BLOX7_RUNTIME_LIBRARY_DIR", runtime_directory},
       {"BLOX7_WEBVIEW_HELPER", helper},
-      {"BLOX7_UPDATE_PROGRESS_HELPER", progress_helper},
   };
   for (const auto& [name, value] : defaults) {
     if (!SetDefault(name, value.string(), error)) {

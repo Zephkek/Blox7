@@ -16,10 +16,8 @@ add_library(blox7_compat STATIC
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_dns_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_host_libc_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_large_file_runtime.cc
-  ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_prctl_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_rwlock_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_signal_runtime.cc
-  ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_socket_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_semaphore_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_pthread_create_runtime.cc
   ${BLOX7_ELF_COMPAT_ROOT}/src/compat/bionic_pthread_key_runtime.cc

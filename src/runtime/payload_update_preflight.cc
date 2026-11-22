@@ -3,7 +3,6 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <spawn.h>
-#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -19,8 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "runtime/helper_environment.h"
-
 extern char** environ;
 
 #ifndef BLOX7_INSTALL_LIBDIR
@@ -31,16 +28,9 @@ namespace blox7 {
 namespace runtime {
 namespace {
 
-constexpr char kProgressFinishedPacket = 'S';
-
 bool Enabled(const Environment& environment, std::string_view name) {
   const auto value = environment.Get(name);
   return value.has_value() && !value->empty() && *value != "0";
-}
-
-bool HasDisplay(const Environment& environment) {
-  return environment.HasNonEmpty("DISPLAY") ||
-         environment.HasNonEmpty("WAYLAND_DISPLAY");
 }
 
 bool IsExecutableRegularFile(const std::filesystem::path& path) {
@@ -97,133 +87,6 @@ std::filesystem::path UpdateHelper(const Environment& environment) {
   }
   return {};
 }
-
-std::filesystem::path ProgressHelper(const Environment& environment) {
-  const auto helper_override =
-      environment.Get("BLOX7_UPDATE_PROGRESS_HELPER");
-  if (helper_override.has_value()) {
-    const std::filesystem::path helper(*helper_override);
-    return helper.is_absolute() && IsExecutableRegularFile(helper)
-               ? helper
-               : std::filesystem::path{};
-  }
-
-  std::error_code error;
-  const std::filesystem::path executable =
-      std::filesystem::read_symlink("/proc/self/exe", error);
-  if (error || executable.empty()) {
-    return {};
-  }
-  const std::filesystem::path helper =
-      executable.parent_path() / "blox7_failure_dialog";
-  return IsExecutableRegularFile(helper) ? helper : std::filesystem::path{};
-}
-
-void WaitForProcess(pid_t process) {
-  if (process <= 0) {
-    return;
-  }
-  while (waitpid(process, nullptr, 0) < 0 && errno == EINTR) {
-  }
-}
-
-class UpdateProgressMonitor final {
- public:
-  UpdateProgressMonitor() = default;
-  ~UpdateProgressMonitor() { Finish(); }
-
-  UpdateProgressMonitor(const UpdateProgressMonitor&) = delete;
-  UpdateProgressMonitor& operator=(const UpdateProgressMonitor&) = delete;
-
-  static UpdateProgressMonitor Start(const Environment& environment) {
-    if (Enabled(environment, "BLOX7_DISABLE_UPDATE_PROGRESS") ||
-        Enabled(environment, "BLOX7_DISABLE_FAILURE_DIALOG") ||
-        Enabled(environment, "BLOX7_ISOLATED_CANARY") ||
-        Enabled(environment, "BLOX7_HEADLESS") || !HasDisplay(environment)) {
-      return {};
-    }
-    const std::filesystem::path helper = ProgressHelper(environment);
-    if (helper.empty()) {
-      return {};
-    }
-
-    int sockets[2] = {-1, -1};
-    if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets) != 0) {
-      return {};
-    }
-    if (sockets[0] <= STDERR_FILENO) {
-      const int descriptor =
-          fcntl(sockets[0], F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
-      close(sockets[0]);
-      if (descriptor < 0) {
-        close(sockets[1]);
-        return {};
-      }
-      sockets[0] = descriptor;
-    }
-    posix_spawn_file_actions_t actions;
-    if (posix_spawn_file_actions_init(&actions) != 0) {
-      close(sockets[0]);
-      close(sockets[1]);
-      return {};
-    }
-    int action_status = 0;
-    if (sockets[0] == STDIN_FILENO) {
-      action_status = posix_spawn_file_actions_addclose(&actions, sockets[0]);
-    }
-    if (action_status == 0 && sockets[1] != STDIN_FILENO) {
-      action_status =
-          posix_spawn_file_actions_adddup2(&actions, sockets[1], STDIN_FILENO);
-    }
-    if (action_status == 0 && sockets[0] != STDIN_FILENO) {
-      action_status = posix_spawn_file_actions_addclose(&actions, sockets[0]);
-    }
-    if (action_status == 0 && sockets[1] != STDIN_FILENO) {
-      action_status = posix_spawn_file_actions_addclose(&actions, sockets[1]);
-    }
-
-    std::string helper_string = helper.string();
-    char progress_option[] = "--progress-monitor";
-    char* arguments[] = {helper_string.data(), progress_option, nullptr};
-    pid_t child = -1;
-    int spawn_status = action_status;
-    if (spawn_status == 0) {
-      const auto child_environment = BuildHelperEnvironment(environ);
-      spawn_status = posix_spawn(&child, helper.c_str(), &actions, nullptr,
-                                 arguments, child_environment.data());
-    }
-    posix_spawn_file_actions_destroy(&actions);
-    close(sockets[1]);
-    if (spawn_status != 0) {
-      close(sockets[0]);
-      return {};
-    }
-    return UpdateProgressMonitor(sockets[0], child);
-  }
-
-  bool active() const { return socket_ >= 0; }
-  int socket() const { return socket_; }
-
- private:
-  UpdateProgressMonitor(int socket, pid_t process)
-      : socket_(socket), process_(process) {}
-
-  void Finish() {
-    if (!active()) {
-      return;
-    }
-    (void)send(socket_, &kProgressFinishedPacket,
-               sizeof(kProgressFinishedPacket), MSG_NOSIGNAL);
-    (void)shutdown(socket_, SHUT_RDWR);
-    close(socket_);
-    socket_ = -1;
-    WaitForProcess(process_);
-    process_ = -1;
-  }
-
-  int socket_ = -1;
-  pid_t process_ = -1;
-};
 
 bool IsEnvironmentEntry(std::string_view entry, std::string_view name) {
   return entry.size() > name.size() && entry[name.size()] == '=' &&
@@ -347,8 +210,7 @@ class UpdaterStderrRelay final {
   std::string failure_;
 };
 
-std::vector<std::string> ChildEnvironment(const RuntimePaths& paths,
-                                          int progress_descriptor = -1) {
+std::vector<std::string> ChildEnvironment(const RuntimePaths& paths) {
   const std::vector<std::pair<std::string_view, std::filesystem::path>>
       overrides = {
           {"BLOX7_CONFIG_FILE", paths.config_file()},
@@ -366,10 +228,6 @@ std::vector<std::string> ChildEnvironment(const RuntimePaths& paths,
   }
   for (const auto& [name, value] : overrides) {
     child_environment.emplace_back(std::string(name) + "=" + value.string());
-  }
-  if (progress_descriptor >= 0) {
-    child_environment.emplace_back("BLOX7_UPDATE_PROGRESS_FD=" +
-                                   std::to_string(progress_descriptor));
   }
   return child_environment;
 }
@@ -403,9 +261,7 @@ PayloadUpdatePreflightResult RunPayloadUpdatePreflight(
   char* arguments[] = {helper_string.data(), update,
                        force_run_latest ? force_latest : startup_preflight,
                        nullptr};
-  UpdateProgressMonitor progress = UpdateProgressMonitor::Start(environment);
-  std::vector<std::string> child_environment =
-      ChildEnvironment(paths, progress.socket());
+  std::vector<std::string> child_environment = ChildEnvironment(paths);
   std::vector<char*> child_environment_pointers;
   child_environment_pointers.reserve(child_environment.size() + 1);
   for (std::string& entry : child_environment) {
@@ -416,13 +272,9 @@ PayloadUpdatePreflightResult RunPayloadUpdatePreflight(
   posix_spawn_file_actions_t actions;
   bool actions_initialized = false;
   int action_status = 0;
-  if (progress.active() || stderr_relay.active()) {
+  if (stderr_relay.active()) {
     action_status = posix_spawn_file_actions_init(&actions);
     actions_initialized = action_status == 0;
-  }
-  if (action_status == 0 && progress.active()) {
-    action_status = posix_spawn_file_actions_adddup2(
-        &actions, progress.socket(), progress.socket());
   }
   if (action_status == 0 && stderr_relay.active()) {
     action_status = posix_spawn_file_actions_adddup2(
@@ -432,7 +284,7 @@ PayloadUpdatePreflightResult RunPayloadUpdatePreflight(
     if (actions_initialized) {
       posix_spawn_file_actions_destroy(&actions);
     }
-    result.error = "cannot prepare Roblox update progress channel: " +
+    result.error = "cannot prepare Roblox update output channel: " +
                    std::string(std::strerror(action_status));
     return result;
   }

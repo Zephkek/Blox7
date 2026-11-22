@@ -25,15 +25,12 @@
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
-#include <unordered_set>
 
-#ifdef BLOX7_USE_BIONIC_LINKER
 #include <mcpelauncher/linker.h>
 
 namespace linker::libdl {
 std::unordered_map<std::string, void*> get_dl_symbols();
 }  // namespace linker::libdl
-#endif
 
 namespace linker {
 
@@ -43,7 +40,6 @@ std::unordered_map<std::string, LibraryHandle> g_symbol_table;
 
 std::unordered_map<std::string, SymbolMap> g_synthetic_symbols;
 std::unordered_map<std::string, LibraryHandle> g_synthetic_libraries;
-std::unordered_set<LibraryHandle> g_synthetic_handles;
 
 SymbolMap g_legacy_bionic_symbols;
 
@@ -76,7 +72,6 @@ bool HasPrefix(std::string_view value, std::string_view prefix) {
          value.compare(0, prefix.size(), prefix) == 0;
 }
 
-#ifdef BLOX7_USE_BIONIC_LINKER
 bool LinkerTraceEnabled() {
   static const bool enabled = std::getenv("BLOX7_TRACE_LINKER") != nullptr;
   return enabled;
@@ -110,7 +105,6 @@ int BionicDlcloseBoundary(void* handle) {
 }
 
 char* BionicDlerrorBoundary() { return ::linker::dlerror(); }
-#endif
 
 bool IsBionicLibcOnlySymbol(std::string_view symbol) {
   static constexpr std::string_view kStdioSymbols[] = {
@@ -204,21 +198,16 @@ const SymbolMap& GetBionicSymbols() {
 }
 
 void* BionicDlIteratePhdrAddress() {
-#ifdef BLOX7_USE_BIONIC_LINKER
   using Callback = int (*)(dl_phdr_info*, size_t, void*);
   using Function = int (*)(Callback, void*);
   return reinterpret_cast<void*>(
       static_cast<Function>(&::linker::dl_iterate_phdr));
-#else
-  return reinterpret_cast<void*>(&::dl_iterate_phdr);
-#endif
 }
 
 ProgramHeaderValidation ValidateBionicProgramHeaders(LibraryHandle handle) {
   if (handle == nullptr) {
     return {false, "null Android library handle"};
   }
-#ifdef BLOX7_USE_BIONIC_LINKER
   const uintptr_t base = ::linker::get_library_base(handle);
   if (base == 0) {
     return {false, "Bionic linker returned a zero load base"};
@@ -251,9 +240,6 @@ ProgramHeaderValidation ValidateBionicProgramHeaders(LibraryHandle handle) {
     return {false, "loaded Android ELF has no PT_GNU_EH_FRAME"};
   }
   return {true, {}};
-#else
-  return {false, "Bionic linker support is disabled"};
-#endif
 }
 
 std::uintptr_t FindLoadedAndroidLibraryBase(
@@ -263,12 +249,8 @@ std::uintptr_t FindLoadedAndroidLibraryBase(
   if (loaded == g_symbol_table.end() || loaded->second == nullptr) {
     return 0;
   }
-#ifdef BLOX7_USE_BIONIC_LINKER
   return static_cast<std::uintptr_t>(
       ::linker::get_library_base(loaded->second));
-#else
-  return 0;
-#endif
 }
 
 void RegisterSyntheticSymbol(const std::string& soname,
@@ -284,13 +266,9 @@ void RegisterSyntheticSymbol(const std::string& soname,
     }
   }
 
-#ifdef BLOX7_USE_BIONIC_LINKER
   if (loaded_handle != nullptr) {
     ::linker::relocate(loaded_handle, SymbolMap{{name, address}});
   }
-#else
-  static_cast<void>(loaded_handle);
-#endif
 }
 
 void RegisterBionicPthreadKeyRuntimeForLibc() {
@@ -402,14 +380,11 @@ void RegisterBionicHostLibcRuntimeForLibc() {
                           reinterpret_cast<void*>(blox7_bionic_mallinfo));
   RegisterSyntheticSymbol("libc.so", "sysinfo",
                           reinterpret_cast<void*>(blox7_bionic_sysinfo));
-  RegisterSyntheticSymbol("libc.so", "uname",
-                          reinterpret_cast<void*>(blox7_bionic_uname));
   RegisterSyntheticSymbol("libc.so", "getuid",
                           reinterpret_cast<void*>(blox7_bionic_getuid));
   RegisterSyntheticSymbol("libc.so", "geteuid",
                           reinterpret_cast<void*>(blox7_bionic_geteuid));
   RegisterSymbol("sysinfo", reinterpret_cast<void*>(blox7_bionic_sysinfo));
-  RegisterSymbol("uname", reinterpret_cast<void*>(blox7_bionic_uname));
   RegisterSymbol("getuid", reinterpret_cast<void*>(blox7_bionic_getuid));
   RegisterSymbol("geteuid", reinterpret_cast<void*>(blox7_bionic_geteuid));
   RegisterSyntheticSymbol("libc.so", "strerror_r",
@@ -496,7 +471,6 @@ void RegisterBionicStdioRuntimeForLibc() {
 }
 
 void RegisterBionicDynamicLoaderForLibdl() {
-#ifdef BLOX7_USE_BIONIC_LINKER
   for (const auto& [name, address] : libdl::get_dl_symbols()) {
     RegisterSyntheticSymbol("libdl.so", name, address);
   }
@@ -512,13 +486,6 @@ void RegisterBionicDynamicLoaderForLibdl() {
   RegisterSyntheticSymbol("libdl.so", "dlerror",
                           reinterpret_cast<void*>(BionicDlerrorBoundary));
   RegisterSymbol("dlerror", reinterpret_cast<void*>(BionicDlerrorBoundary));
-#endif
-}
-
-SymbolMap GetSyntheticLibrarySymbols(const std::string& soname) {
-  std::lock_guard<std::mutex> lock(g_registry_mutex);
-  auto found = g_synthetic_symbols.find(soname);
-  return found == g_synthetic_symbols.end() ? SymbolMap{} : found->second;
 }
 
 LibraryHandle AddSyntheticLibrary(const std::string& soname,
@@ -539,15 +506,12 @@ LibraryHandle AddSyntheticLibrary(const std::string& soname,
   }
 
   if (existing_handle != nullptr) {
-#ifdef BLOX7_USE_BIONIC_LINKER
     if (!exports.empty()) {
       ::linker::relocate(existing_handle, exports);
     }
-#endif
     return existing_handle;
   }
 
-#ifdef BLOX7_USE_BIONIC_LINKER
   const char* persistent_soname = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_registry_mutex);
@@ -556,24 +520,15 @@ LibraryHandle AddSyntheticLibrary(const std::string& soname,
   }
   LibraryHandle handle =
       ::linker::load_library(persistent_soname, owned_exports);
-#else
-  LibraryHandle handle = ::dlopen(soname.c_str(), RTLD_LAZY | RTLD_GLOBAL);
-#endif
   if (!handle) {
-#ifdef BLOX7_USE_BIONIC_LINKER
     std::cerr << "  [bionic-linker] failed to register synthetic library '"
               << soname << "': " << ::linker::dlerror() << '\n';
-#else
-    std::cerr << "  [linker] failed to load synthetic library '" << soname
-              << "': " << ::dlerror() << '\n';
-#endif
     return nullptr;
   }
 
   {
     std::lock_guard<std::mutex> lock(g_registry_mutex);
     g_synthetic_libraries[soname] = handle;
-    g_synthetic_handles.insert(handle);
     g_symbol_table[soname] = handle;
   }
   std::cout << "  [linker] Registered synthetic library '" << soname
@@ -582,13 +537,9 @@ LibraryHandle AddSyntheticLibrary(const std::string& soname,
 }
 
 void UpdateAndroidLibraryPath(const std::string& search_path) {
-#ifdef BLOX7_USE_BIONIC_LINKER
   if (!search_path.empty()) {
     ::linker::update_LD_LIBRARY_PATH(search_path.c_str());
   }
-#else
-  static_cast<void>(search_path);
-#endif
 }
 
 bool SetAndroidLibraryLoadObserver(AndroidLibraryLoadObserver observer,
@@ -622,19 +573,10 @@ LibraryHandle OpenAndroidLibrary(const std::string& real_path,
                                              : real_path.substr(0, separator));
   }
 
-#ifdef BLOX7_USE_BIONIC_LINKER
   LibraryHandle handle = ::linker::dlopen(real_path.c_str(), RTLD_NOW);
-#else
-  LibraryHandle handle = ::dlopen(real_path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
-#endif
   if (!handle) {
-#ifdef BLOX7_USE_BIONIC_LINKER
     std::cerr << "  [bionic-linker] failed to load '" << real_path
               << "': " << ::linker::dlerror() << '\n';
-#else
-    std::cerr << "  [linker] dlopen failed for '" << real_path
-              << "': " << ::dlerror() << '\n';
-#endif
     return nullptr;
   }
 
@@ -650,20 +592,14 @@ LibraryHandle OpenAndroidLibrary(const std::string& real_path,
   }
 
   std::uintptr_t image_base = 0;
-#ifdef BLOX7_USE_BIONIC_LINKER
   image_base = static_cast<std::uintptr_t>(::linker::get_library_base(handle));
-#endif
   if (observer != nullptr &&
       !observer(observer_context, registry_name, image_base)) {
     {
       std::lock_guard<std::mutex> lock(g_registry_mutex);
       RemoveHandleFromRegistry(handle);
     }
-#ifdef BLOX7_USE_BIONIC_LINKER
     ::linker::dlclose(handle);
-#else
-    ::dlclose(handle);
-#endif
     std::cerr << "  [linker] Android image observer rejected '" << real_path
               << "'\n";
     return nullptr;
@@ -733,11 +669,7 @@ void* FindSymbol(LibraryHandle handle, const std::string& symbol_name) {
   if (!handle || IsBlockedRobloxCrashReportNativeSymbol(symbol_name)) {
     return nullptr;
   }
-#ifdef BLOX7_USE_BIONIC_LINKER
   return ::linker::dlsym(handle, symbol_name.c_str());
-#else
-  return ::dlsym(handle, symbol_name.c_str());
-#endif
 }
 
 void* ResolveSymbol(LibraryHandle handle, const std::string& symbol_name) {
@@ -746,43 +678,11 @@ void* ResolveSymbol(LibraryHandle handle, const std::string& symbol_name) {
   }
   void* sym = FindSymbol(handle, symbol_name);
   if (!sym) {
-#ifdef BLOX7_USE_BIONIC_LINKER
     char* err = ::linker::dlerror();
-#else
-    char* err = ::dlerror();
-#endif
     std::cerr << "  [linker] symbol '" << symbol_name << "' not found. dlerror: "
               << (err ? err : "unknown error") << '\n';
   }
   return sym;
-}
-
-void UnloadLibrary(LibraryHandle handle) {
-  if (!handle) {
-    return;
-  }
-
-  bool synthetic = false;
-  {
-    std::lock_guard<std::mutex> lock(g_registry_mutex);
-    synthetic = g_synthetic_handles.erase(handle) != 0;
-    RemoveHandleFromRegistry(handle);
-  }
-
-#ifdef BLOX7_USE_BIONIC_LINKER
-  if (synthetic) {
-    ::linker::unload_library(handle);
-  } else {
-    ::linker::dlclose(handle);
-  }
-#else
-  static_cast<void>(synthetic);
-  ::dlclose(handle);
-#endif
-}
-
-const std::unordered_map<std::string, LibraryHandle>& GetSymbolTable() {
-  return g_symbol_table;
 }
 
 }  // namespace linker

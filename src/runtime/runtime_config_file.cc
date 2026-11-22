@@ -55,6 +55,10 @@ std::string Scalar(const yaml_node_t* node) {
 bool ReadMapping(yaml_document_t* document, const yaml_node_t* mapping,
                  const std::string& section, ValueMap* values,
                  std::string* error) {
+  if (mapping != nullptr && mapping->type == YAML_SCALAR_NODE &&
+      mapping->data.scalar.length == 0) {
+    return true;
+  }
   if (mapping == nullptr || mapping->type != YAML_MAPPING_NODE) {
     *error = section + " must be a mapping";
     return false;
@@ -167,7 +171,6 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
       "device.mouse",
       "device.keyboard",
       "runtime.headless",
-      "auth.use_libsecret",
       "runtime.roblox_library",
       "appearance.theme",
       "graphics.backend",
@@ -177,7 +180,6 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
       "performance.multithreaded_rendering",
       "performance.physics_worker_mode",
       "performance.memory_limit_mb",
-      "performance.gamemode",
       "audio.output_device",
       "audio.input_device",
        "window.width",
@@ -187,7 +189,6 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
        "window.ui_scale",
        "input.touch_enabled",
       "compatibility.desktop_playability",
-      "network.use_system_proxy",
       "network.proxy_host",
       "network.proxy_port",
       "network.proxy_scheme",
@@ -380,15 +381,6 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
     (*environment)["BLOX7_MEMORY_LIMIT_MB"] =
         std::to_string(parsed.memory_limit_mb);
   }
-  if (const auto game_mode = value("performance.gamemode");
-      game_mode.has_value()) {
-    GameModePolicy parsed = GameModePolicy::kAuto;
-    if (!ParseGameModePolicy(*game_mode, &parsed)) {
-      *error = "performance.gamemode must be auto, on, or off";
-      return false;
-    }
-    (*environment)["BLOX7_GAMEMODE"] = GameModePolicyName(parsed);
-  }
   if (const auto output_device = value("audio.output_device");
       output_device.has_value()) {
     if (!IsValidDeviceProfileValue(*output_device, 512)) {
@@ -473,24 +465,10 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
   const auto proxy_scheme = value("network.proxy_scheme");
   const auto proxy_username = value("network.proxy_username");
   const auto proxy_password = value("network.proxy_password");
-  bool use_system_proxy = false;
-  if (const auto system_proxy = value("network.use_system_proxy");
-      system_proxy.has_value()) {
-    if (!ParseBoolean(*system_proxy, &use_system_proxy)) {
-      *error = "network.use_system_proxy must be true or false";
-      return false;
-    }
-    (*environment)["BLOX7_USE_SYSTEM_PROXY"] =
-        use_system_proxy ? "1" : "0";
-  }
   if (proxy_host.has_value() != proxy_port.has_value() ||
       (proxy_scheme.has_value() && !proxy_host.has_value())) {
     *error =
         "network.proxy_host and network.proxy_port must be configured together";
-    return false;
-  }
-  if (use_system_proxy && proxy_host.has_value()) {
-    *error = "network.use_system_proxy cannot be combined with a fixed proxy";
     return false;
   }
   if (proxy_username.has_value() != proxy_password.has_value() ||
@@ -530,7 +508,6 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
                "integrations.discord_rpc.enabled",
                "BLOX7_DISCORD_RPC_ENABLED"),
            {"integrations.fleasion.enabled", "BLOX7_FLEASION_ENABLED"},
-           {"auth.use_libsecret", "BLOX7_USE_LIBSECRET"},
            {"integrations.discord_rpc.show_place_name",
             "BLOX7_DISCORD_RPC_SHOW_PLACE_NAME"},
            {"integrations.discord_rpc.show_elapsed_time",
@@ -713,7 +690,7 @@ bool LoadYaml(const std::filesystem::path& path, ValueMap* values, bool* loaded,
           *error = "device must be a preset scalar or detailed mapping";
           valid = false;
         }
-      } else if (key == "runtime" || key == "appearance" || key == "auth" ||
+      } else if (key == "runtime" || key == "appearance" ||
                  key == "graphics" || key == "performance" ||
                  key == "audio" || key == "window" || key == "input" ||
                  key == "compatibility" || key == "network") {
@@ -806,14 +783,12 @@ RuntimeConfigLoadResult LoadRuntimeConfig(
     result.error = "audio input device is invalid";
   } else if (!result.config.performance().memory_limit_valid) {
     result.error = "memory-limit policy is invalid";
-  } else if (!result.config.performance().game_mode_valid) {
-    result.error = "GameMode policy is invalid";
   } else if (!result.config.performance().physics_worker_mode_valid) {
     result.error = "physics worker policy is invalid";
   } else if (!result.config.fleasion_valid()) {
     result.error = "Fleasion configuration is invalid: use proxy_mode env or hosts, "
                    "a port from 1 to 65535, an absolute CA certificate path, and "
-                   "no conflicting system/fixed proxy";
+                   "no conflicting fixed proxy";
   } else if (!result.config.ca_bundle_valid()) {
     result.error = "CA bundle path is invalid";
   } else if (!result.config.discord_rpc_valid()) {
@@ -853,12 +828,6 @@ bool ExportRuntimeConfigEnvironment(const RuntimeConfig& config,
   if (!config.performance().memory_limit_valid) {
     if (error != nullptr) {
       *error = "cannot export an invalid memory-limit policy";
-    }
-    return false;
-  }
-  if (!config.performance().game_mode_valid) {
-    if (error != nullptr) {
-      *error = "cannot export an invalid GameMode policy";
     }
     return false;
   }
@@ -962,15 +931,10 @@ bool ExportRuntimeConfigEnvironment(const RuntimeConfig& config,
       SetEnvironmentValue("BLOX7_MEMORY_LIMIT_MB",
                           std::to_string(config.performance().memory_limit_mb),
                           error) &&
-      SetEnvironmentValue("BLOX7_GAMEMODE",
-                          GameModePolicyName(config.performance().game_mode),
-                          error) &&
       SetEnvironmentValue("BLOX7_AUDIO_OUTPUT_DEVICE",
                           config.audio_output_device(), error) &&
       SetEnvironmentValue("BLOX7_AUDIO_INPUT_DEVICE",
                           config.audio_input_device(), error) &&
-      SetEnvironmentValue("BLOX7_USE_SYSTEM_PROXY",
-                          config.use_system_proxy() ? "1" : "0", error) &&
       SetEnvironmentValue("BLOX7_DISCORD_RPC_ENABLED",
                           config.discord_rpc().enabled ? "1" : "0", error) &&
       SetEnvironmentValue(

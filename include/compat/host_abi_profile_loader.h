@@ -48,8 +48,6 @@ ExternalHostAbiProfileResult InitializeHostAbiProfileFromEnvironment(
 const HostAbiProfile* FindLoadedExternalHostAbiProfile(
     std::string_view build_id) noexcept;
 
-void SetHostAbiProfileHashingFaultForTesting(bool enabled) noexcept;
-
 }  // namespace blox7::compat
 
 #endif  // BLOX7_COMPAT_HOST_ABI_PROFILE_LOADER_H_

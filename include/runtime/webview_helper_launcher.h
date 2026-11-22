@@ -39,13 +39,6 @@ enum class WebViewHelperControlOperation : unsigned char {
   kRetainPersistentRobloxCookie = 10,
 };
 
-struct WebViewHelperControlCommand {
-  WebViewHelperControlOperation operation =
-      WebViewHelperControlOperation::kClose;
-  std::string payload;
-  bool visible = false;
-};
-
 enum class WebViewHelperEventType : unsigned char {
   kExecuteRoblox = 1,
   kRobloxWkHybrid = 2,
@@ -62,14 +55,6 @@ struct WebViewHelperEvent {
 bool ValidateWebViewUrl(std::string_view url, std::string *error = nullptr);
 bool NormalizeWebViewUrl(std::string_view url, std::string *normalized_url,
                          std::string *error = nullptr);
-bool DecodeWebViewRequest(std::string_view request, std::string *url,
-                          std::string *error = nullptr);
-bool DecodeWebViewHelperControlPacket(std::string_view packet,
-                                      WebViewHelperControlCommand* command,
-                                      std::string* error = nullptr);
-bool EncodeWebViewHelperEventPacket(WebViewHelperEventType type,
-                                    std::string_view payload,
-                                    std::string* packet);
 bool DecodeWebViewHelperEventPacket(std::string_view packet,
                                     WebViewHelperEvent* event,
                                     std::string* error = nullptr);

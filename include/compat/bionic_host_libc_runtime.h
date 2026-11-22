@@ -53,13 +53,9 @@ int BionicCxaThreadAtExit(BionicThreadDestructor destructor, void* argument,
 void BionicArc4RandomBuffer(void* buffer, size_t size) noexcept;
 
 BionicMallinfoSnapshot BionicMallinfo() noexcept;
-bool BionicMallinfoHasHostTelemetry() noexcept;
 
 void NormalizeBionicSysInfo(struct sysinfo* info) noexcept;
 int BionicSysInfo(struct sysinfo* info) noexcept;
-bool NormalizeLinuxulatorUnameVersion(struct utsname* name,
-                                      const char* linux_version) noexcept;
-int BionicUname(struct utsname* name) noexcept;
 uid_t NormalizeBionicApplicationUid(uid_t host_uid) noexcept;
 uid_t BionicGetUid() noexcept;
 uid_t BionicGetEffectiveUid() noexcept;
@@ -85,7 +81,6 @@ void blox7_bionic_arc4random_buf(void* buffer, size_t size);
 int blox7_bionic_atoi(const char* text);
 blox7::compat::BionicMallinfoSnapshot blox7_bionic_mallinfo();
 int blox7_bionic_sysinfo(struct sysinfo* info);
-int blox7_bionic_uname(struct utsname* name);
 uid_t blox7_bionic_getuid();
 uid_t blox7_bionic_geteuid();
 int blox7_bionic_strerror_r(int error_number, char* buffer,

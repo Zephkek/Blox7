@@ -11,12 +11,6 @@
 #define BLOX7_OPENSL_EXPORT
 #endif
 
-struct Blox7OpenSlRuntimeStats {
-  std::uint64_t submitted_buffers;
-  std::uint64_t consumed_buffers;
-  std::uint64_t clean_player_shutdowns;
-};
-
 extern "C" {
 
 #if !defined(BLOX7_USE_SYSTEM_OPENSL_HEADERS)
@@ -44,10 +38,6 @@ BLOX7_OPENSL_API_ENTRY slCreateEngine(
     const blox7::audio::opensl_abi::InterfaceId* interface_ids,
     const blox7::audio::opensl_abi::Boolean* interface_required);
 #endif
-
-BLOX7_OPENSL_EXPORT blox7::audio::opensl_abi::Result
-blox7OpenSlGetRuntimeStats(Blox7OpenSlRuntimeStats* stats,
-                              std::uint32_t stats_size);
 
 }  // extern "C"
 

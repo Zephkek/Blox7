@@ -393,12 +393,6 @@ void RegisterPathMapping(const std::string& android_prefix,
   g_path_mappings[android_prefix] = host_prefix;
 }
 
-void ClearPathMappings() {
-  g_path_mappings.clear();
-  g_ca_bundle_aliases.clear();
-  g_mod_files.clear();
-}
-
 }  // namespace libc_shim
 
 namespace {

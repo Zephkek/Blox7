@@ -219,13 +219,6 @@ int BionicPthreadKeyRuntime::Set(pthread_key_t key,
   return SetSpecificForCurrentThread(key, value);
 }
 
-bool IsBionicPthreadKey(pthread_key_t key) noexcept {
-  const uint32_t encoded = static_cast<uint32_t>(key);
-  const uint32_t index = encoded & ~kBionicPthreadKeyValidFlag;
-  return (encoded & kBionicPthreadKeyValidFlag) != 0 &&
-         index < kBionicPthreadKeyCount;
-}
-
 }  // namespace blox7::compat
 
 extern "C" int blox7_bionic_pthread_key_create(

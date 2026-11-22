@@ -88,10 +88,7 @@ class StartupStateMachine {
   StartupStateMachine(StartupStateMachine&&) = delete;
   StartupStateMachine& operator=(StartupStateMachine&&) = delete;
 
-  StartupUpdateResult RecordEvidence(StartupEvidence evidence);
   StartupUpdateResult Fail(std::string reason);
-  StartupUpdateResult BeginStopping();
-  StartupUpdateResult MarkStopped();
 
   StartupSnapshot Snapshot() const;
 

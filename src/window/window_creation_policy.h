@@ -11,8 +11,6 @@ namespace window {
 SDL_WindowFlags ApplyHighPixelDensityWindowFlag(SDL_WindowFlags flags,
                                                 bool high_dpi);
 
-bool DirectVulkanWindowRequiresInitialSync(std::string_view video_driver);
-
 }  // namespace window
 }  // namespace blox7
 

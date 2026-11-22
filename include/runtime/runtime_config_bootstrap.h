@@ -11,6 +11,7 @@ namespace runtime {
 enum class RuntimeConfigBootstrapStatus {
   kCreated,
   kPreservedExisting,
+  kCleanedExisting,
 };
 
 struct RuntimeConfigBootstrapResult {
@@ -21,6 +22,9 @@ struct RuntimeConfigBootstrapResult {
   explicit operator bool() const { return error.empty(); }
   bool created() const {
     return status == RuntimeConfigBootstrapStatus::kCreated;
+  }
+  bool cleaned() const {
+    return status == RuntimeConfigBootstrapStatus::kCleanedExisting;
   }
 };
 

@@ -8,8 +8,6 @@
 namespace blox7 {
 namespace platform {
 
-std::unique_ptr<PlatformRuntime> CreateSdlPlatformRuntime();
-
 }  // namespace platform
 }  // namespace blox7
 

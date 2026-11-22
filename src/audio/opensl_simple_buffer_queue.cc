@@ -577,9 +577,4 @@ void OpenSlSimpleBufferQueueAdapter::Shutdown() {
   state->shutdown_cv.notify_all();
 }
 
-Status OpenSlRecorderSupportStatus() {
-  return Status::Error(StatusCode::kUnsupported,
-                       "OpenSL audio recording is not implemented");
-}
-
 }  // namespace blox7::audio

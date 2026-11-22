@@ -6,28 +6,6 @@ namespace blox7 {
 namespace runtime {
 namespace {
 
-constexpr bool IsCoreEvidence(StartupEvidence evidence) {
-  return evidence >= StartupEvidence::kConfigured &&
-         evidence <= StartupEvidence::kLuaAppReady;
-}
-
-constexpr bool IsKnownEvidence(StartupEvidence evidence) {
-  switch (evidence) {
-    case StartupEvidence::kConfigured:
-    case StartupEvidence::kJniRuntimeReady:
-    case StartupEvidence::kLibrariesLoaded:
-    case StartupEvidence::kJniOnLoadComplete:
-    case StartupEvidence::kEngineStarted:
-    case StartupEvidence::kDataModelLoading:
-    case StartupEvidence::kLuaAppReady:
-    case StartupEvidence::kRealFramePresented:
-    case StartupEvidence::kInputReady:
-    case StartupEvidence::kAudioReady:
-      return true;
-  }
-  return false;
-}
-
 constexpr uint32_t EvidenceBit(StartupEvidence evidence) {
   return uint32_t{1} << static_cast<uint32_t>(evidence);
 }
@@ -86,28 +64,6 @@ StartupEvidence ExpectedEvidenceForState(StartupState state) {
 
 StartupStateMachine::StartupStateMachine(StartupRequirements requirements)
     : requirements_(requirements) {}
-
-StartupUpdateResult StartupStateMachine::RecordEvidence(
-    StartupEvidence evidence) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!IsKnownEvidence(evidence)) {
-    return RejectInvalidOrderLocked(
-        evidence, StartupEvidenceName(ExpectedEvidenceForState(state_)));
-  }
-  if (HasEvidenceLocked(evidence)) {
-    return {StartupUpdateStatus::kDuplicate, state_,
-            std::string("duplicate startup evidence: ") +
-                StartupEvidenceName(evidence)};
-  }
-  if (state_ == StartupState::kFailure || state_ == StartupState::kStopping ||
-      state_ == StartupState::kStopped) {
-    return {StartupUpdateStatus::kRejected, state_,
-            std::string("startup evidence rejected in state ") +
-                StartupStateName(state_)};
-  }
-  return IsCoreEvidence(evidence) ? RecordCoreEvidenceLocked(evidence)
-                                  : RecordAuxiliaryEvidenceLocked(evidence);
-}
 
 StartupUpdateResult StartupStateMachine::RecordCoreEvidenceLocked(
     StartupEvidence evidence) {
@@ -189,37 +145,6 @@ StartupUpdateResult StartupStateMachine::Fail(std::string reason) {
   state_ = StartupState::kFailure;
   ++revision_;
   return {StartupUpdateStatus::kApplied, state_, failure_reason_};
-}
-
-StartupUpdateResult StartupStateMachine::BeginStopping() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (state_ == StartupState::kStopping || state_ == StartupState::kStopped) {
-    return {StartupUpdateStatus::kDuplicate, state_,
-            std::string("runtime is already ") + StartupStateName(state_)};
-  }
-  state_ = StartupState::kStopping;
-  ++revision_;
-  return {StartupUpdateStatus::kApplied, state_, "runtime stopping"};
-}
-
-StartupUpdateResult StartupStateMachine::MarkStopped() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (state_ == StartupState::kStopped) {
-    return {StartupUpdateStatus::kDuplicate, state_,
-            "runtime is already Stopped"};
-  }
-  if (state_ != StartupState::kStopping) {
-    failure_reason_ =
-        std::string(
-            "invalid lifecycle order: Stopped requires Stopping, was ") +
-        StartupStateName(state_);
-    state_ = StartupState::kFailure;
-    ++revision_;
-    return {StartupUpdateStatus::kRejected, state_, failure_reason_};
-  }
-  state_ = StartupState::kStopped;
-  ++revision_;
-  return {StartupUpdateStatus::kApplied, state_, "runtime stopped"};
 }
 
 StartupSnapshot StartupStateMachine::Snapshot() const {

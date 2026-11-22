@@ -39,10 +39,6 @@ struct CommandLineParseResult {
 };
 
 CommandLineParseResult ParseCommandLine(int argc, const char* const argv[]);
-bool BuildCommandLineReexecArguments(const CommandLineOptions& options,
-                                     int argc, const char* const argv[],
-                                     std::vector<std::string>* arguments,
-                                     std::string* error);
 void ScrubCommandLineLaunchArguments(CommandLineOptions* options, int argc,
                                      char* argv[]);
 bool ApplyCommandLineEnvironment(const CommandLineOptions& options,

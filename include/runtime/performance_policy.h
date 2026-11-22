@@ -6,7 +6,6 @@
 #include <string_view>
 
 #include "runtime/frame_rate_policy.h"
-#include "runtime/game_mode.h"
 
 namespace blox7 {
 namespace runtime {
@@ -27,8 +26,6 @@ struct PerformancePolicy {
   int physical_core_count = 0;
   std::uint64_t memory_limit_mb = 0;
   bool memory_limit_valid = true;
-  GameModePolicy game_mode = GameModePolicy::kAuto;
-  bool game_mode_valid = true;
   PhysicsWorkerMode physics_worker_mode = PhysicsWorkerMode::kAuto;
   bool physics_worker_mode_valid = true;
 
@@ -42,7 +39,7 @@ struct PerformancePolicy {
 
 PerformancePolicy ParsePerformancePolicy(
     std::string_view multithreaded_rendering,
-    std::string_view memory_limit_mb = "0", std::string_view game_mode = "auto",
+    std::string_view memory_limit_mb = "0",
     std::string_view physics_worker_mode = "auto");
 
 int DetectAvailablePhysicalCoreCount();

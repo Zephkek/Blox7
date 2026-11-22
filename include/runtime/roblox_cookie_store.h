@@ -33,7 +33,6 @@ class RobloxSecretStore {
 std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore();
 std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore(
     const Environment& environment);
-void SetRobloxCookieWarningHandler(void (*handler)(std::string_view));
 
 StoredCookie ReadRobloxCookieFile(const std::filesystem::path& path,
                                   bool required = false);

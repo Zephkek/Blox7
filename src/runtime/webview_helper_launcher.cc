@@ -123,13 +123,10 @@ pid_t WebViewHelperProcess::process_id() const {
 
 namespace {
 
-constexpr std::string_view kProtocolHeader = "BLOX7-WEBVIEW 1\n";
 constexpr std::string_view kControlMagic = "MWVC";
 constexpr std::string_view kEventMagic = "MWVE";
 constexpr unsigned char kControlProtocolVersion = 1;
 constexpr std::size_t kControlHeaderBytes = 12;
-constexpr std::size_t kMaximumRequestBytes =
-    kProtocolHeader.size() + 20 + 1 + kMaximumWebViewUrlBytes;
 constexpr std::string_view kInternalRoutePrefix = "www:";
 constexpr std::string_view kRobloxWebOrigin = "https://www.roblox.com/";
 
@@ -183,15 +180,6 @@ private:
   char *value_ = nullptr;
 };
 
-bool HostIsFreeBsd() {
-  char buffer[512] = {};
-  std::ifstream file("/proc/version", std::ios::binary);
-  file.read(buffer, sizeof(buffer) - 1);
-  const std::string_view text(buffer, static_cast<std::size_t>(file.gcount()));
-  return text.find("FreeBSD") != std::string_view::npos ||
-         text.find("freebsd.org") != std::string_view::npos;
-}
-
 std::string FramePacket(std::string_view packet) {
   std::string out(4, '\0');
   const std::size_t size = packet.size();
@@ -222,31 +210,6 @@ bool ExtractFrame(std::string *buffer, std::string *frame) {
   frame->assign(*buffer, 4, size);
   buffer->erase(0, 4 + size);
   return true;
-}
-
-int ConnectToFreeBsdHost() {
-  const int descriptor = socket(AF_INET, SOCK_STREAM, 0);
-  if (descriptor < 0) {
-    return -1;
-  }
-  fcntl(descriptor, F_SETFD, FD_CLOEXEC);
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(2137);
-  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  int enabled = 1;
-  setsockopt(descriptor, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
-  if (connect(descriptor, reinterpret_cast<sockaddr *>(&address),
-              sizeof(address)) != 0) {
-    close(descriptor);
-    return -1;
-  }
-  const int flags = fcntl(descriptor, F_GETFL);
-  if (flags < 0 || fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) != 0) {
-    close(descriptor);
-    return -1;
-  }
-  return descriptor;
 }
 
 ssize_t ReceivePacket(WebViewHelperProcess::State *state,
@@ -358,33 +321,6 @@ bool HasUnsafePath(std::string_view path) {
     segment.push_back(static_cast<char>(decoded));
   }
   return false;
-}
-
-bool WriteAll(int descriptor, std::string_view bytes) {
-  std::size_t offset = 0;
-  while (offset < bytes.size()) {
-    const ssize_t written =
-        write(descriptor, bytes.data() + offset, bytes.size() - offset);
-    if (written < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      return false;
-    }
-    if (written == 0) {
-      return false;
-    }
-    offset += static_cast<std::size_t>(written);
-  }
-  return true;
-}
-
-std::string EncodeRequest(std::string_view url) {
-  std::string request(kProtocolHeader);
-  request += std::to_string(url.size());
-  request += '\n';
-  request.append(url);
-  return request;
 }
 
 std::string EncodeControlPacket(WebViewHelperControlOperation operation,
@@ -609,183 +545,6 @@ bool NormalizeWebViewUrl(std::string_view url, std::string *normalized_url,
     normalized_url->clear();
     return false;
   }
-  return true;
-}
-
-bool DecodeWebViewRequest(std::string_view request, std::string *url,
-                          std::string *error) {
-  if (url == nullptr) {
-    if (error != nullptr) {
-      *error = "webview request has no output destination";
-    }
-    return false;
-  }
-  if (request.size() > kMaximumRequestBytes ||
-      request.size() < kProtocolHeader.size() ||
-      request.compare(0, kProtocolHeader.size(), kProtocolHeader) != 0) {
-    if (error != nullptr) {
-      *error = "webview request has an invalid protocol header";
-    }
-    return false;
-  }
-  const std::size_t length_end = request.find('\n', kProtocolHeader.size());
-  if (length_end == std::string_view::npos) {
-    if (error != nullptr) {
-      *error = "webview request has no bounded URL length";
-    }
-    return false;
-  }
-  const std::string_view length_text = request.substr(
-      kProtocolHeader.size(), length_end - kProtocolHeader.size());
-  std::size_t expected_length = 0;
-  const auto conversion =
-      std::from_chars(length_text.data(),
-                      length_text.data() + length_text.size(), expected_length);
-  const std::string_view decoded = request.substr(length_end + 1);
-  if (length_text.empty() || conversion.ec != std::errc() ||
-      conversion.ptr != length_text.data() + length_text.size() ||
-      expected_length != decoded.size() ||
-      expected_length > kMaximumWebViewUrlBytes ||
-      !ValidateWebViewUrl(decoded, error)) {
-    if (error != nullptr && error->empty()) {
-      *error = "webview request URL length is invalid";
-    }
-    return false;
-  }
-  url->assign(decoded);
-  return true;
-}
-
-bool DecodeWebViewHelperControlPacket(std::string_view packet,
-                                      WebViewHelperControlCommand* command,
-                                      std::string* error) {
-  if (error != nullptr) {
-    error->clear();
-  }
-  const auto fail = [command, error](const char* message) {
-    if (command != nullptr) {
-      command->operation = WebViewHelperControlOperation::kClose;
-      command->payload.clear();
-      command->visible = false;
-    }
-    if (error != nullptr) {
-      *error = message;
-    }
-    return false;
-  };
-  if (command == nullptr) {
-    return fail("webview control command has no output destination");
-  }
-  if (packet.size() < kControlHeaderBytes ||
-      packet.size() > kMaximumWebViewControlPacketBytes ||
-      packet.compare(0, kControlMagic.size(), kControlMagic) != 0 ||
-      static_cast<unsigned char>(packet[4]) != kControlProtocolVersion ||
-      packet[6] != '\0' || packet[7] != '\0') {
-    return fail("webview control packet has an invalid header");
-  }
-  const std::size_t payload_size =
-      (static_cast<std::size_t>(static_cast<unsigned char>(packet[8])) << 24) |
-      (static_cast<std::size_t>(static_cast<unsigned char>(packet[9])) << 16) |
-      (static_cast<std::size_t>(static_cast<unsigned char>(packet[10])) << 8) |
-      static_cast<std::size_t>(static_cast<unsigned char>(packet[11]));
-  if (payload_size != packet.size() - kControlHeaderBytes) {
-    return fail("webview control packet has an invalid payload length");
-  }
-
-  const auto operation = static_cast<WebViewHelperControlOperation>(
-      static_cast<unsigned char>(packet[5]));
-  const std::string_view payload = packet.substr(kControlHeaderBytes);
-  const bool contains_nul = payload.find('\0') != std::string_view::npos;
-  switch (operation) {
-    case WebViewHelperControlOperation::kLoadUrl:
-      if (!ValidateWebViewUrl(payload, error)) {
-        command->operation = WebViewHelperControlOperation::kClose;
-        command->payload.clear();
-        command->visible = false;
-        return false;
-      }
-      break;
-    case WebViewHelperControlOperation::kSetTitle:
-      if (payload.size() > kMaximumWebViewTitleBytes ||
-          ContainsControlBytes(payload)) {
-        return fail("webview control title is oversized or unsafe");
-      }
-      break;
-    case WebViewHelperControlOperation::kSetVisible:
-    case WebViewHelperControlOperation::kSetBackNavigationDisabled:
-    case WebViewHelperControlOperation::kSetShowDomainAsTitle:
-      if (payload.size() != 1 ||
-          (static_cast<unsigned char>(payload.front()) != 0 &&
-           static_cast<unsigned char>(payload.front()) != 1)) {
-        return fail("webview control boolean payload is invalid");
-      }
-      break;
-    case WebViewHelperControlOperation::kEvaluateJavaScript:
-      if (payload.size() > kMaximumWebViewJavaScriptBytes || contains_nul) {
-        return fail("webview control JavaScript is oversized or contains NUL");
-      }
-      break;
-    case WebViewHelperControlOperation::kSetRobloxCookie:
-      if (payload.empty() || payload.size() > kMaximumWebViewCookieBytes ||
-          !std::all_of(payload.begin(), payload.end(), [](char byte) {
-            const unsigned char value = static_cast<unsigned char>(byte);
-            return value == 0x21 || (value >= 0x23 && value <= 0x2b) ||
-                   (value >= 0x2d && value <= 0x3a) ||
-                   (value >= 0x3c && value <= 0x5b) ||
-                   (value >= 0x5d && value <= 0x7e);
-          })) {
-        return fail("webview Roblox cookie is oversized or unsafe");
-      }
-      break;
-    case WebViewHelperControlOperation::kClearRobloxCookie:
-      if (!payload.empty()) {
-        return fail("webview Roblox cookie clear payload must be empty");
-      }
-      break;
-    case WebViewHelperControlOperation::kRetainPersistentRobloxCookie:
-      if (!payload.empty()) {
-        return fail("webview Roblox cookie retention payload must be empty");
-      }
-      break;
-    case WebViewHelperControlOperation::kClose:
-      if (!payload.empty()) {
-        return fail("webview control close payload must be empty");
-      }
-      break;
-    default:
-      return fail("webview control operation is unsupported");
-  }
-
-  command->operation = operation;
-  command->payload.assign(payload);
-  command->visible = !payload.empty() && payload.front() != '\0';
-  return true;
-}
-
-bool EncodeWebViewHelperEventPacket(WebViewHelperEventType type,
-                                    std::string_view payload,
-                                    std::string* packet) {
-  const bool ready = type == WebViewHelperEventType::kReady;
-  const bool cookie = type == WebViewHelperEventType::kRobloxCookie;
-  if (packet == nullptr || (!ready && payload.empty()) ||
-      payload.size() > (cookie ? kMaximumWebViewCookieBytes
-                               : kMaximumWebViewHybridEventBytes) ||
-      payload.find('\0') != std::string_view::npos ||
-      (type != WebViewHelperEventType::kExecuteRoblox &&
-       type != WebViewHelperEventType::kRobloxWkHybrid &&
-       type != WebViewHelperEventType::kRobloxLaunchUri && !ready && !cookie)) {
-    return false;
-  }
-  packet->assign(kControlHeaderBytes, '\0');
-  std::copy(kEventMagic.begin(), kEventMagic.end(), packet->begin());
-  (*packet)[4] = static_cast<char>(kControlProtocolVersion);
-  (*packet)[5] = static_cast<char>(type);
-  const std::size_t size = payload.size();
-  (*packet)[8] = static_cast<char>((size >> 24) & 0xff);
-  (*packet)[9] = static_cast<char>((size >> 16) & 0xff);
-  (*packet)[10] = static_cast<char>((size >> 8) & 0xff);
-  (*packet)[11] = static_cast<char>(size & 0xff);
-  packet->append(payload);
   return true;
 }
 
@@ -1185,141 +944,19 @@ WebViewHelperLaunchResult LaunchWebViewHelper(
   if (!NormalizeWebViewUrl(url, &normalized_url, &result.error)) {
     return result;
   }
-  {
-    WindowsHelperStart started = StartWindowsWebViewHelper(helper, std::move(exit_observer));
-    if (!started.error.empty()) {
-      result.error = std::move(started.error);
-      return result;
-    }
-    result.spawned = true;
-    result.process_id = started.child;
-    result.process = std::shared_ptr<WebViewHelperProcess>(
-        new WebViewHelperProcess(std::move(started.state)));
-    if (!result.process->LoadUrl(normalized_url)) {
-      result.spawned = false;
-      result.error = "cannot send the initial URL to the webview helper";
-    }
-    return result;
-  }
-  if (HostIsFreeBsd()) {
-    const int descriptor = ConnectToFreeBsdHost();
-    if (descriptor < 0) {
-      result.error = "cannot connect to the FreeBSD webview host";
-      return result;
-    }
-    auto tcp_state = std::make_shared<WebViewHelperProcess::State>();
-    tcp_state->tcp = true;
-    tcp_state->control_descriptor = descriptor;
-    tcp_state->child.store(1, std::memory_order_release);
-    result.process = std::shared_ptr<WebViewHelperProcess>(
-        new WebViewHelperProcess(std::move(tcp_state)));
-    result.spawned = true;
-    result.process_id = 1;
-    if (!result.process->LoadUrl(normalized_url)) {
-      result.spawned = false;
-      result.error = "cannot send the initial URL to the FreeBSD webview host";
-    }
-    return result;
-  }
-  std::error_code filesystem_error;
-  const std::filesystem::file_status helper_status =
-      std::filesystem::symlink_status(helper, filesystem_error);
-  if (!helper.is_absolute() || filesystem_error ||
-      !std::filesystem::is_regular_file(helper_status) ||
-      std::filesystem::is_symlink(helper_status) ||
-      access(helper.c_str(), X_OK) != 0) {
-    result.error = "webview helper is not an executable absolute regular file";
-    return result;
-  }
-
-  int control_descriptors[2] = {-1, -1};
-  if (socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0,
-                 control_descriptors) != 0) {
-    result.error = "cannot create private webview control channel";
-    return result;
-  }
-  ScopedFileDescriptor parent_control(control_descriptors[0]);
-  const ScopedFileDescriptor child_control(control_descriptors[1]);
-  if (child_control.get() == kWebViewHelperControlDescriptor) {
-    const int descriptor_flags = fcntl(child_control.get(), F_GETFD);
-    if (descriptor_flags < 0 || fcntl(child_control.get(), F_SETFD,
-                                      descriptor_flags & ~FD_CLOEXEC) != 0) {
-      result.error = "cannot prepare private webview control channel";
-      return result;
-    }
-  }
-
-  std::string request = EncodeRequest(normalized_url);
-  SensitiveStringGuard request_guard(&request);
-  const int request_descriptor =
-      memfd_create("blox7-webview-request", MFD_CLOEXEC);
-  if (request_descriptor < 0) {
-    result.error = "cannot create bounded webview request";
-    return result;
-  }
-  const ScopedFileDescriptor request_file(request_descriptor);
-  if (!WriteAll(request_file.get(), request) ||
-      lseek(request_file.get(), 0, SEEK_SET) < 0) {
-    result.error = "cannot prepare bounded webview request";
-    return result;
-  }
-
-  posix_spawn_file_actions_t actions;
-  int spawn_status = posix_spawn_file_actions_init(&actions);
-  if (spawn_status != 0) {
-    result.error = "cannot initialize webview helper process: " +
-                   std::string(std::strerror(spawn_status));
-    return result;
-  }
-  spawn_status = posix_spawn_file_actions_adddup2(&actions, request_file.get(),
-                                                  STDIN_FILENO);
-  if (spawn_status == 0 && request_file.get() != STDIN_FILENO) {
-    spawn_status =
-        posix_spawn_file_actions_addclose(&actions, request_file.get());
-  }
-  if (spawn_status == 0) {
-    spawn_status =
-        posix_spawn_file_actions_addclose(&actions, parent_control.get());
-  }
-  if (spawn_status == 0) {
-    spawn_status = posix_spawn_file_actions_adddup2(
-        &actions, child_control.get(), kWebViewHelperControlDescriptor);
-  }
-  if (spawn_status == 0 &&
-      child_control.get() != kWebViewHelperControlDescriptor) {
-    spawn_status =
-        posix_spawn_file_actions_addclose(&actions, child_control.get());
-  }
-
-  pid_t child = -1;
-  std::string helper_string = helper.string();
-  char *arguments[] = {helper_string.data(), nullptr};
-  if (spawn_status == 0) {
-    const auto child_environment = BuildHelperEnvironment(environ);
-    spawn_status = posix_spawn(&child, helper.c_str(), &actions, nullptr,
-                               arguments, child_environment.data());
-  }
-  posix_spawn_file_actions_destroy(&actions);
-  if (spawn_status != 0) {
-    result.error = "cannot start webview helper: " +
-                   std::string(std::strerror(spawn_status));
-    return result;
-  }
-  auto process_state = std::make_shared<WebViewHelperProcess::State>();
-  process_state->child.store(child, std::memory_order_release);
-  process_state->control_descriptor = parent_control.release();
-  const int reaper_status =
-      StartDetachedChildReaper(child, process_state, std::move(exit_observer));
-  if (reaper_status != 0) {
-    TerminateAndReapChild(child);
-    result.error = "cannot own webview helper process: " +
-                   std::string(std::strerror(reaper_status));
+  WindowsHelperStart started = StartWindowsWebViewHelper(helper, std::move(exit_observer));
+  if (!started.error.empty()) {
+    result.error = std::move(started.error);
     return result;
   }
   result.spawned = true;
-  result.process_id = child;
+  result.process_id = started.child;
   result.process = std::shared_ptr<WebViewHelperProcess>(
-      new WebViewHelperProcess(std::move(process_state)));
+      new WebViewHelperProcess(std::move(started.state)));
+  if (!result.process->LoadUrl(normalized_url)) {
+    result.spawned = false;
+    result.error = "cannot send the initial URL to the webview helper";
+  }
   return result;
 }
 

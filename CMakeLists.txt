@@ -81,7 +81,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# libjnivm uses C++ exceptions, so these cannot be directory-wide.
 add_library(blox7_compile_options INTERFACE)
 target_compile_options(blox7_compile_options INTERFACE
   "$<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wpedantic;-Wno-unused-parameter;-fno-exceptions;-g>"
@@ -91,64 +90,17 @@ function(blox7_apply_compile_options target_name)
   target_link_libraries(${target_name} PRIVATE blox7_compile_options)
 endfunction()
 
-option(BLOX7_ENABLE_UPSTREAM_JNIVM
-  "Build upstream libjnivm for the incremental JNI runtime migration" ON)
-if(BLOX7_ENABLE_UPSTREAM_JNIVM)
-  set(JNIVM_ENABLE_TRACE OFF CACHE BOOL
-    "Enable tracing inside upstream libjnivm")
-  set(JNIVM_ENABLE_GC ON CACHE BOOL
-    "Enable local/global reference tracking inside upstream libjnivm")
-  set(JNIVM_ENABLE_DEBUG OFF CACHE BOOL
-    "Enable upstream libjnivm class-dump/code-generation support")
-  set(JNIVM_ENABLE_RETURN_NON_ZERO OFF CACHE BOOL
-    "Allow upstream libjnivm to fabricate unresolved object return values")
-  set(JNIVM_FAKE_JNI_MINECRAFT_LINUX_COMPAT OFF CACHE BOOL
-    "Enable legacy fake-jni static method promotion")
-  set(JNIVM_ENABLE_TESTS OFF CACHE BOOL
-    "Build upstream libjnivm's own test suite")
-  set(JNIVM_BUILD_EXAMPLES OFF CACHE BOOL
-    "Build upstream libjnivm examples")
-
-  add_subdirectory(third_party/libjnivm EXCLUDE_FROM_ALL)
-  # Work around a missing include in libjnivm.
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(jnivm PRIVATE -include string)
-  endif()
-  target_link_libraries(jnivm PUBLIC Threads::Threads)
-  add_library(Blox7::UpstreamJni ALIAS jnivm)
-endif()
-
-option(BLOX7_WIN32 "Build for the Windows port (win/): Android ELF on the port's libc.so" OFF)
-if(BLOX7_WIN32)
-  # The port's loader (in its libc.so) provides mcpelauncher-linker's API natively.
-  add_library(linker STATIC win/runtime/linker_win.cc)
-  target_include_directories(linker PUBLIC third_party/mcpelauncher-linker/public_include)
-  target_compile_definitions(linker PUBLIC BLOX7_WIN32=1)
-else()
-add_subdirectory(third_party/mcpelauncher-linker)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  target_compile_options(linker PRIVATE -w)
-endif()
-endif()
+add_library(linker STATIC win/runtime/linker_win.cc)
+target_include_directories(linker PUBLIC third_party/mcpelauncher-linker/public_include)
+target_compile_definitions(linker PUBLIC BLOX7_WIN32=1)
 
 set(VULKAN_HEADERS_ENABLE_TESTS OFF CACHE BOOL
   "Build Khronos Vulkan-Headers tests" FORCE)
 set(VULKAN_HEADERS_ENABLE_INSTALL OFF CACHE BOOL
   "Install vendored Vulkan-Headers" FORCE)
+set(VULKAN_HEADERS_ENABLE_MODULE OFF CACHE BOOL
+  "Build the Vulkan-Hpp C++ named modules" FORCE)
 add_subdirectory(third_party/Vulkan-Headers EXCLUDE_FROM_ALL)
-
-include(CTest)
-if(BUILD_TESTING)
-  # Package builds disable tests and do not fetch Google Test.
-  include(FetchContent)
-  FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        v1.14.0
-  )
-  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-  FetchContent_MakeAvailable(googletest)
-endif()
 
 find_package(OpenSSL REQUIRED)
 
@@ -158,13 +110,6 @@ foreach(foundation_target IN ITEMS
     blox7_graphics_foundation
     blox7_sdl_vulkan_wsi)
   blox7_apply_compile_options(${foundation_target})
-endforeach()
-foreach(graphics_test_target IN ITEMS
-    bionic_egl_bridge_test
-    platform_graphics_foundation_test)
-  if(TARGET ${graphics_test_target})
-    blox7_apply_compile_options(${graphics_test_target})
-  endif()
 endforeach()
 
 include(${CMAKE_SOURCE_DIR}/cmake/Blox7Audio.cmake)
@@ -177,25 +122,6 @@ foreach(audio_target IN ITEMS
     blox7_opensles)
   blox7_apply_compile_options(${audio_target})
 endforeach()
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
-   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
-  # GCC 16 reports a false array-bounds warning in this translation unit.
-  target_compile_options(blox7_audio_opensl_adapter PRIVATE
-    -Wno-array-bounds
-  )
-endif()
-if(TARGET audio_foundation_test)
-  blox7_apply_compile_options(audio_foundation_test)
-endif()
-if(TARGET opensl_playback_runtime_test)
-  blox7_apply_compile_options(opensl_playback_runtime_test)
-endif()
-if(TARGET fmod_java_audio_runtime_test)
-  blox7_apply_compile_options(fmod_java_audio_runtime_test)
-endif()
-if(TARGET fmod_jni_audio_bridge_test)
-  blox7_apply_compile_options(fmod_jni_audio_bridge_test)
-endif()
 
 include(${CMAKE_SOURCE_DIR}/cmake/Blox7ElfCompatibility.cmake)
 
@@ -213,11 +139,6 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBYAML REQUIRED IMPORTED_TARGET yaml-0.1)
 pkg_check_modules(MINIZIP REQUIRED IMPORTED_TARGET minizip)
 pkg_check_modules(CAPSTONE REQUIRED IMPORTED_TARGET capstone)
-pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
-pkg_check_modules(LIBSECRET QUIET IMPORTED_TARGET libsecret-1)
-pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
-pkg_check_modules(LIBADWAITA REQUIRED IMPORTED_TARGET "libadwaita-1>=1.6")
-pkg_check_modules(WEBKITGTK6 REQUIRED IMPORTED_TARGET webkitgtk-6.0)
 
 add_library(blox7_update STATIC
   src/update/android_manifest.cc
@@ -291,7 +212,6 @@ add_library(blox7_runtime STATIC
   src/runtime/external_launch_broker.cc
   src/runtime/frame_rate_policy.cc
   src/runtime/fleasion.cc
-  src/runtime/game_mode.cc
   src/runtime/game_session_coordinator.cc
   src/runtime/graphics_launch_policy.cc
   src/runtime/http_client_policy.cc
@@ -325,7 +245,6 @@ add_library(blox7_runtime STATIC
   src/runtime/startup_state_machine.cc
   src/runtime/supported_launch_policy.cc
   src/runtime/support_bundle.cc
-  src/runtime/system_proxy.cc
   src/runtime/texture_memory_policy.cc
 )
 add_library(Blox7::Runtime ALIAS blox7_runtime)
@@ -349,48 +268,14 @@ set_property(SOURCE src/runtime/session_log.cc APPEND PROPERTY
   "BLOX7_BUILD_TARGET_PROCESSOR=\"${CMAKE_SYSTEM_PROCESSOR}\""
 )
 blox7_apply_compile_options(blox7_runtime)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
-   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
-  # GCC 16 reports a false array-bounds warning in nlohmann::json::dump().
-  set_property(SOURCE src/runtime/roblox_launch_uri.cc APPEND PROPERTY
-    COMPILE_OPTIONS -Wno-array-bounds
-  )
-endif()
 target_link_libraries(blox7_runtime PUBLIC Threads::Threads)
 target_link_libraries(blox7_runtime PRIVATE
   OpenSSL::Crypto
   CURL::libcurl
   nlohmann_json::nlohmann_json
-  PkgConfig::GIO
   PkgConfig::LIBYAML
   ${CMAKE_DL_LIBS}
 )
-
-# Keep GTK out of the process that loads Android libraries.
-add_library(blox7_failure_dialog_runtime STATIC
-  src/runtime/failure_dialog.cc
-)
-add_library(Blox7::FailureDialog ALIAS blox7_failure_dialog_runtime)
-target_include_directories(blox7_failure_dialog_runtime PUBLIC include)
-target_compile_definitions(blox7_failure_dialog_runtime PRIVATE
-  "BLOX7_INSTALL_LIBDIR=\"${CMAKE_INSTALL_LIBDIR}\""
-)
-blox7_apply_compile_options(blox7_failure_dialog_runtime)
-
-add_executable(blox7_failure_dialog
-  src/ui/blox7_failure_dialog.cc
-)
-target_link_libraries(blox7_failure_dialog PRIVATE PkgConfig::LIBADWAITA)
-blox7_apply_compile_options(blox7_failure_dialog)
-
-add_executable(blox7_cookie_helper src/runtime/blox7_cookie_helper.cc)
-if(LIBSECRET_FOUND)
-  target_link_libraries(blox7_cookie_helper PRIVATE PkgConfig::LIBSECRET)
-  target_compile_definitions(blox7_cookie_helper PRIVATE BLOX7_HAVE_LIBSECRET=1)
-else()
-  message(WARNING "libsecret-1 headers missing: Roblox cookies will use private plaintext files")
-endif()
-blox7_apply_compile_options(blox7_cookie_helper)
 
 add_library(blox7_services STATIC
   src/services/http_client.cc
@@ -414,29 +299,6 @@ add_library(Blox7::WebViewLauncher ALIAS blox7_webview_launcher)
 target_include_directories(blox7_webview_launcher PUBLIC include)
 target_link_libraries(blox7_webview_launcher PUBLIC CURL::libcurl)
 blox7_apply_compile_options(blox7_webview_launcher)
-
-add_library(blox7_webview_helper_policy STATIC
-  src/webview/webview_helper_policy.cc
-)
-add_library(Blox7::WebViewHelperPolicy ALIAS blox7_webview_helper_policy)
-target_include_directories(blox7_webview_helper_policy PUBLIC src)
-target_link_libraries(blox7_webview_helper_policy PUBLIC
-  PkgConfig::WEBKITGTK6
-  nlohmann_json::nlohmann_json
-)
-blox7_apply_compile_options(blox7_webview_helper_policy)
-
-add_executable(blox7_webview_helper
-  src/webview/blox7_webview_helper.cc
-)
-target_link_libraries(blox7_webview_helper PRIVATE
-  Blox7::WebViewLauncher
-  Blox7::WebViewHelperPolicy
-  Blox7::Runtime
-  PkgConfig::GTK4
-  PkgConfig::WEBKITGTK6
-)
-blox7_apply_compile_options(blox7_webview_helper)
 
 add_library(blox7_auth_runtime_composition STATIC
   src/runtime/auth_runtime_composition.cc
@@ -464,7 +326,6 @@ target_link_libraries(blox7_linker PUBLIC
   blox7_bionic_abi_exports
 )
 blox7_apply_compile_options(blox7_linker)
-target_compile_definitions(blox7_linker PUBLIC BLOX7_USE_BIONIC_LINKER=1)
 # The Bionic linker expects IPLT boundaries that host executables do not have.
 target_link_options(blox7_linker INTERFACE
   -Wl,--defsym=__rela_iplt_start=0
@@ -568,13 +429,11 @@ target_include_directories(blox7_bionic_abi_exports
 )
 blox7_apply_compile_options(blox7_bionic_abi_exports)
 # our fortify exports share names with glibc's __*_chk, lto folds them into themselves and loops forever
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  set_property(SOURCE src/compat/bionic_abi_exports.cc APPEND PROPERTY
-    COMPILE_OPTIONS
-      -fno-lto
-      -fno-builtin
-  )
-endif()
+set_property(SOURCE src/compat/bionic_abi_exports.cc APPEND PROPERTY
+  COMPILE_OPTIONS
+    -fno-lto
+    -fno-builtin
+)
 target_link_libraries(blox7_bionic_abi_exports PRIVATE
   blox7_bionic_stdio_runtime
   blox7_window
@@ -587,12 +446,6 @@ add_library(blox7_legacy_runtime STATIC
 )
 target_include_directories(blox7_legacy_runtime PRIVATE include src)
 blox7_apply_compile_options(blox7_legacy_runtime)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  # Diagnostics from signal handlers cannot handle a failed write.
-  set_property(SOURCE src/legacy/legacy_runtime.cc APPEND PROPERTY
-    COMPILE_OPTIONS -Wno-unused-result
-  )
-endif()
 target_link_libraries(blox7_legacy_runtime PRIVATE
   blox7_legacy_jnivm
   blox7_compat
@@ -619,7 +472,6 @@ target_compile_definitions(blox7 PRIVATE
 target_link_libraries(blox7 PRIVATE
   blox7_legacy_runtime
   blox7_auth_runtime_composition
-  blox7_failure_dialog_runtime
   blox7_fmod_jni_audio_bridge
   blox7_roblox_output_device_runtime
   blox7_roblox_fullscreen_runtime
@@ -631,111 +483,11 @@ target_link_libraries(blox7 PRIVATE
 target_link_options(blox7 PRIVATE
   -Wl,--export-dynamic
 )
-if(BLOX7_WIN32)
-  # bionic is the real libc here, so the glibc-host stdio (__sF) stays unexported
-  target_link_options(blox7 PRIVATE
-    -Wl,--exclude-libs,libblox7_bionic_stdio_runtime.a
-  )
-  # the focused TextBox gets its own layer over the game window
-  target_sources(blox7 PRIVATE win/runtime/text_layer_win.cc)
-  target_sources(blox7 PRIVATE win/runtime/album_saver_win.cc)
-  target_link_libraries(blox7 PRIVATE Blox7::Update SDL3::SDL3)
-endif()
+target_link_options(blox7 PRIVATE
+  -Wl,--exclude-libs,libblox7_bionic_stdio_runtime.a
+)
+target_sources(blox7 PRIVATE win/runtime/text_layer_win.cc)
+target_sources(blox7 PRIVATE win/runtime/album_saver_win.cc)
+target_link_libraries(blox7 PRIVATE Blox7::Update SDL3::SDL3)
 
-# FreeBSD Linuxulator helper for the DF socket option, x86-64 asm only
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
-  set(BLOX7_BUILD_FREEBSD_SOCKET_HELPER OFF)
-endif()
-option(BLOX7_BUILD_FREEBSD_SOCKET_HELPER
-  "Build the native FreeBSD Linuxulator socket helper" ON)
-if(BLOX7_BUILD_FREEBSD_SOCKET_HELPER)
-find_program(BLOX7_LLD_EXECUTABLE NAMES ld.lld REQUIRED)
-find_program(BLOX7_ELFEDIT_EXECUTABLE NAMES elfedit REQUIRED)
-get_filename_component(BLOX7_LLD_DIRECTORY
-  "${BLOX7_LLD_EXECUTABLE}" DIRECTORY)
-set(BLOX7_FREEBSD_SOCKET_HELPER
-  "${CMAKE_BINARY_DIR}/blox7_freebsd_socket_helper")
-add_custom_command(
-  OUTPUT "${BLOX7_FREEBSD_SOCKET_HELPER}"
-  COMMAND "${CMAKE_CXX_COMPILER}"
-    -x assembler-with-cpp
-    -nostdlib
-    -static
-    -no-pie
-    "-B${BLOX7_LLD_DIRECTORY}/"
-    -fuse-ld=lld
-    -Wl,-e,_start,--build-id=none,-z,noexecstack
-    -o "${BLOX7_FREEBSD_SOCKET_HELPER}"
-    "${CMAKE_SOURCE_DIR}/src/compat/freebsd_socket_helper.S"
-  COMMAND "${BLOX7_ELFEDIT_EXECUTABLE}"
-    --output-osabi FreeBSD "${BLOX7_FREEBSD_SOCKET_HELPER}"
-  DEPENDS "${CMAKE_SOURCE_DIR}/src/compat/freebsd_socket_helper.S"
-  COMMENT "Building native FreeBSD Linuxulator socket helper"
-  VERBATIM
-)
-add_custom_target(blox7_freebsd_socket_helper_build ALL
-  DEPENDS "${BLOX7_FREEBSD_SOCKET_HELPER}"
-)
-add_dependencies(blox7 blox7_freebsd_socket_helper_build)
-endif()
-
-set_target_properties(blox7 PROPERTIES
-  BUILD_RPATH   "\$ORIGIN"
-  INSTALL_RPATH "\$ORIGIN;\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/blox7"
-)
-
-set(BLOX7_INSTALL_RUNTIME_DIR "${CMAKE_INSTALL_LIBDIR}/blox7")
-set(BLOX7_INSTALL_DATA_DIR "${CMAKE_INSTALL_DATADIR}/blox7")
-
-install(TARGETS blox7
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-)
-install(TARGETS
-    blox7
-    blox7_updater
-    blox7_failure_dialog
-    blox7_webview_helper
-    blox7_cookie_helper
-    blox7_audio_sdl
-    blox7_opensles
-    stub_sys_m
-    stub_sys_z
-    stub_sys_dl
-    stub_sys_c
-    stub_android
-    stub_log
-    stub_mediandk
-    stub_openmax
-    stub_egl
-    stub_glesv2
-    stub_vulkan
-  RUNTIME DESTINATION "${BLOX7_INSTALL_RUNTIME_DIR}"
-  LIBRARY DESTINATION "${BLOX7_INSTALL_RUNTIME_DIR}"
-)
-if(BLOX7_BUILD_FREEBSD_SOCKET_HELPER)
-install(PROGRAMS "${BLOX7_FREEBSD_SOCKET_HELPER}"
-  DESTINATION "${BLOX7_INSTALL_RUNTIME_DIR}"
-)
-endif()
-install(FILES
-    config/roblox_compatibility.json
-    config/roblox_bootstrap_sources.json
-    config/roblox_host_abi_reference.json
-    config/roblox_signing_certificates.json
-    config/roblox_download_sources.json
-  DESTINATION "${BLOX7_INSTALL_DATA_DIR}/metadata"
-)
-
-if(BLOX7_WIN32)
-  # no gtk/webkit helpers on windows
-  add_dependencies(blox7 stub_sys_m stub_sys_z stub_sys_dl stub_sys_c stub_android stub_log
-    stub_mediandk blox7_opensles stub_openmax stub_egl stub_glesv2 stub_vulkan)
-else()
 add_dependencies(blox7 all_stubs)
-add_dependencies(blox7 blox7_failure_dialog)
-add_dependencies(blox7 blox7_webview_helper blox7_cookie_helper)
-endif()
-
-if(BUILD_TESTING)
-  add_subdirectory(tests)
-endif()

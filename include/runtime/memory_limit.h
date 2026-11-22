@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "runtime/owned_pthread.h"
 
@@ -23,23 +22,6 @@ struct ProcessMemoryUsage {
 };
 
 ProcessMemoryUsage ParseProcessStatusMemory(std::string_view status);
-
-enum class CgroupMemoryLimitStatus {
-  kActive,
-  kUnavailable,
-  kExecFailed,
-};
-
-struct CgroupMemoryLimitResult {
-  CgroupMemoryLimitStatus status = CgroupMemoryLimitStatus::kUnavailable;
-  std::string detail;
-
-  bool active() const { return status == CgroupMemoryLimitStatus::kActive; }
-};
-
-CgroupMemoryLimitResult MaybeReexecWithCgroupMemoryLimit(
-    int argc, char* const argv[], std::uint64_t limit_bytes,
-    const std::vector<std::string>* reexec_arguments = nullptr);
 
 class MemoryLimitWatchdog final {
  public:

@@ -32,9 +32,7 @@
 #include "runtime/crash_report_policy.h"
 #include "runtime/environment.h"
 #include "runtime/external_launch_broker.h"
-#include "runtime/failure_dialog.h"
 #include "runtime/fleasion.h"
-#include "runtime/game_mode.h"
 #include "runtime/graphics_launch_policy.h"
 #include "runtime/memory_limit.h"
 #include "runtime/payload_update_preflight.h"
@@ -54,7 +52,6 @@
 #include "runtime/single_instance_lock.h"
 #include "runtime/support_bundle.h"
 #include "runtime/supported_launch_policy.h"
-#include "runtime/system_proxy.h"
 #include "runtime/webview_helper_launcher.h"
 #include "services/auth_service.h"
 #include "services/browser_tracker_service.h"
@@ -87,21 +84,6 @@ class ExternalLaunchBrokerScope final {
  private:
   std::shared_ptr<blox7::runtime::ExternalLaunchBroker> broker_;
 };
-
-void SecureErase(char* data, std::size_t size) {
-  volatile char* bytes = data;
-  for (std::size_t index = 0; bytes != nullptr && index < size; ++index) {
-    bytes[index] = '\0';
-  }
-}
-
-void SecureEraseArguments(std::vector<std::string>* arguments) {
-  if (arguments == nullptr) return;
-  for (std::string& argument : *arguments) {
-    SecureErase(argument.data(), argument.size());
-  }
-  arguments->clear();
-}
 
 bool QueueAndroidWindowFlags(void*, int flags, int mask) {
   return blox7::window::RequestFullscreenFromAndroidWindowFlags(flags, mask);
@@ -265,11 +247,6 @@ int main(int argc, char* argv[]) {
   }
 
   const blox7::runtime::ProcessEnvironment environment;
-  blox7::runtime::SetRobloxCookieWarningHandler(
-      [](std::string_view message) {
-        (void)blox7::runtime::ShowWarningDialog(
-            blox7::runtime::ProcessEnvironment(), message);
-      });
   const std::string built_in_compatibility_manifest = environment.GetOr(
       "BLOX7_UPDATE_COMPATIBILITY_PATH",
       environment.GetOr("BLOX7_COMPATIBILITY_MANIFEST",
@@ -304,13 +281,6 @@ int main(int argc, char* argv[]) {
       return EXIT_FAILURE;
     }
   }
-  std::vector<std::string> cgroup_reexec_arguments;
-  if (!blox7::runtime::BuildCommandLineReexecArguments(
-          command_line.options, argc, argv, &cgroup_reexec_arguments,
-          &command_line_error)) {
-    std::cerr << "[FATAL] " << command_line_error << '\n';
-    return EXIT_FAILURE;
-  }
   blox7::runtime::ScrubCommandLineLaunchArguments(&command_line.options,
                                                      argc, argv);
   blox7::runtime::SessionLog session_log;
@@ -344,18 +314,10 @@ int main(int argc, char* argv[]) {
         }
         std::cerr << "[FATAL] Cannot send website join to running Blox7: "
                   << forward_status.message() << '\n';
-        (void)blox7::runtime::ShowFailureDialog(
-            environment,
-            "Blox7 is already running, but the requested experience "
-            "could not be sent to it.");
       } else if (instance_lock->already_running()) {
         std::cerr << "[FATAL] Blox7 is already running for this user\n";
-        (void)blox7::runtime::ShowFailureDialog(
-            environment, "An instance of Blox7 is already running.");
       } else {
         std::cerr << "[FATAL] " << instance_lock->error() << '\n';
-        (void)blox7::runtime::ShowFailureDialog(
-            environment, "Blox7 could not acquire its launch lock.");
       }
       return EXIT_FAILURE;
     }
@@ -365,10 +327,6 @@ int main(int argc, char* argv[]) {
   if (!config_bootstrap) {
     std::cerr << "[FATAL] Cannot prepare " << paths.config_file() << ": "
               << config_bootstrap.error << '\n';
-    if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
-      (void)blox7::runtime::ShowFailureDialog(
-          environment, "Blox7 could not prepare its configuration.");
-    }
     return EXIT_FAILURE;
   }
   blox7::runtime::RuntimeConfigLoadResult runtime_config =
@@ -376,45 +334,7 @@ int main(int argc, char* argv[]) {
   if (!runtime_config) {
     std::cerr << "[FATAL] Cannot load " << paths.config_file() << ": "
               << runtime_config.error << '\n';
-    if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
-      (void)blox7::runtime::ShowFailureDialog(
-          environment, "Blox7 could not load its configuration.");
-    }
     return EXIT_FAILURE;
-  }
-  if (runtime_config.config.use_system_proxy()) {
-    const blox7::runtime::SystemProxyResult system_proxy =
-        blox7::runtime::ResolveSystemProxy();
-    const std::string proxy_host = system_proxy.proxy.has_value()
-                                       ? system_proxy.proxy->host
-                                       : std::string();
-    const std::string proxy_port =
-        system_proxy.proxy.has_value()
-            ? std::to_string(system_proxy.proxy->port)
-            : std::string();
-    const std::string proxy_scheme = system_proxy.proxy.has_value()
-                                         ? system_proxy.proxy->scheme
-                                         : std::string();
-    if (!system_proxy ||
-        setenv("BLOX7_HTTP_PROXY_HOST", proxy_host.c_str(), 1) != 0 ||
-        setenv("BLOX7_HTTP_PROXY_PORT", proxy_port.c_str(), 1) != 0 ||
-        setenv("BLOX7_HTTP_PROXY_SCHEME", proxy_scheme.c_str(), 1) != 0 ||
-        setenv("BLOX7_HTTP_PROXY_USERNAME", "", 1) != 0 ||
-        setenv("BLOX7_HTTP_PROXY_PASSWORD", "", 1) != 0) {
-      std::cerr << "[FATAL] Cannot resolve host system proxy";
-      if (!system_proxy.error.empty()) {
-        std::cerr << ": " << system_proxy.error;
-      }
-      std::cerr << '\n';
-      return EXIT_FAILURE;
-    }
-    runtime_config = blox7::runtime::LoadRuntimeConfig(
-        environment, paths.config_file());
-    if (!runtime_config) {
-      std::cerr << "[FATAL] Cannot apply host system proxy: "
-                << runtime_config.error << '\n';
-      return EXIT_FAILURE;
-    }
   }
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
       runtime_config.config.has_unsafe_detached_thread_overrides()) {
@@ -425,10 +345,6 @@ int main(int argc, char* argv[]) {
     }
     std::cerr << "  Supported runtime requires synchronous or owned worker "
                  "execution.\n";
-    (void)blox7::runtime::ShowFailureDialog(
-        environment,
-        "Blox7 cannot start with unsupported legacy thread "
-        "overrides enabled.");
     return EXIT_FAILURE;
   }
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
@@ -437,7 +353,6 @@ int main(int argc, char* argv[]) {
     std::cerr << "[FATAL] " << command_line_error << '\n';
     return EXIT_FAILURE;
   }
-  blox7::runtime::FailureDialogMonitor failure_dialog;
   blox7::runtime::MemoryLimitWatchdog memory_limit_watchdog;
   const bool use_memory_limit =
       command_line.options.mode == blox7::runtime::CommandMode::kRun &&
@@ -446,11 +361,6 @@ int main(int argc, char* argv[]) {
       use_memory_limit
           ? runtime_config.config.performance().memory_limit_bytes()
           : 0;
-  blox7::runtime::CgroupMemoryLimitResult cgroup_limit;
-  if (use_memory_limit) {
-    cgroup_limit = blox7::runtime::MaybeReexecWithCgroupMemoryLimit(
-        argc, argv, memory_limit_bytes, &cgroup_reexec_arguments);
-  }
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
     session_log = blox7::runtime::SessionLog::Start(
         environment, paths, process_started_at);
@@ -509,23 +419,9 @@ int main(int argc, char* argv[]) {
     std::cout << "  [runtime] created first-run configuration: "
               << paths.config_file() << '\n';
   }
-  if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
-      runtime_config.config.use_system_proxy()) {
-    if (runtime_config.config.network_proxy().has_value()) {
-      std::cout << "  [network] system proxy="
-                << blox7::runtime::BuildNetworkProxyUrl(
-                       *runtime_config.config.network_proxy())
-                << '\n';
-    } else {
-      std::cout << "  [network] system proxy=direct\n";
-    }
-  }
-  if (use_memory_limit) {
-    if (cgroup_limit.active()) {
-      std::cout << "  [memory] hard process-tree limit active: "
-                << runtime_config.config.performance().memory_limit_mb
-                << " MiB RAM, swap disabled\n";
-    }
+  if (config_bootstrap.cleaned()) {
+    std::cout << "  [runtime] removed settings Blox7 no longer has from "
+              << paths.config_file() << '\n';
   }
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
       runtime_config.config.graphics_backend() ==
@@ -559,47 +455,8 @@ int main(int argc, char* argv[]) {
               << '\n';
   }
 
-  const blox7::runtime::GameModePolicy game_mode_policy =
-      runtime_config.config.performance().game_mode;
-  blox7::runtime::GameModeSession game_mode_session =
-      command_line.options.mode == blox7::runtime::CommandMode::kRun
-          ? blox7::runtime::GameModeSession::Start(game_mode_policy)
-          : blox7::runtime::GameModeSession();
-  switch (game_mode_session.state()) {
-    case blox7::runtime::GameModeSessionState::kActive:
-      std::cout << "  [gamemode] performance request active\n";
-      break;
-    case blox7::runtime::GameModeSessionState::kAlreadyActive:
-      std::cout << "  [gamemode] already active for this process\n";
-      break;
-    case blox7::runtime::GameModeSessionState::kUnavailable:
-    case blox7::runtime::GameModeSessionState::kRequestFailed:
-      if (game_mode_policy == blox7::runtime::GameModePolicy::kOn) {
-        std::cerr << "  [gamemode] requested but unavailable: "
-                  << game_mode_session.detail()
-                  << "; continuing without GameMode\n";
-      } else {
-        std::cout << "  [gamemode] unavailable; continuing normally\n";
-      }
-      break;
-    case blox7::runtime::GameModeSessionState::kDisabled:
-      if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
-        std::cout << "  [gamemode] disabled by runtime policy\n";
-      }
-      break;
-    case blox7::runtime::GameModeSessionState::kStopped:
-    case blox7::runtime::GameModeSessionState::kStopFailed:
-      break;
-  }
-  if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
-    failure_dialog = blox7::runtime::FailureDialogMonitor::Start(
-        environment,
-        "Blox7 could not start Roblox because of an internal error.");
-  }
   if (use_memory_limit) {
     if (!memory_limit_watchdog.Start(memory_limit_bytes, &command_line_error)) {
-      failure_dialog.SetMessage(
-          "Blox7 could not start its memory safety monitor.");
       std::cerr << "[FATAL] " << command_line_error << '\n';
       return EXIT_FAILURE;
     }
@@ -607,7 +464,6 @@ int main(int argc, char* argv[]) {
               << runtime_config.config.performance().memory_limit_mb
               << " MiB\n";
   }
-  SecureEraseArguments(&cgroup_reexec_arguments);
   const bool uses_managed_payload =
       !environment.HasNonEmpty("ROBLOX_LIB_PATH") &&
       runtime_config.config.roblox_library_path() ==
@@ -634,8 +490,6 @@ int main(int argc, char* argv[]) {
       std::cerr << "[FATAL] Cannot configure the Roblox update graphics backend\n";
       return EXIT_FAILURE;
     }
-    failure_dialog.SetMessage(
-        "Blox7 could not update or verify the Roblox installation.");
     const blox7::runtime::PayloadUpdatePreflightResult update_preflight =
         blox7::runtime::RunPayloadUpdatePreflight(environment, paths);
     if (!update_preflight) {
@@ -643,17 +497,9 @@ int main(int argc, char* argv[]) {
       if (!update_preflight.details.empty()) {
         std::cerr << ": " << update_preflight.details;
       }
-      failure_dialog.SetMessage(
-          "Blox7 could not update or verify the Roblox installation.\n\n" +
-          (update_preflight.details.empty() ? update_preflight.error
-                                           : update_preflight.details) +
-          "\n\nSession log: " + (paths.logs_root() / "sessions").string());
       std::cerr << '\n';
       return EXIT_FAILURE;
     }
-    failure_dialog.SetMessage(
-        "Blox7 could not finish starting Roblox because of an internal "
-        "error.");
     background_update.Start(environment, paths);
   }
   if (!blox7::runtime::ExportRuntimePathEnvironment(paths,
@@ -1049,13 +895,8 @@ int main(int argc, char* argv[]) {
         std::string(runtime_config.config.device_profile().soc_model),
     });
     if (composition.rejected_credential_retired) {
-      constexpr std::string_view kSignedOutMessage =
-          "Your saved Roblox session is no longer valid. Sign in again to "
-          "continue.";
       std::cout << "  [auth] saved Roblox session expired; continuing with "
                    "native sign-in\n";
-      (void)blox7::runtime::ShowWarningDialog(environment,
-                                                 kSignedOutMessage);
     }
     if (composition.status ==
         blox7::runtime::AuthRuntimeStatus::kAuthenticated) {
@@ -1157,8 +998,6 @@ int main(int argc, char* argv[]) {
       return EXIT_FAILURE;
     }
   }
-  failure_dialog.SetMessage(
-      "Roblox closed unexpectedly because of an internal error.");
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
     blox7::runtime::LogProcessDiagnostics(
         blox7::runtime::ProcessDiagnosticStage::kNativeRuntime);
@@ -1179,29 +1018,18 @@ int main(int argc, char* argv[]) {
               << launch_broker_shutdown_status.message() << '\n';
     runtime_status = EXIT_FAILURE;
   }
-  if (runtime_status != EXIT_SUCCESS) {
-    failure_dialog.SetMessage("Roblox stopped with error code " +
-                              std::to_string(runtime_status) + ".");
-  }
   support_bundle_guard.SetExitCode(runtime_status);
   output_device_bridge.Shutdown();
   fullscreen_bridge.Shutdown();
   memory_limit_watchdog.Stop();
-  const blox7::Status game_mode_stop_status = game_mode_session.Stop();
-  if (!game_mode_stop_status.ok()) {
-    std::cerr << "  [gamemode] release failed: "
-              << game_mode_stop_status.message() << '\n';
-  }
   if (runtime_status == EXIT_SUCCESS &&
       command_line.options.mode == blox7::runtime::CommandMode::kRun) {
-    failure_dialog.MarkSuccessful();
     support_bundle_guard.Disarm();
     std::cout.flush();
     std::cerr.flush();
     std::_Exit(EXIT_SUCCESS);
   }
   if (runtime_status == EXIT_SUCCESS) {
-    failure_dialog.MarkSuccessful();
     support_bundle_guard.Disarm();
   }
   return runtime_status;

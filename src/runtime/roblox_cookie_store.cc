@@ -1,41 +1,24 @@
 #include "runtime/roblox_cookie_store.h"
 
 #include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <spawn.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include <array>
-#include <atomic>
 #include <cerrno>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
 
-#include "runtime/helper_environment.h"
-#include "runtime/runtime_config_file.h"
-#include "runtime/runtime_paths.h"
-
-extern char** environ;
+#include "runtime/environment.h"
 
 extern "C" int __w32_protect(const void* in, size_t size, void** out, size_t* out_size);
 extern "C" int __w32_unprotect(const void* in, size_t size, void** out, size_t* out_size);
-
-#ifndef BLOX7_INSTALL_LIBDIR
-#define BLOX7_INSTALL_LIBDIR "lib"
-#endif
 
 namespace blox7::runtime {
 namespace {
 
 constexpr size_t kMaximumCookieBytes = 1024 * 1024;
-std::atomic<void (*)(std::string_view)> warning_handler{nullptr};
-std::atomic<bool> warning_shown{false};
 
 void ClearString(std::string* value) {
   volatile char* bytes = value->data();
@@ -43,23 +26,8 @@ void ClearString(std::string* value) {
   value->clear();
 }
 
-class NotifyingSecretStore : public RobloxSecretStore {
- public:
-  void Warn(std::string_view message) override {
-    RobloxSecretStore::Warn(message);
-    if (warning_shown.exchange(true)) return;
-    if (const auto handler = warning_handler.load()) handler(message);
-  }
-};
-
-class DisabledSecretStore final : public NotifyingSecretStore {
- public:
-  bool enabled() const override { return false; }
-  StoredCookie Load(const std::filesystem::path&) override { return {}; }
-};
-
 // no keyring on windows, dpapi ties the cookie to the windows account instead
-class DpapiSecretStore final : public NotifyingSecretStore {
+class DpapiSecretStore final : public RobloxSecretStore {
  public:
   StoredCookie Load(const std::filesystem::path& profile) override {
     StoredCookie result;
@@ -142,184 +110,6 @@ class DpapiSecretStore final : public NotifyingSecretStore {
   }
 };
 
-std::filesystem::path CookieHelper() {
-  std::error_code error;
-  const auto executable =
-      std::filesystem::read_symlink("/proc/self/exe", error);
-  if (error) return {};
-  const auto directory = executable.parent_path();
-  const char* override = std::getenv("BLOX7_COOKIE_HELPER");
-  std::vector<std::filesystem::path> candidates;
-  if (override != nullptr) {
-    candidates.emplace_back(override);
-  } else {
-    candidates = {
-        directory / "blox7_cookie_helper",
-        directory.parent_path() / BLOX7_INSTALL_LIBDIR /
-            "blox7/blox7_cookie_helper",
-        directory.parent_path() / "libexec/blox7/blox7_cookie_helper"};
-    if (directory.filename() == "tests")
-      candidates.push_back(directory.parent_path() / "blox7_cookie_helper");
-  }
-  for (const auto& path : candidates) {
-    if (path.is_absolute() && std::filesystem::is_regular_file(path, error) &&
-        access(path.c_str(), X_OK) == 0)
-      return path;
-  }
-  return {};
-}
-
-std::string ExchangeCookie(char operation, const std::filesystem::path& profile,
-                           std::string_view cookie = {}) {
-  const auto helper = CookieHelper();
-  std::error_code error;
-  const auto key =
-      std::filesystem::absolute(profile, error).lexically_normal().string();
-  if (helper.empty() || error || key.find_first_of("\r\n") != key.npos ||
-      key.find('\0') != key.npos || key.size() > 4096 ||
-      cookie.size() > kMaximumCookieBytes)
-    return {};
-  int sockets[2];
-  if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) != 0)
-    return {};
-  for (int& fd : sockets) {
-    if (fd < 3) {
-      const int moved = fcntl(fd, F_DUPFD_CLOEXEC, 3);
-      close(fd);
-      fd = moved;
-    }
-  }
-  posix_spawn_file_actions_t actions;
-  int status = posix_spawn_file_actions_init(&actions);
-  if (status != 0 || sockets[0] < 0 || sockets[1] < 0) {
-    close(sockets[0]);
-    close(sockets[1]);
-    if (status == 0) posix_spawn_file_actions_destroy(&actions);
-    return {};
-  }
-  status = posix_spawn_file_actions_adddup2(&actions, sockets[1], STDIN_FILENO);
-  if (status == 0)
-    status =
-        posix_spawn_file_actions_adddup2(&actions, sockets[1], STDOUT_FILENO);
-  if (status == 0)
-    status = posix_spawn_file_actions_addclose(&actions, sockets[0]);
-  if (status == 0)
-    status = posix_spawn_file_actions_addclose(&actions, sockets[1]);
-  std::string program = helper.string();
-  char* arguments[] = {program.data(), nullptr};
-  const auto environment = BuildHelperEnvironment(environ);
-  pid_t child = -1;
-  if (status == 0)
-    status = posix_spawn(&child, program.c_str(), &actions, nullptr, arguments,
-                         environment.data());
-  posix_spawn_file_actions_destroy(&actions);
-  close(sockets[1]);
-  if (status != 0) {
-    close(sockets[0]);
-    return {};
-  }
-  std::string request(1, operation);
-  request += "\n" + key + "\n";
-  request.append(cookie);
-  std::string response;
-  size_t sent = 0;
-  bool eof = false;
-  bool exited = false;
-  int child_status = 0;
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(15);
-  while (std::chrono::steady_clock::now() < deadline && !(eof && exited)) {
-    if (!exited) {
-      const pid_t reaped = waitpid(child, &child_status, WNOHANG);
-      exited = reaped == child;
-      if (reaped < 0 && errno != EINTR) {
-        exited = true;
-        child_status = 1 << 8;
-        break;
-      }
-    }
-    if (eof) {
-      (void)poll(nullptr, 0, 20);
-      continue;
-    }
-    pollfd socket{
-        sockets[0],
-        static_cast<short>(POLLIN | (sent < request.size() ? POLLOUT : 0)), 0};
-    if (poll(&socket, 1, 20) < 0) {
-      if (errno == EINTR) continue;
-      break;
-    }
-    if ((socket.revents & POLLOUT) && sent < request.size()) {
-      const ssize_t count =
-          send(sockets[0], request.data() + sent, request.size() - sent,
-               MSG_NOSIGNAL | MSG_DONTWAIT);
-      if (count > 0) {
-        sent += static_cast<size_t>(count);
-        if (sent == request.size()) shutdown(sockets[0], SHUT_WR);
-      } else if (count < 0 && errno != EINTR && errno != EAGAIN)
-        break;
-    }
-    if (socket.revents & (POLLIN | POLLHUP | POLLERR)) {
-      std::array<char, 4096> buffer{};
-      const ssize_t count =
-          recv(sockets[0], buffer.data(), buffer.size(), MSG_DONTWAIT);
-      if (count == 0)
-        eof = true;
-      else if (count > 0)
-        response.append(buffer.data(), static_cast<size_t>(count));
-      else if (errno != EINTR && errno != EAGAIN)
-        break;
-      volatile char* bytes = buffer.data();
-      for (size_t i = 0; i < buffer.size(); ++i) bytes[i] = '\0';
-      if (response.size() > kMaximumCookieBytes + 1) break;
-    }
-  }
-  close(sockets[0]);
-  ClearString(&request);
-  if (!exited) {
-    kill(child, SIGKILL);
-    while (waitpid(child, &child_status, 0) < 0 && errno == EINTR) {
-    }
-  }
-  if (!exited || !eof || !WIFEXITED(child_status) ||
-      WEXITSTATUS(child_status) != 0 ||
-      response.size() > kMaximumCookieBytes + 1)
-    ClearString(&response);
-  return response;
-}
-
-class HelperSecretStore final : public NotifyingSecretStore {
- public:
-  StoredCookie Load(const std::filesystem::path& profile) override {
-    if (!available_) return RobloxSecretStore::Load(profile);
-    std::string response = ExchangeCookie('L', profile);
-    StoredCookie result;
-    result.from_secret_store = true;
-    if (!response.empty() && response.front() == 'F') {
-      result.status = StoredCookieStatus::kFound;
-      result.value = response.substr(1);
-    } else if (response != "M") {
-      available_ = false;
-      result = RobloxSecretStore::Load(profile);
-    }
-    ClearString(&response);
-    return result;
-  }
-  bool Store(const std::filesystem::path& profile,
-             const std::string& cookie) override {
-    if (!available_) return false;
-    const bool stored = ExchangeCookie('S', profile, cookie) == "F";
-    if (!stored) available_ = false;
-    return stored;
-  }
-  bool Clear(const std::filesystem::path& profile) override {
-    return available_ && ExchangeCookie('C', profile) == "F";
-  }
-
- private:
-  std::atomic<bool> available_{true};
-};
-
 }  // namespace
 
 StoredCookie RobloxSecretStore::Load(const std::filesystem::path&) {
@@ -348,15 +138,6 @@ std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore(
     const Environment& environment) {
   (void)environment;
   return std::make_shared<DpapiSecretStore>();
-  const auto paths = RuntimePaths::FromEnvironment(environment);
-  const auto loaded = LoadRuntimeConfig(environment, paths.config_file());
-  if (loaded && loaded.config.use_libsecret())
-    return std::make_shared<HelperSecretStore>();
-  return std::make_shared<DisabledSecretStore>();
-}
-
-void SetRobloxCookieWarningHandler(void (*handler)(std::string_view)) {
-  warning_handler.store(handler);
 }
 
 StoredCookie ReadRobloxCookieFile(const std::filesystem::path& path,

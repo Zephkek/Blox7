@@ -8,7 +8,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace blox7 {
@@ -49,9 +53,6 @@ runtime:
   # active verified payload.
   # roblox_library: /absolute/path/to/libroblox.so
 
-auth:
-  use_libsecret: false
-
 appearance:
   # String (default: roblox): use Roblox's saved account theme. Supported
   # overrides: dark, light, or system (follow the desktop color scheme).
@@ -78,13 +79,9 @@ performance:
   # available to Roblox worker pools; `latency` preserves Roblox-managed pool
   # sizes and coalesces midphase work. Supported: auto, latency, throughput.
   physics_worker_mode: throughput
-  # Integer MiB (default: 0): hard RAM cap for the Blox7 process tree.
-  # 0 disables the cap. cgroup v2 also disables swap; other Linux systems use
-  # an RSS+swap watchdog. 6144 is a conservative starting point for 32 GiB RAM.
+  # Integer MiB (default: 0): stop Blox7 once its memory use passes this many
+  # MiB. 0 disables the cap.
   memory_limit_mb: 0
-  # String (default: auto): request Feral GameMode when its host daemon and
-  # client library are available. Supported values: auto, on, off.
-  gamemode: auto
 
 audio:
   # String (default: default): `default` follows the host system output.
@@ -147,9 +144,6 @@ window:
   ui_scale: auto
 
 network:
-  # Boolean (default: false): follow the host HTTP/SOCKS5 proxy and
-  # automatically use its current port. Do not combine with a fixed proxy.
-  use_system_proxy: false
   # Optional fixed HTTP/SOCKS5 proxy. Uncomment host and port together.
   # The host must not contain a scheme such as http://.
   # proxy_scheme: http
@@ -201,12 +195,186 @@ bool WriteAll(int file, std::string_view contents, std::string* error) {
       if (errno == EINTR) {
         continue;
       }
-      *error = ErrorMessage("cannot write first-run configuration", errno);
+      *error = ErrorMessage("cannot write configuration", errno);
       return false;
     }
     next += written;
     remaining -= static_cast<std::size_t>(written);
   }
+  return true;
+}
+
+bool WriteTemporaryConfig(const std::filesystem::path& parent,
+                          const std::filesystem::path& config_file,
+                          std::string_view contents,
+                          std::vector<char>* temporary_path,
+                          std::string* error) {
+  const std::string pattern =
+      (parent / ("." + config_file.filename().string() + ".tmp.XXXXXX"))
+          .string();
+  temporary_path->assign(pattern.begin(), pattern.end());
+  temporary_path->push_back('\0');
+  const int file = mkstemp(temporary_path->data());
+  if (file < 0) {
+    *error = ErrorMessage("cannot create temporary configuration", errno);
+    return false;
+  }
+  const auto fail = [&](std::string message) {
+    (void)close(file);
+    (void)unlink(temporary_path->data());
+    *error = std::move(message);
+    return false;
+  };
+  if (fcntl(file, F_SETFD, FD_CLOEXEC) != 0 ||
+      fchmod(file, S_IRUSR | S_IWUSR) != 0) {
+    return fail(ErrorMessage("cannot secure temporary configuration", errno));
+  }
+  std::string write_error;
+  if (!WriteAll(file, contents, &write_error)) {
+    return fail(write_error);
+  }
+  if (fsync(file) != 0) {
+    return fail(ErrorMessage("cannot synchronize configuration", errno));
+  }
+  if (close(file) != 0) {
+    const int close_error = errno;
+    (void)unlink(temporary_path->data());
+    *error = ErrorMessage("cannot close configuration", close_error);
+    return false;
+  }
+  return true;
+}
+
+struct OldSetting {
+  std::string_view section;
+  std::string_view key;
+};
+
+constexpr OldSetting kOldSettings[] = {
+    {"auth", "use_libsecret"},
+    {"performance", "gamemode"},
+    {"network", "use_system_proxy"},
+};
+
+std::string_view WithoutCarriageReturn(std::string_view line) {
+  return !line.empty() && line.back() == '\r' ? line.substr(0, line.size() - 1)
+                                              : line;
+}
+
+bool IsTopLevel(std::string_view line) {
+  return !line.empty() && line.front() != ' ' && line.front() != '#';
+}
+
+std::string_view Indented(std::string_view line, std::size_t* indent) {
+  const std::size_t first = line.find_first_not_of(' ');
+  *indent = first == std::string_view::npos ? line.size() : first;
+  return line.substr(*indent);
+}
+
+std::string WithoutOldSettings(std::string_view text) {
+  std::vector<std::string_view> lines;
+  for (std::size_t begin = 0; begin <= text.size();) {
+    const std::size_t end = text.find('\n', begin);
+    if (end == std::string_view::npos) {
+      lines.push_back(text.substr(begin));
+      break;
+    }
+    lines.push_back(text.substr(begin, end - begin));
+    begin = end + 1;
+  }
+  std::vector<bool> drop(lines.size(), false);
+  std::vector<std::size_t> emptied_headers;
+  std::string_view section;
+  std::size_t header = 0;
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    const std::string_view line = WithoutCarriageReturn(lines[i]);
+    if (IsTopLevel(line)) {
+      section = line.substr(0, line.find(':'));
+      header = i;
+      continue;
+    }
+    std::size_t indent = 0;
+    const std::string_view content = Indented(line, &indent);
+    if (indent != 2 || content.empty() || content.front() == '#') continue;
+    for (const OldSetting& removed : kOldSettings) {
+      if (section != removed.section ||
+          content.substr(0, removed.key.size()) != removed.key ||
+          content.substr(removed.key.size(), 1) != ":") {
+        continue;
+      }
+      drop[i] = true;
+      for (std::size_t above = i; above > header + 1; --above) {
+        std::size_t above_indent = 0;
+        const std::string_view comment =
+            Indented(WithoutCarriageReturn(lines[above - 1]), &above_indent);
+        if (above_indent != 2 || comment.empty() || comment.front() != '#') {
+          break;
+        }
+        drop[above - 1] = true;
+      }
+      emptied_headers.push_back(header);
+    }
+  }
+  if (emptied_headers.empty()) return std::string(text);
+  for (const std::size_t candidate : emptied_headers) {
+    std::size_t end = candidate + 1;
+    bool has_content = false;
+    for (; end < lines.size(); ++end) {
+      const std::string_view line = WithoutCarriageReturn(lines[end]);
+      if (!line.empty() && line.front() != ' ') break;
+      if (!drop[end] && !line.empty()) has_content = true;
+    }
+    if (has_content) continue;
+    for (std::size_t i = candidate; i < end; ++i) {
+      if (!WithoutCarriageReturn(lines[i]).empty()) drop[i] = true;
+    }
+  }
+  std::string result;
+  bool previous_blank = false;
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    if (drop[i]) continue;
+    const bool blank = WithoutCarriageReturn(lines[i]).empty();
+    if (blank && previous_blank && i + 1 < lines.size()) continue;
+    previous_blank = blank;
+    result.append(lines[i]);
+    if (i + 1 < lines.size()) result.push_back('\n');
+  }
+  return result;
+}
+
+bool ReadConfig(const std::filesystem::path& config_file, std::string* text,
+                std::string* error) {
+  std::ifstream input(config_file, std::ios::binary);
+  if (!input) {
+    *error = "cannot read runtime configuration";
+    return false;
+  }
+  std::ostringstream contents;
+  contents << input.rdbuf();
+  *text = contents.str();
+  return true;
+}
+
+bool CleanOldSettings(const std::filesystem::path& config_file, bool* changed,
+                       std::string* error) {
+  std::string text;
+  if (!ReadConfig(config_file, &text, error)) return false;
+  const std::string cleaned = WithoutOldSettings(text);
+  if (cleaned == text) return true;
+  std::filesystem::path parent = config_file.parent_path();
+  if (parent.empty()) parent = ".";
+  std::vector<char> temporary_path;
+  if (!WriteTemporaryConfig(parent, config_file, cleaned, &temporary_path,
+                            error)) {
+    return false;
+  }
+  if (rename(temporary_path.data(), config_file.c_str()) != 0) {
+    const int rename_error = errno;
+    (void)unlink(temporary_path.data());
+    *error = ErrorMessage("cannot replace runtime configuration", rename_error);
+    return false;
+  }
+  *changed = true;
   return true;
 }
 
@@ -248,6 +416,10 @@ RuntimeConfigBootstrapResult EnsureRuntimeConfigFile(
     return result;
   }
   if (exists) {
+    bool changed = false;
+    if (CleanOldSettings(config_file, &changed, &result.error) && changed) {
+      result.status = RuntimeConfigBootstrapStatus::kCleanedExisting;
+    }
     return result;
   }
 
@@ -282,54 +454,14 @@ RuntimeConfigBootstrapResult EnsureRuntimeConfigFile(
     }
   }
 
-  std::string temporary_pattern =
-      (parent / ("." + config_file.filename().string() + ".tmp.XXXXXX"))
-          .string();
-  std::vector<char> temporary_path(temporary_pattern.begin(),
-                                   temporary_pattern.end());
-  temporary_path.push_back('\0');
-  const int temporary_file = mkstemp(temporary_path.data());
-  if (temporary_file < 0) {
-    result.error = ErrorMessage("cannot create temporary configuration", errno);
+  std::vector<char> temporary_path;
+  if (!WriteTemporaryConfig(parent, config_file, kDefaultRuntimeConfig,
+                            &temporary_path, &result.error)) {
     return result;
   }
-
-  const auto discard_temporary = [&temporary_path]() {
-    (void)unlink(temporary_path.data());
-  };
-  if (fcntl(temporary_file, F_SETFD, FD_CLOEXEC) != 0 ||
-      fchmod(temporary_file, S_IRUSR | S_IWUSR) != 0) {
-    const int operation_error = errno;
-    (void)close(temporary_file);
-    discard_temporary();
-    result.error =
-        ErrorMessage("cannot secure temporary configuration", operation_error);
-    return result;
-  }
-  if (!WriteAll(temporary_file, kDefaultRuntimeConfig, &result.error)) {
-    (void)close(temporary_file);
-    discard_temporary();
-    return result;
-  }
-  if (fsync(temporary_file) != 0) {
-    const int operation_error = errno;
-    (void)close(temporary_file);
-    discard_temporary();
-    result.error = ErrorMessage("cannot synchronize first-run configuration",
-                                operation_error);
-    return result;
-  }
-  if (close(temporary_file) != 0) {
-    const int operation_error = errno;
-    discard_temporary();
-    result.error =
-        ErrorMessage("cannot close first-run configuration", operation_error);
-    return result;
-  }
-
   if (link(temporary_path.data(), config_file.c_str()) != 0) {
     const int publish_error = errno;
-    discard_temporary();
+    (void)unlink(temporary_path.data());
     if (publish_error == EEXIST) {
       bool raced_entry_exists = false;
       if (!InspectExistingConfig(config_file, &raced_entry_exists,

@@ -332,15 +332,5 @@ const char* RobloxCapabilityResolutionStatusName(
   return "Unknown";
 }
 
-const char* RobloxGamepadApiName(RobloxGamepadApi api) {
-  switch (api) {
-    case RobloxGamepadApi::kUnsupported:
-      return "Unsupported";
-    case RobloxGamepadApi::kWithGamepadType:
-      return "WithGamepadType";
-  }
-  return "Unknown";
-}
-
 }  // namespace runtime
 }  // namespace blox7

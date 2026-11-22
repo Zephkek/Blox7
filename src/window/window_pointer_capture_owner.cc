@@ -163,15 +163,6 @@ bool WindowPointerCaptureOwner::OnShiftKeyPressed(bool text_input_active) {
   return Pump(text_input_active);
 }
 
-bool WindowPointerCaptureOwner::NeedsRightButtonReleaseRecovery(
-    bool) const {
-  return false;
-}
-
-bool WindowPointerCaptureOwner::ShouldDispatchMouseMotion() {
-  return true;
-}
-
 bool WindowPointerCaptureOwner::OnFocusGained(bool text_input_active) {
   focused_ = true;
   return Pump(text_input_active);

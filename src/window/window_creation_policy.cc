@@ -11,9 +11,5 @@ SDL_WindowFlags ApplyHighPixelDensityWindowFlag(SDL_WindowFlags flags,
   return flags & ~SDL_WINDOW_HIGH_PIXEL_DENSITY;
 }
 
-bool DirectVulkanWindowRequiresInitialSync(std::string_view video_driver) {
-  return video_driver == "wayland";
-}
-
 }  // namespace window
 }  // namespace blox7

@@ -142,7 +142,6 @@ public:
   Status HandleOwnedExecuteJavaScript(std::string payload);
   Status HandleCloseWindow();
 
-  Status QueueJavaScriptCallback(std::string payload);
   Status QueueBrowserWindowClosed();
   Status DrainOutgoingEvents();
 

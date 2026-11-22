@@ -67,8 +67,6 @@ class ClientSettingsService {
   HttpClient& http_client_;
 };
 
-const char* ClientSettingsSourceName(ClientSettingsSource source);
-
 }  // namespace services
 }  // namespace blox7
 

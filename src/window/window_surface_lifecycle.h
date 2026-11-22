@@ -55,8 +55,6 @@ class WindowSurfaceLifecycle final {
   bool active_ = false;
 };
 
-const char* WindowSurfaceEventTypeName(WindowSurfaceEventType type);
-
 }  // namespace window
 }  // namespace blox7
 

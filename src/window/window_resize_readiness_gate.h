@@ -66,8 +66,6 @@ class WindowResizeReadinessGate final {
   WindowResizeReadinessSnapshot snapshot_;
 };
 
-const char* WindowResizeReadinessStateName(WindowResizeReadinessState state);
-
 }  // namespace window
 }  // namespace blox7
 

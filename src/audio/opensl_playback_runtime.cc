@@ -49,10 +49,6 @@ constexpr abi::InterfaceIdValue kVolumeId = {
     0x09e8ede0, 0xddde, 0x11db, 0xb4f6,
     {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
 
-std::atomic<std::uint64_t> g_submitted_buffers{0};
-std::atomic<std::uint64_t> g_consumed_buffers{0};
-std::atomic<std::uint64_t> g_clean_player_shutdowns{0};
-
 enum class RuntimeObjectKind {
   kEngine,
   kOutputMix,
@@ -378,7 +374,6 @@ void OnQueueEvent(void* context, OpenSlBufferQueueEvent event,
   switch (event) {
     case OpenSlBufferQueueEvent::kSubmitted:
       player->submitted_buffers.fetch_add(1, std::memory_order_relaxed);
-      g_submitted_buffers.fetch_add(1, std::memory_order_relaxed);
       {
         bool expected = false;
         if (player->submission_reported.compare_exchange_strong(
@@ -392,7 +387,6 @@ void OnQueueEvent(void* context, OpenSlBufferQueueEvent event,
     case OpenSlBufferQueueEvent::kConsumed: {
       const std::uint64_t consumed =
           player->consumed_buffers.fetch_add(1, std::memory_order_relaxed) + 1;
-      g_consumed_buffers.fetch_add(1, std::memory_order_relaxed);
       bool expected = false;
       if (player->consumption_reported.compare_exchange_strong(
               expected, true, std::memory_order_relaxed)) {
@@ -608,9 +602,6 @@ void ObjectDestroy(abi::Object self) {
     const OpenSlSimpleBufferQueueStats stats = queue_adapter->GetStats();
     const Status shutdown_status = queue_adapter->last_error();
     const bool clean = shutdown_status.ok() && stats.pending_buffers == 0;
-    if (clean) {
-      g_clean_player_shutdowns.fetch_add(1, std::memory_order_relaxed);
-    }
     std::fprintf(
         stderr,
         "[blox7][audio] OpenSL player shutdown: submitted=%llu "
@@ -1380,21 +1371,6 @@ BLOX7_OPENSL_API_ENTRY slQuerySupportedEngineInterfaces(
     blox7::audio::opensl_abi::Uint32 index,
     blox7::audio::opensl_abi::InterfaceId* iid) {
   return blox7::audio::QuerySupportedEngineInterface(index, iid);
-}
-
-BLOX7_OPENSL_EXPORT blox7::audio::opensl_abi::Result
-blox7OpenSlGetRuntimeStats(Blox7OpenSlRuntimeStats* stats,
-                              std::uint32_t stats_size) {
-  namespace abi = blox7::audio::opensl_abi;
-  if (stats == nullptr || stats_size < sizeof(Blox7OpenSlRuntimeStats)) {
-    return abi::kResultParameterInvalid;
-  }
-  *stats = Blox7OpenSlRuntimeStats{
-      blox7::audio::g_submitted_buffers.load(std::memory_order_relaxed),
-      blox7::audio::g_consumed_buffers.load(std::memory_order_relaxed),
-      blox7::audio::g_clean_player_shutdowns.load(
-          std::memory_order_relaxed)};
-  return abi::kResultSuccess;
 }
 
 }  // extern "C"

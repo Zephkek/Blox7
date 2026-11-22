@@ -739,27 +739,5 @@ const char* GameSessionStateName(GameSessionState state) {
   return "Unknown";
 }
 
-const char* GamePresentBackendName(GamePresentBackend backend) {
-  switch (backend) {
-    case GamePresentBackend::kUnknown:
-      return "Unknown";
-    case GamePresentBackend::kVulkan:
-      return "Vulkan";
-    case GamePresentBackend::kOpenGlEs:
-      return "OpenGlEs";
-  }
-  return "Unknown";
-}
-
-const char* GameSessionPrincipalKindName(GameSessionPrincipalKind kind) {
-  switch (kind) {
-    case GameSessionPrincipalKind::kLocalGuest:
-      return "LocalGuest";
-    case GameSessionPrincipalKind::kAuthenticated:
-      return "Authenticated";
-  }
-  return "Unknown";
-}
-
 }  // namespace runtime
 }  // namespace blox7

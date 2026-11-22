@@ -409,12 +409,6 @@ class ExternalLaunchBroker::Impl final {
     return Status::Ok();
   }
 
-  Status QueueInitial(RobloxExperienceLaunchRequest request) {
-    RobloxExperienceLaunchRequest normalized;
-    Status status = NormalizeRequest(request, &normalized);
-    return status.ok() ? QueueNormalized(std::move(normalized)) : status;
-  }
-
   Status Drain(const ExternalLaunchSink& sink, std::size_t maximum_requests) {
     if (!sink.valid()) {
       return Invalid("external-launch sink is incomplete");
@@ -671,11 +665,6 @@ Status ExternalLaunchBroker::ForwardToOwner(
   }
   return Unavailable(
       ErrnoMessage("external-launch owner is unavailable", last_error));
-}
-
-Status ExternalLaunchBroker::QueueInitialRequest(
-    RobloxExperienceLaunchRequest request) {
-  return impl_->QueueInitial(std::move(request));
 }
 
 Status ExternalLaunchBroker::Drain(const ExternalLaunchSink& sink,

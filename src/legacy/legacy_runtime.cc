@@ -47,9 +47,7 @@
 
 #include "runtime/roblox_user_agent.h"
 #include "compat/bionic_abi_exports.h"
-#include "compat/bionic_prctl_runtime.h"
 #include "compat/bionic_pthread_create_runtime.h"
-#include "compat/bionic_socket_runtime.h"
 #include "compat/build_profile.h"
 #include "compat/elf_build_id.h"
 #include "compat/guest_abi.h"
@@ -84,9 +82,7 @@
 #include "window/window.h"
 #include "window/window_game_surface_bridge.h"
 
-#ifdef BLOX7_USE_BIONIC_LINKER
 #include <mcpelauncher/linker.h>
-#endif
 
 #ifndef BLOX7_DEFAULT_COMPATIBILITY_MANIFEST
 #define BLOX7_DEFAULT_COMPATIBILITY_MANIFEST \
@@ -4600,10 +4596,8 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
   }
   PrintStage(1, "Initialising Bionic linker + Pseudo-JVM");
 
-#ifdef BLOX7_USE_BIONIC_LINKER
   ::linker::init();
   std::cout << "  mcpelauncher Bionic linker initialised.\n";
-#endif
 
   auto jni_vm = dependencies.jni_vm();
   if (jni_vm == nullptr) {
@@ -5443,12 +5437,6 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
   }
   RegisterBionicDnsWrappers();
   RegisterBionicPathWrappers();
-  linker::RegisterSymbol("prctl",
-                         reinterpret_cast<void*>(blox7_bionic_prctl));
-  linker::RegisterSymbol(
-      "setsockopt", reinterpret_cast<void*>(blox7_bionic_setsockopt));
-  linker::RegisterSymbol("sendmsg",
-                         reinterpret_cast<void*>(blox7_bionic_sendmsg));
   linker::RegisterSymbol("mprotect", reinterpret_cast<void*>(blox7_mprotect));
   linker::RegisterSymbol("__system_property_get",
                          reinterpret_cast<void*>(blox7_system_property_get));
@@ -5777,13 +5765,11 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
 
   {
     uintptr_t base_addr = g_libroblox_base;
-#ifdef BLOX7_USE_BIONIC_LINKER
     const uintptr_t loader_base =
         static_cast<uintptr_t>(::linker::get_library_base(roblox_handle));
     if (loader_base != 0) {
       base_addr = loader_base;
     }
-#endif
     if (base_addr == 0) {
       Dl_info symbol_info{};
       if (::dladdr(reinterpret_cast<void*>(jni_onload), &symbol_info) != 0) {

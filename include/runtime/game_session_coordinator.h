@@ -221,8 +221,6 @@ class GameSessionCoordinator final {
 };
 
 const char* GameSessionStateName(GameSessionState state);
-const char* GamePresentBackendName(GamePresentBackend backend);
-const char* GameSessionPrincipalKindName(GameSessionPrincipalKind kind);
 
 }  // namespace runtime
 }  // namespace blox7

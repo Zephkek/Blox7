@@ -39,8 +39,6 @@ namespace {
 
 using Json = nlohmann::json;
 
-std::atomic<bool> g_hashing_fault_for_testing{false};
-
 std::string FormatHex(const unsigned char* data, std::size_t size,
                       std::size_t max_chars = 0) {
   static constexpr char kHex[] = "0123456789abcdef";
@@ -59,9 +57,6 @@ std::string FormatHex(const unsigned char* data, std::size_t size,
 
 std::string ComputeSha256Hex(std::string_view bytes,
                              std::size_t max_chars = 0) {
-  if (g_hashing_fault_for_testing.load(std::memory_order_acquire)) {
-    return {};
-  }
   unsigned char digest[EVP_MAX_MD_SIZE];
   unsigned int len = 0;
   if (EVP_Digest(bytes.data(), bytes.size(), digest, &len, EVP_sha256(),
@@ -1346,10 +1341,6 @@ ExternalHostAbiProfileResult InitializeHostAbiProfileFromEnvironment(
   request.candidate_process_authorization = candidate_process_authorization;
   request.explicit_unverified_authorization = explicit_unverified_authorization;
   return LoadExternalHostAbiProfile(request);
-}
-
-void SetHostAbiProfileHashingFaultForTesting(bool enabled) noexcept {
-  g_hashing_fault_for_testing.store(enabled, std::memory_order_release);
 }
 
 }  // namespace blox7::compat

@@ -4,9 +4,6 @@
 #include <cstdint>
 
 #if defined(BLOX7_USE_SYSTEM_OPENSL_HEADERS)
-#if !defined(__ANDROID__) && !defined(SL_API_DEPRECATED)
-#define SL_API_DEPRECATED(level)
-#endif
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
 #define BLOX7_OPENSL_API_ENTRY SLAPIENTRY

@@ -241,7 +241,6 @@ std::string BuildNetworkProxyUrl(const NetworkProxyConfig& proxy,
 RuntimeConfig RuntimeConfig::FromEnvironment(const Environment& environment) {
   RuntimeConfig config;
   config.headless_ = LegacyEnabled(environment, "BLOX7_HEADLESS");
-  config.use_libsecret_ = environment.GetOr("BLOX7_USE_LIBSECRET", "0") == "1";
   config.roblox_library_path_ = environment.GetOr(
       "ROBLOX_LIB_PATH", config.roblox_library_path_.string());
   config.graphics_backend_name_ = environment.GetOr(
@@ -353,7 +352,6 @@ RuntimeConfig RuntimeConfig::FromEnvironment(const Environment& environment) {
   config.performance_ = ParsePerformancePolicy(
       environment.GetOr("BLOX7_MULTITHREADED_RENDERING", "0"),
       environment.GetOr("BLOX7_MEMORY_LIMIT_MB", "0"),
-      environment.GetOr("BLOX7_GAMEMODE", "auto"),
       environment.GetOr("BLOX7_PHYSICS_WORKER_MODE", "throughput"));
   config.audio_output_device_ = environment.GetOr(
       "BLOX7_AUDIO_OUTPUT_DEVICE", config.audio_output_device_);
@@ -363,8 +361,6 @@ RuntimeConfig RuntimeConfig::FromEnvironment(const Environment& environment) {
       "BLOX7_AUDIO_INPUT_DEVICE", config.audio_input_device_);
   config.audio_input_device_valid_ =
       IsValidDeviceProfileValue(config.audio_input_device_, 512);
-  config.use_system_proxy_ =
-      LegacyEnabled(environment, "BLOX7_USE_SYSTEM_PROXY");
   config.network_proxy_ = ReadNetworkProxy(environment);
   config.fleasion_enabled_ = ReadBoolean(
       environment, "BLOX7_FLEASION_ENABLED", false, &config.fleasion_valid_);
@@ -383,7 +379,6 @@ RuntimeConfig RuntimeConfig::FromEnvironment(const Environment& environment) {
       config.fleasion_valid_ = false;
   }
   if (config.fleasion_enabled_) {
-    if (config.use_system_proxy_) config.fleasion_valid_ = false;
     if (config.fleasion_proxy_mode_ == "env" && fleasion_proxy) {
       if (config.network_proxy_ &&
           (config.network_proxy_->host != fleasion_proxy->host ||

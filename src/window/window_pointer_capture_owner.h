@@ -46,8 +46,6 @@ class WindowPointerCaptureOwner final {
   bool OnRightButton(bool pressed, bool text_input_active,
                      std::optional<PointerPosition> position = std::nullopt);
   bool OnShiftKeyPressed(bool text_input_active);
-  bool NeedsRightButtonReleaseRecovery(bool observed_pressed) const;
-  bool ShouldDispatchMouseMotion();
   bool OnFocusGained(bool text_input_active);
   bool OnFocusLost();
   bool Shutdown();

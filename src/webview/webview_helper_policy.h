@@ -1,10 +1,6 @@
 #ifndef BLOX7_WEBVIEW_WEBVIEW_HELPER_POLICY_H_
 #define BLOX7_WEBVIEW_WEBVIEW_HELPER_POLICY_H_
 
-#if !defined(_WIN32)
-#include <jsc/jsc.h>
-#endif
-
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -34,24 +30,15 @@ struct UriPolicyResult {
   std::string host = "none";
 };
 
-bool ShouldDisableWebKitSandbox(std::string_view kernel_version,
-                                const char* sandbox_override);
-bool ShouldDisableWebViewHardwareAcceleration(
-    bool wayland_display, const char* compositing_override);
 const char* AndroidBridgeSource();
 std::string BuildRobloxAppUserAgentTokens();
 std::string BuildRobloxAndroidUserAgent();
 
 bool IsBrowserLoginUrl(std::string_view url);
 bool IsRobloxChallengePage(std::string_view url);
-bool IsEssentialWebResource(const char* uri);
 std::string BoundedLogToken(const char* value, std::string_view fallback);
 UriPolicyResult EvaluateNavigationUri(const char* uri);
 const char* CaptchaEventName(CaptchaEventType type);
-#if !defined(_WIN32)
-bool ExtractExecuteRobloxCommand(JSCValue* value, std::string* command);
-bool ExtractRobloxWkHybridCommand(JSCValue* value, std::string* command);
-#endif
 bool ParseCaptchaEvent(std::string_view command, CaptchaEvent* event);
 std::string BuildCallbackScript(std::string_view callback_id);
 

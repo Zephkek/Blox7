@@ -223,9 +223,6 @@ public:
   void RegisterMethod(const std::string &method_name,
                       const std::string &signature, MethodCallback callback);
 
-  const MethodCallback *FindMethod(const std::string &method_name,
-                                   const std::string &signature) const;
-
   const std::unordered_map<std::string, MethodCallback> &GetMethods() const {
     return methods_;
   }
@@ -257,8 +254,6 @@ public:
   std::size_t GetClassCount() const { return class_registry_.size(); }
 
   void SetRobloxAuthIdentity(const RobloxAuthIdentity &identity);
-
-  void ClearRobloxAuthIdentity();
 
   RobloxAuthIdentity GetRobloxAuthIdentitySnapshot() const;
 
@@ -314,7 +309,6 @@ public:
                                     std::size_t *direct_buffer_capacity);
   bool DispatchWebRtcAudioRecordStart(const void *identity);
   bool DispatchWebRtcAudioRecordStop(const void *identity);
-  void DispatchWebRtcAudioRecordClose(const void *identity);
   void DispatchWebRtcAudioRecordData(const void *identity,
                                      std::size_t size_bytes);
 
@@ -331,7 +325,6 @@ public:
   int DispatchWebRtcAudioTrackBufferSizeFrames(const void *identity);
   bool DispatchWebRtcAudioTrackStart(const void *identity);
   bool DispatchWebRtcAudioTrackStop(const void *identity);
-  void DispatchWebRtcAudioTrackClose(const void *identity);
   void DispatchWebRtcAudioTrackData(const void *identity,
                                     std::size_t size_bytes);
 

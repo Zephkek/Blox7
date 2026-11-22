@@ -37,8 +37,6 @@ void RegisterBionicStdioRuntimeForLibc();
 
 void RegisterBionicDynamicLoaderForLibdl();
 
-SymbolMap GetSyntheticLibrarySymbols(const std::string& soname);
-
 void UpdateAndroidLibraryPath(const std::string& search_path);
 
 bool SetAndroidLibraryLoadObserver(AndroidLibraryLoadObserver observer,
@@ -57,8 +55,6 @@ void* FindSymbol(LibraryHandle handle, const std::string& symbol_name);
 bool IsBlockedRobloxCrashReportNativeSymbol(
     std::string_view symbol_name) noexcept;
 
-void UnloadLibrary(LibraryHandle handle);
-
 void RegisterSymbol(const std::string& name, void* addr);
 
 const SymbolMap& GetBionicSymbols();
@@ -68,8 +64,6 @@ void* BionicDlIteratePhdrAddress();
 ProgramHeaderValidation ValidateBionicProgramHeaders(LibraryHandle handle);
 
 std::uintptr_t FindLoadedAndroidLibraryBase(const std::string& logical_name);
-
-const std::unordered_map<std::string, LibraryHandle>& GetSymbolTable();
 
 }  // namespace linker
 

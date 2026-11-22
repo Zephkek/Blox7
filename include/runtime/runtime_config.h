@@ -81,7 +81,6 @@ class RuntimeConfig {
   static RuntimeConfig FromEnvironment(const Environment& environment);
 
   bool headless() const { return headless_; }
-  bool use_libsecret() const { return use_libsecret_; }
   const std::filesystem::path& roblox_library_path() const {
     return roblox_library_path_;
   }
@@ -128,7 +127,6 @@ class RuntimeConfig {
     return ca_bundle_;
   }
   bool ca_bundle_valid() const { return ca_bundle_valid_; }
-  bool use_system_proxy() const { return use_system_proxy_; }
   bool fleasion_enabled() const { return fleasion_enabled_; }
   bool fleasion_valid() const { return fleasion_valid_; }
   const std::string& fleasion_proxy_mode() const { return fleasion_proxy_mode_; }
@@ -150,7 +148,6 @@ class RuntimeConfig {
 
  private:
   bool headless_ = false;
-  bool use_libsecret_ = false;
   std::filesystem::path roblox_library_path_ = "rbx_bin/libroblox.so";
   GraphicsBackend graphics_backend_ = GraphicsBackend::kVulkan;
   std::string graphics_backend_name_ = "direct-vulkan";
@@ -168,7 +165,6 @@ class RuntimeConfig {
   bool audio_output_device_valid_ = true;
   std::string audio_input_device_ = "default";
   bool audio_input_device_valid_ = true;
-  bool use_system_proxy_ = false;
   bool fleasion_enabled_ = false;
   bool fleasion_valid_ = true;
   std::string fleasion_proxy_mode_ = "env";

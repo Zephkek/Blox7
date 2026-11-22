@@ -26,8 +26,6 @@ class BionicPthreadKeyRuntime {
   BionicPthreadKeyRuntime() = default;
 };
 
-bool IsBionicPthreadKey(pthread_key_t key) noexcept;
-
 }  // namespace blox7::compat
 
 extern "C" {

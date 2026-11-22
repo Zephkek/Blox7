@@ -40,16 +40,6 @@ void Class::RegisterMethod(const std::string& method_name,
   methods_[key] = std::move(callback);
 }
 
-const MethodCallback* Class::FindMethod(const std::string& method_name,
-                                        const std::string& signature) const {
-  const std::string key = method_name + ":" + signature;
-  auto it = methods_.find(key);
-  if (it == methods_.end()) {
-    return nullptr;
-  }
-  return &it->second;
-}
-
 extern "C" {
 void* blox7_gameactivity_on_start_native = nullptr;
 void* blox7_gameactivity_on_resume_native = nullptr;
@@ -5126,17 +5116,6 @@ bool VM::DispatchWebRtcAudioRecordStop(const void *identity) {
          binding.callbacks.stop(binding.context.get(), identity);
 }
 
-void VM::DispatchWebRtcAudioRecordClose(const void *identity) {
-  WebRtcAudioRecordBinding binding;
-  {
-    std::lock_guard<std::mutex> lock(webrtc_audio_record_mutex_);
-    binding = webrtc_audio_record_binding_;
-  }
-  if (binding.context != nullptr && binding.callbacks.close != nullptr) {
-    binding.callbacks.close(binding.context.get(), identity);
-  }
-}
-
 void VM::RegisterWebRtcAudioRecordNative(const char *name,
                                          const char *signature,
                                          void *function) {
@@ -5291,17 +5270,6 @@ bool VM::DispatchWebRtcAudioTrackStop(const void *identity) {
          binding.callbacks.stop(binding.context.get(), identity);
 }
 
-void VM::DispatchWebRtcAudioTrackClose(const void *identity) {
-  WebRtcAudioTrackBinding binding;
-  {
-    std::lock_guard<std::mutex> lock(webrtc_audio_track_mutex_);
-    binding = webrtc_audio_track_binding_;
-  }
-  if (binding.context != nullptr && binding.callbacks.close != nullptr) {
-    binding.callbacks.close(binding.context.get(), identity);
-  }
-}
-
 void VM::RegisterWebRtcAudioTrackNative(const char *name, const char *signature,
                                         void *function) {
   if (name == nullptr || signature == nullptr || function == nullptr) {
@@ -5367,11 +5335,6 @@ void VM::SetRobloxAuthIdentity(const RobloxAuthIdentity& identity) {
   std::lock_guard<std::mutex> lock(roblox_auth_identity_mutex_);
   roblox_auth_identity_ =
       identity.user_id > 0 ? identity : RobloxAuthIdentity{};
-}
-
-void VM::ClearRobloxAuthIdentity() {
-  std::lock_guard<std::mutex> lock(roblox_auth_identity_mutex_);
-  roblox_auth_identity_ = {};
 }
 
 RobloxAuthIdentity VM::GetRobloxAuthIdentitySnapshot() const {

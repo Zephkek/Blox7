@@ -337,25 +337,5 @@ bool ClientSettingsService::IsValidJson(const std::string& content) {
   return !value.is_discarded() && value.is_object();
 }
 
-const char* ClientSettingsSourceName(ClientSettingsSource source) {
-  switch (source) {
-    case ClientSettingsSource::kExplicitJson:
-      return "explicit JSON";
-    case ClientSettingsSource::kExplicitFile:
-      return "explicit file";
-    case ClientSettingsSource::kBundledFile:
-      return "bundled file";
-    case ClientSettingsSource::kSafeDefaults:
-      return "safe defaults";
-    case ClientSettingsSource::kDownloaded:
-      return "download";
-    case ClientSettingsSource::kCache:
-      return "cache";
-    case ClientSettingsSource::kEmptyDefaults:
-      return "empty defaults";
-  }
-  return "unknown";
-}
-
 }  // namespace services
 }  // namespace blox7

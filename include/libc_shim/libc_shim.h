@@ -44,8 +44,6 @@ std::string TranslatePath(const std::string& android_path);
 void RegisterPathMapping(const std::string& android_prefix,
                          const std::string& host_prefix);
 
-void ClearPathMappings();
-
 }  // namespace libc_shim
 
 extern "C" {

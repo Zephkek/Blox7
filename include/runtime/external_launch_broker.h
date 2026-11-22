@@ -49,8 +49,6 @@ class ExternalLaunchBroker final {
   static Status ForwardToOwner(const ExternalLaunchBrokerOptions& options,
                                const RobloxExperienceLaunchRequest& request);
 
-  Status QueueInitialRequest(RobloxExperienceLaunchRequest request);
-
   Status Drain(const ExternalLaunchSink& sink, std::size_t maximum_requests);
 
   Status Shutdown();

@@ -120,9 +120,7 @@ target_link_libraries(stub_mediandk PRIVATE
   ${BLOX7_AVUTIL_LIBRARY}
   Threads::Threads
 )
-if(BLOX7_WIN32)
-  target_sources(stub_mediandk PRIVATE ${CMAKE_SOURCE_DIR}/win/media/media_foundation_encoder_win.cc)
-endif()
+target_sources(stub_mediandk PRIVATE ${CMAKE_SOURCE_DIR}/win/media/media_foundation_encoder_win.cc)
 
 add_library(stub_openmax SHARED libopensl_stub.cc)
 configure_stub(stub_openmax "libOpenMAXAL.so")
@@ -139,13 +137,8 @@ configure_stub(stub_glesv2 "libGLESv2.so")
 target_link_libraries(stub_glesv2 PRIVATE dl)
 
 # android wsi on top of the host vulkan loader
-if(BLOX7_WIN32)
-  # windows: vulkan comes through libSDL3.so's bridge and the text box is its own layer, so no libplacebo
-  set(BLOX7_VULKAN_TEXT_OVERLAY ${CMAKE_SOURCE_DIR}/win/runtime/vulkan_text_overlay_compositor_win.cc)
-  set_property(SOURCE ${BLOX7_VULKAN_TEXT_OVERLAY} APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
-else()
-  set(BLOX7_VULKAN_TEXT_OVERLAY ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_text_overlay_compositor.cc)
-endif()
+set(BLOX7_VULKAN_TEXT_OVERLAY ${CMAKE_SOURCE_DIR}/win/runtime/vulkan_text_overlay_compositor_win.cc)
+set_property(SOURCE ${BLOX7_VULKAN_TEXT_OVERLAY} APPEND PROPERTY COMPILE_OPTIONS -Wno-missing-field-initializers)
 add_library(stub_vulkan SHARED
   ${CMAKE_SOURCE_DIR}/src/graphics/bionic_vulkan_loader_adapter.cc
   ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_capture_swapchain.cc
@@ -161,11 +154,9 @@ set_property(SOURCE ${CMAKE_SOURCE_DIR}/src/graphics/vulkan_capture_swapchain.cc
 # GetProcAddr lookups stay on our wrappers even if the real loader got in first
 target_link_options(stub_vulkan PRIVATE "LINKER:-Bsymbolic-functions")
 target_include_directories(stub_vulkan PRIVATE ${CMAKE_SOURCE_DIR}/include)
-pkg_check_modules(LIBPLACEBO REQUIRED IMPORTED_TARGET libplacebo)
 pkg_check_modules(LIBPNG REQUIRED IMPORTED_TARGET libpng)
 target_link_libraries(stub_vulkan PRIVATE
   Blox7::SdlVulkanWsi
-  PkgConfig::LIBPLACEBO
   PkgConfig::LIBPNG
   Threads::Threads
   dl

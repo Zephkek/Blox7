@@ -594,16 +594,6 @@ Status RobloxBrowserServiceBridge::HandleCloseWindow() {
   return status;
 }
 
-Status RobloxBrowserServiceBridge::QueueJavaScriptCallback(
-    std::string payload) {
-  if (payload.size() > kMaximumRobloxBrowserServicePayloadBytes ||
-      HasEmbeddedNul(payload)) {
-    return Invalid("BrowserService JavaScript callback payload is invalid");
-  }
-  return QueueOutgoingEvent(OutgoingEventKind::kJavaScriptCallback,
-                            std::move(payload));
-}
-
 Status RobloxBrowserServiceBridge::QueueBrowserWindowClosed() {
   return QueueOutgoingEvent(OutgoingEventKind::kBrowserWindowClosed, {});
 }

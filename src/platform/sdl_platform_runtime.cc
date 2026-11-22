@@ -198,9 +198,5 @@ class SdlPlatformRuntime final : public PlatformRuntime {
 
 }  // namespace
 
-std::unique_ptr<PlatformRuntime> CreateSdlPlatformRuntime() {
-  return std::make_unique<SdlPlatformRuntime>();
-}
-
 }  // namespace platform
 }  // namespace blox7

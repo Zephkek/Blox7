@@ -229,7 +229,6 @@ RobloxCapabilityResolution ResolveRobloxCapabilities(
 
 const char* RobloxCapabilityResolutionStatusName(
     RobloxCapabilityResolutionStatus status);
-const char* RobloxGamepadApiName(RobloxGamepadApi api);
 
 }  // namespace runtime
 }  // namespace blox7
