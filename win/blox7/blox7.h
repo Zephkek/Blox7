@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+extern "C" {
+__declspec(dllexport) extern DWORD NvOptimusEnablement;
+__declspec(dllexport) extern int AmdPowerXpressRequestHighPerformance;
+}
+
 namespace blox7 {
 
 struct Paths {
@@ -80,7 +85,6 @@ struct GpuChoice {
   std::wstring id;
   std::wstring name;
   std::wstring short_name;
-  uint64_t memory = 0;
 };
 
 struct FastFlag {

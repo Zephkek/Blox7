@@ -440,8 +440,9 @@ def build_blox7():
     cmd = [f'{MINGW}/bin/clang++.exe', '-std=c++20', '-O2', '-Wall', '-Wextra', '-municode', '-mwindows', '-I', gen,
            os.path.join(src, 'main.cpp'), os.path.join(src, 'runtime.cpp'), os.path.join(src, 'settings.cpp'),
            os.path.join(src, 'ui.cpp'), os.path.join(src, 'update.cpp'), boot, isa, res, f'@{update}',
-           '-o', exe, '-static', '-lws2_32', '-lcrypt32', '-Wl,--gc-sections', '-Wl,--major-subsystem-version,6',
-           '-Wl,--minor-subsystem-version,1', '-Wl,--major-os-version,6', '-Wl,--minor-os-version,1']
+           '-o', exe, '-static', '-lws2_32', '-lcrypt32', '-lsetupapi', '-luuid', '-Wl,--gc-sections',
+           '-Wl,--major-subsystem-version,6', '-Wl,--minor-subsystem-version,1', '-Wl,--major-os-version,6',
+           '-Wl,--minor-os-version,1']
     subprocess.check_call(cmd)
     print('built', exe, f'{os.path.getsize(exe) / 1048576:.1f} MB')
 

@@ -1,5 +1,8 @@
 #include <d3d10.h>
 #include <dxgi1_6.h>
+#include <cfgmgr32.h>
+#include <devguid.h>
+#include <setupapi.h>
 #include <mfapi.h>
 #include <shlobj.h>
 #include <wincodec.h>
@@ -990,8 +993,18 @@ void refresh_join_links(const Paths& paths) {
   write_ini(ini_path(paths), ini);
 }
 
+namespace {
+
+void request_gpu(const std::wstring& gpu) {
+  NvOptimusEnablement = gpu.empty() || gpu.rfind(L"10de:", 0) == 0;
+  AmdPowerXpressRequestHighPerformance = gpu.empty() || gpu.rfind(L"1002:", 0) == 0;
+}
+
+}  // namespace
+
 void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
   Settings s = load_settings(paths);
+  request_gpu(s.gpu);
   // no vulkan driver (most intel gpus on win7) or a modded win7 driver: this launch runs opengl es, the saved choice stays
   if ((!vulkan_driver && (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan")) ||
       vulkan_held_back(s)) {
@@ -1367,23 +1380,27 @@ std::vector<DeviceChoice> device_choices() {
 
 std::vector<GpuChoice> gpu_choices() {
   std::vector<GpuChoice> gpus;
-  HMODULE dxgi = LoadLibraryW(L"dxgi.dll");
-  using CreateFactory = HRESULT(WINAPI*)(REFIID, void**);
-  const auto create = dxgi ? reinterpret_cast<CreateFactory>(GetProcAddress(dxgi, "CreateDXGIFactory1")) : nullptr;
-  IDXGIFactory1* factory = nullptr;
-  if (!create || FAILED(create(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory)))) return gpus;
-  IDXGIAdapter1* adapter = nullptr;
-  for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-    DXGI_ADAPTER_DESC1 desc{};
-    if (SUCCEEDED(adapter->GetDesc1(&desc)) && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && desc.VendorId != 0x1414) {
-      wchar_t id[16];
-      std::swprintf(id, 16, L"%04x:%04x", desc.VendorId, desc.DeviceId);
-      if (std::none_of(gpus.begin(), gpus.end(), [&](const GpuChoice& gpu) { return gpu.id == id; }))
-        gpus.push_back({id, desc.Description, short_gpu_name(desc.Description), desc.DedicatedVideoMemory});
-    }
-    adapter->Release();
+  HDEVINFO set = SetupDiGetClassDevsW(&GUID_DEVCLASS_DISPLAY, nullptr, nullptr, DIGCF_PRESENT);
+  if (set == INVALID_HANDLE_VALUE) return gpus;
+  SP_DEVINFO_DATA device{};
+  device.cbSize = sizeof device;
+  for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &device); ++i) {
+    ULONG status = 0, problem = 0;
+    wchar_t hardware[512] = L"", description[256] = L"";
+    unsigned vendor = 0, id = 0;
+    if (CM_Get_DevNode_Status(&status, &problem, device.DevInst, 0) != CR_SUCCESS || !(status & DN_STARTED) ||
+        !SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_HARDWAREID, nullptr, reinterpret_cast<BYTE*>(hardware),
+                                           sizeof hardware - sizeof(wchar_t), nullptr) ||
+        std::swscanf(hardware, L"PCI\\VEN_%4x&DEV_%4x", &vendor, &id) != 2 ||
+        !SetupDiGetDeviceRegistryPropertyW(set, &device, SPDRP_DEVICEDESC, nullptr, reinterpret_cast<BYTE*>(description),
+                                           sizeof description - sizeof(wchar_t), nullptr))
+      continue;
+    wchar_t key[16];
+    std::swprintf(key, 16, L"%04x:%04x", vendor, id);
+    if (std::none_of(gpus.begin(), gpus.end(), [&](const GpuChoice& gpu) { return gpu.id == key; }))
+      gpus.push_back({key, description, short_gpu_name(description)});
   }
-  factory->Release();
+  SetupDiDestroyDeviceInfoList(set);
   return gpus;
 }
 
