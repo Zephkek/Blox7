@@ -184,6 +184,7 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
        "window.height",
        "window.title",
        "window.high_dpi",
+       "window.ui_scale",
        "input.touch_enabled",
       "compatibility.desktop_playability",
       "network.use_system_proxy",
@@ -436,6 +437,18 @@ bool ValidateAndMap(const ValueMap& yaml, ValueMap* environment,
       return false;
     }
     (*environment)["BLOX7_WIN_HIGH_DPI"] = parsed ? "1" : "0";
+  }
+  if (const auto scale = value("window.ui_scale"); scale.has_value()) {
+    int parsed = 0;
+    if (*scale == "auto") {
+      (*environment)["BLOX7_WIN_UI_SCALE"] = "auto";
+    } else if (ParsePositiveInt(*scale, &parsed) && parsed >= kMinimumUiScale &&
+               parsed <= kMaximumUiScale) {
+      (*environment)["BLOX7_WIN_UI_SCALE"] = std::to_string(parsed);
+    } else {
+      *error = "window.ui_scale must be auto or a percentage from 100 to 400";
+      return false;
+    }
   }
   if (const auto touch = value("input.touch_enabled"); touch.has_value()) {
     bool parsed = false;
@@ -779,6 +792,8 @@ RuntimeConfigLoadResult LoadRuntimeConfig(
     result.error = "theme mode is invalid";
   } else if (!result.config.window().high_dpi_valid) {
     result.error = "window high-DPI policy is invalid";
+  } else if (!result.config.window().ui_scale_valid) {
+    result.error = "window UI scale policy is invalid";
   } else if (result.config.vsync_mode() != "auto" &&
              result.config.vsync_mode() != "on" &&
              result.config.vsync_mode() != "off") {
@@ -917,6 +932,11 @@ bool ExportRuntimeConfigEnvironment(const RuntimeConfig& config,
       SetEnvironmentValue("BLOX7_WIN_TITLE", config.window().title, error) &&
       SetEnvironmentValue("BLOX7_WIN_HIGH_DPI",
                           config.window().high_dpi ? "1" : "0", error) &&
+      SetEnvironmentValue("BLOX7_WIN_UI_SCALE",
+                          config.window().ui_scale > 0
+                              ? std::to_string(config.window().ui_scale)
+                              : std::string("auto"),
+                          error) &&
       SetEnvironmentValue(
           "BLOX7_TOUCH_MODE",
           config.input_capabilities().touch_enabled ? "on" : "off", error) &&

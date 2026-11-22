@@ -155,6 +155,24 @@ int ReadPositiveInt(const Environment& environment, std::string_view name,
   return static_cast<int>(parsed);
 }
 
+int ReadUiScale(const Environment& environment, int default_value,
+                bool* valid) {
+  const std::optional<std::string> value =
+      environment.Get("BLOX7_WIN_UI_SCALE");
+  if (!value.has_value() || value->empty() || *value == "auto") {
+    return value.has_value() ? 0 : default_value;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const long parsed = std::strtol(value->c_str(), &end, 10);
+  if (end == value->c_str() || *end != '\0' || errno == ERANGE ||
+      parsed < kMinimumUiScale || parsed > kMaximumUiScale) {
+    *valid = false;
+    return default_value;
+  }
+  return static_cast<int>(parsed);
+}
+
 }  // namespace
 
 std::optional<NetworkProxyConfig> ReadNetworkProxy(
@@ -245,6 +263,8 @@ RuntimeConfig RuntimeConfig::FromEnvironment(const Environment& environment) {
   config.window_.high_dpi = ReadBoolean(environment, "BLOX7_WIN_HIGH_DPI",
                                         config.window_.high_dpi,
                                         &config.window_.high_dpi_valid);
+  config.window_.ui_scale = ReadUiScale(environment, config.window_.ui_scale,
+                                       &config.window_.ui_scale_valid);
   config.theme_mode_ =
       environment.GetOr("BLOX7_THEME", config.theme_mode_);
   const std::optional<std::string> configured_device =

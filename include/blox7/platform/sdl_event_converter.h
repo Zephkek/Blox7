@@ -9,6 +9,15 @@
 namespace blox7 {
 namespace platform {
 
+inline float RobloxUiScale(float display_scale, int percent) {
+  if (percent > 0) {
+    return static_cast<float>(percent) / 100.0F;
+  }
+  return display_scale > 0.0F ? display_scale : 1.0F;
+}
+
+float RobloxUiScale(SDL_Window* window);
+
 bool ConvertSdlEvent(SDL_Window* window, const SDL_Event& source,
                      PlatformEvent* destination,
                      bool relative_mouse_mode = false);

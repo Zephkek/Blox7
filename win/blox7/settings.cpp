@@ -796,6 +796,8 @@ Settings load_settings(const Paths& paths) {
   s.worker_mode = pick("performance", "physics_worker_mode", s.worker_mode);
   s.threaded_rendering = flag("performance", "multithreaded_rendering", s.threaded_rendering);
   s.high_dpi = flag("window", "high_dpi", s.high_dpi);
+  const int ui_scale = _wtoi(pick("window", "ui_scale", L"auto").c_str());
+  s.ui_scale = ui_scale >= 100 && ui_scale <= 400 ? ui_scale : 0;
   const int width = _wtoi(pick("window", "width", L"0").c_str());
   const int height = _wtoi(pick("window", "height", L"0").c_str());
   if (width > 0 && height > 0) {
@@ -889,6 +891,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   config = yaml_set(config, "window", "width", std::to_string(s.width));
   config = yaml_set(config, "window", "height", std::to_string(s.height));
   config = yaml_set(config, "window", "high_dpi", s.high_dpi ? "true" : "false");
+  config = yaml_set(config, "window", "ui_scale", s.ui_scale > 0 ? std::to_string(s.ui_scale) : "auto");
   std::string profile;
   if (const Phone* phone = find_phone(s.device)) {
     const std::string code = phone->code;
@@ -1259,12 +1262,6 @@ SIZE render_size(const Settings& s) {
   if (s.fullscreen) {
     w = GetSystemMetrics(SM_CXSCREEN);
     h = GetSystemMetrics(SM_CYSCREEN);
-  } else if (s.high_dpi) {
-    HDC screen = GetDC(nullptr);
-    const double dpi = screen ? GetDeviceCaps(screen, LOGPIXELSX) / 96.0 : 1.0;
-    if (screen) ReleaseDC(nullptr, screen);
-    w *= dpi;
-    h *= dpi;
   }
   const double scale = std::clamp(s.render_scale, 50, 100) / 100.0;
   return {static_cast<LONG>(std::lround(w * scale)), static_cast<LONG>(std::lround(h * scale))};

@@ -124,6 +124,58 @@ TEST(WindowStateStoreTest, RestoredSizeAppliesOnlyToUnchangedConfiguredSize) {
   EXPECT_FALSE(RestoredSizeApplies(state, 1280, 340));
 }
 
+TEST(WindowStateStoreTest, NewConfiguredSizeDropsSavedMaximize) {
+  PersistedWindowState saved;
+  saved.width = 2560;
+  saved.height = 1440;
+  saved.x = 255;
+  saved.y = 4;
+  saved.has_position = true;
+  saved.maximized = true;
+  saved.has_configured_size = true;
+  saved.configured_width = 2560;
+  saved.configured_height = 1440;
+
+  PersistedWindowState state = ReconcileConfiguredSize(saved, 1920, 1080);
+  EXPECT_EQ(state.width, 1920);
+  EXPECT_EQ(state.height, 1080);
+  EXPECT_FALSE(state.maximized);
+  EXPECT_TRUE(state.has_position);
+  EXPECT_EQ(state.configured_width, 1920);
+  EXPECT_EQ(state.configured_height, 1080);
+  EXPECT_FALSE(PlanWindowStartupPresentation(state).maximize_after_constraints);
+
+  saved.fullscreen = true;
+  state = ReconcileConfiguredSize(saved, 1920, 1080);
+  EXPECT_TRUE(state.fullscreen);
+  EXPECT_TRUE(PlanWindowStartupPresentation(state).fullscreen_at_creation);
+}
+
+TEST(WindowStateStoreTest, UnchangedConfiguredSizeKeepsSavedWindow) {
+  PersistedWindowState saved;
+  saved.width = 1700;
+  saved.height = 900;
+  saved.maximized = true;
+  saved.has_configured_size = true;
+  saved.configured_width = 1920;
+  saved.configured_height = 1080;
+
+  const PersistedWindowState state = ReconcileConfiguredSize(saved, 1920, 1080);
+  EXPECT_EQ(state.width, 1700);
+  EXPECT_EQ(state.height, 900);
+  EXPECT_TRUE(state.maximized);
+
+  PersistedWindowState legacy;
+  legacy.width = 1700;
+  legacy.height = 900;
+  legacy.maximized = true;
+  const PersistedWindowState upgraded =
+      ReconcileConfiguredSize(legacy, 1280, 720);
+  EXPECT_EQ(upgraded.width, 1280);
+  EXPECT_FALSE(upgraded.maximized);
+  EXPECT_TRUE(upgraded.has_configured_size);
+}
+
 TEST(WindowStateStoreTest, RejectsMalformedConfiguredSize) {
   TemporaryDirectory temporary;
   const std::filesystem::path path = temporary.path() / "window-state.json";

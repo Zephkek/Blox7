@@ -41,6 +41,7 @@ struct Settings {
   int height = 720;
   bool fullscreen = false;
   bool high_dpi = false;
+  int ui_scale = 0;
   int refresh_rate = 0;
   std::wstring effects = L"off";
   float sharpen = 0, vibrance = 0, contrast = 1, brightness = 0;

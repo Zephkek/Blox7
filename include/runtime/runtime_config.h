@@ -24,12 +24,17 @@ enum class GraphicsBackend {
   kUnknown,
 };
 
+inline constexpr int kMinimumUiScale = 100;
+inline constexpr int kMaximumUiScale = 400;
+
 struct WindowConfig {
   int width = 1280;
   int height = 720;
   std::string title = "Roblox";
   bool high_dpi = false;
   bool high_dpi_valid = true;
+  int ui_scale = 0;
+  bool ui_scale_valid = true;
 };
 
 struct InputCapabilityConfig {

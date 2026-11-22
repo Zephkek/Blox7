@@ -129,6 +129,15 @@ TEST(SdlWindowIconTest, AppliesEmbeddedPngToRealWindow) {
   SDL_Quit();
 }
 
+TEST(SdlEventConverterTest, RobloxUiScaleFollowsDisplayUnlessPicked) {
+  EXPECT_FLOAT_EQ(platform::RobloxUiScale(1.5F, 0), 1.5F);
+  EXPECT_FLOAT_EQ(platform::RobloxUiScale(1.5F, 100), 1.0F);
+  EXPECT_FLOAT_EQ(platform::RobloxUiScale(1.0F, 125), 1.25F);
+  EXPECT_FLOAT_EQ(platform::RobloxUiScale(1.5F, 200), 2.0F);
+  EXPECT_FLOAT_EQ(platform::RobloxUiScale(0.0F, 0), 1.0F);
+  EXPECT_FLOAT_EQ(platform::RobloxUiScale(-2.0F, 0), 1.0F);
+}
+
 TEST(SdlEventConverterTest, ConvertsFocusWithoutOwningTheSdlQueue) {
   SDL_Event source{};
   source.type = SDL_EVENT_WINDOW_FOCUS_LOST;

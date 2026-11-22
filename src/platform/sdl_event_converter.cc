@@ -1,9 +1,20 @@
 #include "blox7/platform/sdl_event_converter.h"
 
 #include <cstdint>
+#include <cstdlib>
 
 namespace blox7 {
 namespace platform {
+
+float RobloxUiScale(SDL_Window* window) {
+  static const int percent = [] {
+    const char* value = std::getenv("BLOX7_WIN_UI_SCALE");
+    const int parsed = value != nullptr ? std::atoi(value) : 0;
+    return parsed >= 100 && parsed <= 400 ? parsed : 0;
+  }();
+  return RobloxUiScale(window != nullptr ? SDL_GetWindowDisplayScale(window) : 1.0F,
+                       percent);
+}
 
 bool ConvertSdlEvent(SDL_Window* window, const SDL_Event& source,
                      PlatformEvent* destination, bool relative_mouse_mode) {
@@ -29,8 +40,7 @@ bool ConvertSdlEvent(SDL_Window* window, const SDL_Event& source,
                                      &resized.pixel_height)) {
         return false;
       }
-      const float density_scale = SDL_GetWindowDisplayScale(window);
-      resized.density_scale = density_scale > 0.0F ? density_scale : 1.0F;
+      resized.density_scale = RobloxUiScale(window);
       destination->payload = resized;
       return true;
     }

@@ -31,6 +31,20 @@ inline bool RestoredSizeApplies(const PersistedWindowState& state,
          state.configured_height == configured_height;
 }
 
+inline PersistedWindowState ReconcileConfiguredSize(PersistedWindowState state,
+                                                    int configured_width,
+                                                    int configured_height) {
+  if (!RestoredSizeApplies(state, configured_width, configured_height)) {
+    state.width = configured_width;
+    state.height = configured_height;
+    state.maximized = false;
+  }
+  state.configured_width = configured_width;
+  state.configured_height = configured_height;
+  state.has_configured_size = true;
+  return state;
+}
+
 struct WindowStartupPresentationPlan {
   bool fullscreen_at_creation = false;
   bool maximize_after_constraints = false;

@@ -1173,8 +1173,7 @@ float QueryWindowDpiScale() {
   if (g_state.sdl_window == nullptr) {
     return 1.0f;
   }
-  const float scale = SDL_GetWindowDisplayScale(g_state.sdl_window);
-  return scale > 0.0f ? scale : 1.0f;
+  return platform::RobloxUiScale(g_state.sdl_window);
 }
 
 void ResolveNativeWindowHandle() {
@@ -1462,14 +1461,12 @@ bool Init(int width, int height, const char* title) {
       std::fprintf(stderr, "  [window-state] restore ignored: %s\n",
                    restored.status.message().c_str());
     } else if (restored.found) {
-      g_state.persisted_window = restored.state;
-      g_state.persisted_window.configured_width = requested_width;
-      g_state.persisted_window.configured_height = requested_height;
-      g_state.persisted_window.has_configured_size = true;
+      g_state.persisted_window = ReconcileConfiguredSize(
+          restored.state, requested_width, requested_height);
+      width = g_state.persisted_window.width;
+      height = g_state.persisted_window.height;
       if (RestoredSizeApplies(restored.state, requested_width,
                               requested_height)) {
-        width = restored.state.width;
-        height = restored.state.height;
         std::fprintf(stderr,
                      "  [window-state] restored logical=%dx%d fullscreen=%d "
                      "maximized=%d position=%s\n",
@@ -1477,15 +1474,14 @@ bool Init(int width, int height, const char* title) {
                      restored.state.maximized ? 1 : 0,
                      restored.state.has_position ? "saved" : "compositor");
       } else {
-        g_state.persisted_window.width = width;
-        g_state.persisted_window.height = height;
         std::fprintf(stderr,
                      "  [window-state] configured logical=%dx%d replaces "
-                     "saved=%dx%d fullscreen=%d maximized=%d position=%s\n",
+                     "saved=%dx%d maximized=%d, starts fullscreen=%d "
+                     "maximized=0 position=%s\n",
                      width, height, restored.state.width,
                      restored.state.height,
-                     restored.state.fullscreen ? 1 : 0,
                      restored.state.maximized ? 1 : 0,
+                     restored.state.fullscreen ? 1 : 0,
                      restored.state.has_position ? "saved" : "compositor");
       }
       g_state.restored_fullscreen_sync_pending = true;

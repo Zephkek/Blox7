@@ -122,7 +122,7 @@ enum Control : int {
   kGpu,
   kWindowSize,
   kFullscreen,
-  kHighDpi,
+  kUiScale,
   kRefresh,
   kFrameRate,
   kVsync,
@@ -1137,25 +1137,43 @@ void page_display(const D2D1_RECT_F& page) {
   std::vector<std::wstring> labels;
   for (const auto& size : sizes) labels.push_back(std::to_wstring(size.first) + L" x " + std::to_wstring(size.second));
 
-  group(rect(x, y, w, 98), L"Window");
-  combo_row(L"Size:", ix, y + 16, 92, 160, kWindowSize, labels,
+  group(rect(x, y, w, 122), L"Window");
+  combo_row(L"Size:", ix, y + 16, 92, 190, kWindowSize, labels,
             static_cast<size_t>(std::find(sizes.begin(), sizes.end(), current) - sizes.begin()), true, [sizes](size_t i) {
               g.pending.width = sizes[i].first;
               g.pending.height = sizes[i].second;
               mark_dirty();
             });
-  checkbox(kFullscreen, ix, y + 46, iw, g.pending.fullscreen, L"Start Roblox in fullscreen", [] {
+  const int windows_scale = static_cast<int>(std::lround(c->dpi * 100 / 96));
+  std::vector<int> scales{0};
+  for (int s = 100; s <= std::max(200, windows_scale + 50); s += 25) scales.push_back(s);
+  if (std::find(scales.begin(), scales.end(), g.pending.ui_scale) == scales.end()) scales.push_back(g.pending.ui_scale);
+  std::vector<std::wstring> scale_names;
+  for (const int s : scales)
+    scale_names.push_back(s == 0                ? L"Same as Windows (" + std::to_wstring(windows_scale) + L"%)"
+                          : s == windows_scale ? std::to_wstring(s) + L"% (Windows)"
+                                               : std::to_wstring(s) + L"%");
+  combo_row(L"UI scale:", ix, y + 46, 92, 190, kUiScale, scale_names,
+            static_cast<size_t>(std::find(scales.begin(), scales.end(), g.pending.ui_scale) - scales.begin()), true,
+            [scales](size_t i) {
+              g.pending.ui_scale = scales[i];
+              mark_dirty();
+            });
+  checkbox(kFullscreen, ix, y + 76, iw, g.pending.fullscreen, L"Start Roblox in fullscreen", [] {
     g.pending.fullscreen = !g.pending.fullscreen;
     mark_dirty();
   });
-  const int scale = static_cast<int>(std::lround(c->dpi * 100 / 96));
-  checkbox(kHighDpi, ix, y + 70, iw, g.pending.high_dpi,
-           scale > 100 ? L"Sharp picture on this " + std::to_wstring(scale) + L"% scaled screen" : L"Sharp picture on high-DPI screens",
-           [] {
-             g.pending.high_dpi = !g.pending.high_dpi;
-             mark_dirty();
-           });
-  y += 98 + kMargin;
+  const int scale = g.pending.ui_scale > 0 ? g.pending.ui_scale : windows_scale;
+  const int drawn_w = g.pending.fullscreen ? g.screen_w : g.pending.width;
+  const int drawn_h = g.pending.fullscreen ? g.screen_h : g.pending.height;
+  std::wstring note = g.pending.fullscreen ? L"Fullscreen draws all " + std::to_wstring(drawn_w) + L" x " + std::to_wstring(drawn_h) +
+                                                 L" pixels"
+                                           : std::wstring(L"Roblox draws this many pixels");
+  if (scale == 100) note += L" and reports the same size.";
+  else note += L" and reports " + std::to_wstring(std::lround(drawn_w * 100.0 / scale)) + L" x " +
+               std::to_wstring(std::lround(drawn_h * 100.0 / scale)) + L".";
+  text(note, g.fonts.body, rect(ix, y + 102, iw, 15), kSecondary);
+  y += 122 + kMargin;
 
   const float fullscreen = g.pending.refresh_rate > 0 ? 72 : 50;
   group(rect(x, y, w, fullscreen), L"Fullscreen");

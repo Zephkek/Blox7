@@ -168,16 +168,20 @@ TEST(RuntimeConfigBootstrapTest,
            "# Boolean (default: true): never expose private or reserved "
            "joins.\n      public_servers_only: true",
            "#   playing: \"{place_name}\"\n    #   state: Playing Roblox",
-            "# Integer (default: 1280): initial window width in logical desktop "
-            "units.\n  "
+            "# Integer (default: 1280): initial game area width, in pixels on "
+            "Windows.\n  "
             "width: 1280",
-            "# Integer (default: 720): initial window height in logical desktop "
-            "units.\n  "
+            "# Integer (default: 720): initial game area height, in pixels on "
+            "Windows.\n  "
             "height: 720",
             "# String (default: Roblox): window title.\n  title: Roblox",
             "# Boolean (default: false): render at physical display-pixel density instead\n  "
             "# of the logical desktop resolution. Enable only for sharper high-DPI output.\n  "
             "high_dpi: false",
+            "# String (default: auto): size of Roblox's UI. auto follows Windows' display\n  "
+            "# scale; a percentage from 100 to 400 overrides it. At 100 Roblox counts sizes\n  "
+            "# in real pixels.\n  "
+            "ui_scale: auto",
            "# HostAbi profile, run two isolated canaries with the selected "
            "graphics\n  "
            "# backend, and promote only on success. An existing current "
@@ -328,6 +332,7 @@ window:
   height: 1080
   title: Blox7 Desktop
   high_dpi: true
+  ui_scale: 125
 input:
   touch_enabled: false
 network:
@@ -376,6 +381,7 @@ updates:
   EXPECT_EQ(loaded.config.window().height, 1080);
   EXPECT_EQ(loaded.config.window().title, "Blox7 Desktop");
   EXPECT_TRUE(loaded.config.window().high_dpi);
+  EXPECT_EQ(loaded.config.window().ui_scale, 125);
   EXPECT_FALSE(loaded.config.input_capabilities().touch_enabled);
   EXPECT_TRUE(loaded.config.desktop_playability());
   ASSERT_TRUE(loaded.config.roblox_http_user_agent().has_value());
@@ -488,6 +494,39 @@ audio:
   std::string error;
   EXPECT_FALSE(ExportRuntimeConfigEnvironment(from_environment, &error));
   EXPECT_NE(error.find("invalid audio output device"), std::string::npos);
+}
+
+TEST(RuntimeConfigFileTest, RejectsInvalidUiScale) {
+  for (const char* bad : {"maybe", "99", "401", "150%", "0"}) {
+    TemporaryDirectory temporary;
+    const std::filesystem::path file = temporary.Write(
+        std::string("version: 1\nwindow:\n  ui_scale: ") + bad + "\n");
+    const RuntimeConfigLoadResult loaded =
+        LoadRuntimeConfig(MapEnvironment(), file);
+    EXPECT_FALSE(loaded) << bad;
+    EXPECT_NE(loaded.error.find("window.ui_scale"), std::string::npos) << bad;
+  }
+  const RuntimeConfig from_environment = RuntimeConfig::FromEnvironment(
+      MapEnvironment({{"BLOX7_WIN_UI_SCALE", "40"}}));
+  EXPECT_FALSE(from_environment.window().ui_scale_valid);
+}
+
+TEST(RuntimeConfigFileTest, ExportsUiScale) {
+  unsetenv("BLOX7_WIN_UI_SCALE");
+  std::string error;
+  const RuntimeConfig default_config =
+      RuntimeConfig::FromEnvironment(MapEnvironment());
+  EXPECT_EQ(default_config.window().ui_scale, 0);
+  ASSERT_TRUE(ExportRuntimeConfigEnvironment(default_config, &error)) << error;
+  ASSERT_NE(getenv("BLOX7_WIN_UI_SCALE"), nullptr);
+  EXPECT_STREQ(getenv("BLOX7_WIN_UI_SCALE"), "auto");
+
+  const RuntimeConfig picked = RuntimeConfig::FromEnvironment(
+      MapEnvironment({{"BLOX7_WIN_UI_SCALE", "100"}}));
+  EXPECT_EQ(picked.window().ui_scale, 100);
+  ASSERT_TRUE(ExportRuntimeConfigEnvironment(picked, &error)) << error;
+  EXPECT_STREQ(getenv("BLOX7_WIN_UI_SCALE"), "100");
+  unsetenv("BLOX7_WIN_UI_SCALE");
 }
 
 TEST(RuntimeConfigFileTest, RejectsInvalidHighDpiPolicy) {

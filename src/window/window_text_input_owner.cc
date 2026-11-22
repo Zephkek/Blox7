@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "blox7/platform/platform_runtime.h"
+#include "blox7/platform/sdl_event_converter.h"
 
 namespace blox7 {
 namespace window {
@@ -206,8 +207,7 @@ bool SdlTextInputBackend::SetArea(const TextInputArea& area) {
                                  &transform.pixel_height)) {
     return false;
   }
-  const float density_scale = SDL_GetWindowDisplayScale(window);
-  transform.density_scale = density_scale > 0.0F ? density_scale : 1.0F;
+  transform.density_scale = platform::RobloxUiScale(window);
   if (!transform.valid()) {
     return false;
   }
