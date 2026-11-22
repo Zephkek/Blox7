@@ -22,6 +22,7 @@
 #include "blox7/graphics/angle_probe.h"
 #include "blox7/graphics/gles_text_overlay_compositor.h"
 #include "blox7/graphics/present_mode_policy.h"
+#include "blox7/graphics/roblox_renderer_checks.h"
 #include "blox7/platform/display_refresh_capabilities.h"
 #include "blox7/platform/sdl_application_metadata.h"
 #include "blox7/platform/sdl_event_converter.h"
@@ -1772,9 +1773,15 @@ bool Init(int width, int height, const char* title) {
             SDL_GetError());
 #endif
   }
+#ifdef BLOX7_WIN32
+  const bool roblox_draws_here =
+      graphics::RobloxAcceptsGlesVersion(WindowsGlString(0x1F02));
+#else
+  const bool roblox_draws_here =
+      context_version_available && context_major >= 3;
+#endif
   const bool unsupported_version =
-      (!context_version_available || context_major < 3) &&
-      !IsEnabledEnv("BLOX7_ALLOW_GLES2_RESEARCH");
+      !roblox_draws_here && !IsEnabledEnv("BLOX7_ALLOW_GLES2_RESEARCH");
   bool refuse_context = unsupported_version;
 #ifdef BLOX7_WIN32
   if (!WindowsAngleForced() && StringEquals(WindowsAngleMode(), "retry-test")) {

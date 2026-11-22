@@ -118,6 +118,7 @@ add_library(blox7_sdl_vulkan_wsi STATIC
   ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/sdl_vulkan_wsi.cc
   ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/android_vulkan_wsi_adapter.cc
   ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/present_mode_policy.cc
+  ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/roblox_renderer_checks.cc
 )
 set_target_properties(blox7_sdl_vulkan_wsi PROPERTIES
   POSITION_INDEPENDENT_CODE ON

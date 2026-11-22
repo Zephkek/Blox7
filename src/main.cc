@@ -26,6 +26,7 @@
 #include "blox7/audio/fmod_jni_audio_bridge.h"
 #include "blox7/audio/webrtc_jni_audio_bridge.h"
 #include "blox7/audio/roblox_output_device_bridge.h"
+#include "blox7/graphics/roblox_renderer_checks.h"
 #include "runtime/auth_runtime_composition.h"
 #include "runtime/command_line.h"
 #include "runtime/crash_report_policy.h"
@@ -539,6 +540,28 @@ int main(int argc, char* argv[]) {
       std::cout << "  [memory] hard process-tree limit active: "
                 << runtime_config.config.performance().memory_limit_mb
                 << " MiB RAM, swap disabled\n";
+    }
+  }
+  if (command_line.options.mode == blox7::runtime::CommandMode::kRun &&
+      runtime_config.config.graphics_backend() ==
+          blox7::runtime::GraphicsBackend::kVulkan &&
+      !blox7::graphics::RobloxFindsVulkanDevice()) {
+    std::cout << "  [runtime] Roblox finds no Vulkan device to draw with "
+                 "here, running OpenGL ES instead\n";
+    if (setenv("BLOX7_GRAPHICS_BACKEND", "opengl", 1) != 0) {
+      std::cerr << "[FATAL] Cannot switch the graphics backend\n";
+      return EXIT_FAILURE;
+    }
+    runtime_config =
+        blox7::runtime::LoadRuntimeConfig(environment, paths.config_file());
+    if (!runtime_config) {
+      std::cerr << "[FATAL] " << runtime_config.error << '\n';
+      return EXIT_FAILURE;
+    }
+    if (!blox7::runtime::ApplyGraphicsLaunchPolicy(runtime_config.config,
+                                                   &command_line_error)) {
+      std::cerr << "[FATAL] " << command_line_error << '\n';
+      return EXIT_FAILURE;
     }
   }
   if (command_line.options.mode == blox7::runtime::CommandMode::kRun) {
