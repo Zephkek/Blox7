@@ -38,8 +38,6 @@ bool ParseInt(std::string_view text, int *value) {
   return parsed.ec == std::errc() && parsed.ptr == text.data() + text.size();
 }
 
-// roblox bumps the number when its settings format changes, the newest file
-// is the live one
 std::filesystem::path BasicSettingsFile(const std::filesystem::path &app_data) {
   constexpr std::string_view kPrefix = "GlobalBasicSettings_";
   constexpr std::string_view kSuffix = ".xml";
@@ -205,8 +203,6 @@ std::optional<int> RobloxFramerateCapFor(const FrameRatePolicy &policy) {
   return std::nullopt;
 }
 
-// blox7 borrows the player's cap while it needs one and hands the old value
-// back afterwards, unless the player changed it in game since
 bool SyncRobloxFramerateCap(const std::filesystem::path &app_data,
                             const std::filesystem::path &loan_file,
                             std::optional<int> cap, std::string *error) {
@@ -281,7 +277,6 @@ bool MergeFrameRateClientSettingsOverrides(const FrameRatePolicy &policy,
                           error)) {
     return false;
   }
-  // a scheduler target would win over the player's cap and pull it back to 240
   if (policy.mode == FrameRateLimitMode::kUnmanaged ||
       policy.mode == FrameRateLimitMode::kDisplay ||
       policy.held_by_roblox_setting) {

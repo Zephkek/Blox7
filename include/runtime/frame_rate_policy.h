@@ -30,9 +30,6 @@ struct FrameRatePolicy {
 
 FrameRatePolicy ParseFrameRatePolicy(std::string_view value);
 
-// roblox stops DFIntTaskSchedulerTargetFps at 240 but not its own Maximum
-// Frame Rate setting, so unlimited and anything above 240 go through
-// FramerateCap instead
 std::optional<int> RobloxFramerateCapFor(const FrameRatePolicy &policy);
 
 bool SyncRobloxFramerateCap(const std::filesystem::path &app_data,
