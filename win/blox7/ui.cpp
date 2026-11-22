@@ -1476,7 +1476,7 @@ void page_about(const D2D1_RECT_F& page) {
   float y = page.top + kMargin;
   draw_logo(x + 24, y + 24, 36);
   text(L"Blox7", g.fonts.instruction, rect(x + 60, y, w - 60, 21), kInstruction);
-  text(L"Version 0.4", g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kSecondary);
+  text(L"Version 0.5", g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kSecondary);
   text(L"Roblox ported back to Windows 7.", g.fonts.body, rect(x + 60, y + 39, w - 60, 15), kText);
   y += 66;
   text(L"Runs Roblox's Android app natively on Windows 7 through 11. Built on Mocktail by komaruworld.",

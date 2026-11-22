@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define S7_VERSION "0.2"
+#define S7_VERSION "0.3"
 #define S7_KEEP L".s7orig"
 #define S7_JOURNAL L"studio7.bind"
 #define S7_READY L"studio7.ready"

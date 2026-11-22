@@ -11,8 +11,8 @@ S7RT.DLL RCDATA "layer/s7rt.dll"
 NOTICES RCDATA "licenses.txt"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,2,0,0
- PRODUCTVERSION 0,2,0,0
+ FILEVERSION 0,3,0,0
+ PRODUCTVERSION 0,3,0,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -25,12 +25,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Zeph"
       VALUE "FileDescription", "Studio7 - Roblox Studio ported back to Windows 7"
-      VALUE "FileVersion", "0.2.0"
+      VALUE "FileVersion", "0.3.0"
       VALUE "InternalName", "Studio7"
       VALUE "LegalCopyright", "Copyright 2026 Zeph. Not affiliated with Roblox Corporation."
       VALUE "OriginalFilename", "Studio7.exe"
       VALUE "ProductName", "Studio7"
-      VALUE "ProductVersion", "0.2.0"
+      VALUE "ProductVersion", "0.3.0"
     END
   END
   BLOCK "VarFileInfo"
