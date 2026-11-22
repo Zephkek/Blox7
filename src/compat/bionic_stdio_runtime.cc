@@ -3,12 +3,8 @@
 #include <cerrno>
 #include <cstdint>
 
-#ifdef BLOX7_WIN32
 // everyone has to share libc's real __sF or libc++ ends up talking to the wrong stdout
 #define BLOX7_STDIO_VISIBILITY "hidden"
-#else
-#define BLOX7_STDIO_VISIBILITY "default"
-#endif
 
 extern "C" {
 

@@ -64,13 +64,8 @@ bool ApplyInstalledResourceDefaults(std::string* error) {
   } else {
     return true;
   }
-#ifdef BLOX7_WIN32
   const std::filesystem::path helper =
       runtime_directory / "blox7_webview_helper.exe";
-#else
-  const std::filesystem::path helper =
-      runtime_directory / "blox7_webview_helper";
-#endif
   const std::filesystem::path progress_helper =
       runtime_directory / "blox7_failure_dialog";
   const std::filesystem::path update_helper =

@@ -12,17 +12,14 @@
 #define BLOX7_DISCORD_APPLICATION_ID ""
 #endif
 
-#ifdef BLOX7_WIN32
 extern "C" void* __w32_pe_open(const char* utf8_path);
 extern "C" void* __w32_pe_symbol(void* module, const char* name);
-#endif
 
 namespace blox7 {
 namespace runtime {
 namespace {
 
 bool HostHasTouchScreen() {
-#ifdef BLOX7_WIN32
   constexpr int kSmDigitizer = 94;
   constexpr int kNidTouch = 0x01 | 0x02;
   constexpr int kNidReady = 0x80;
@@ -37,9 +34,6 @@ bool HostHasTouchScreen() {
   }
   const int digitizer = get_system_metrics(kSmDigitizer);
   return (digitizer & kNidReady) != 0 && (digitizer & kNidTouch) != 0;
-#else
-  return true;
-#endif
 }
 
 std::string EncodeProxyCredential(std::string_view value) {
@@ -467,12 +461,6 @@ GraphicsBackend RuntimeConfig::ParseGraphicsBackend(std::string_view name) {
   }
   if (name == "vulkan" || name == "native-vulkan" || name == "direct-vulkan") {
     return GraphicsBackend::kVulkan;
-  }
-  if (name == "angle-vulkan") {
-    return GraphicsBackend::kAngleVulkan;
-  }
-  if (name == "angle-swiftshader") {
-    return GraphicsBackend::kAngleSwiftShader;
   }
   return GraphicsBackend::kUnknown;
 }

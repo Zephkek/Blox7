@@ -174,7 +174,6 @@ void RemoveHandleFromRegistry(LibraryHandle handle) {
   }
 }
 
-#ifdef BLOX7_WIN32
 // libc already is bionic on windows, so the glibc translators stay out
 bool WindowsPortDropsOverride(std::string_view name) {
   static constexpr std::string_view kKept[] = {
@@ -191,14 +190,11 @@ bool WindowsPortDropsOverride(std::string_view name) {
   static void* const libc = ::dlopen("libc.so", RTLD_NOW);
   return ::dlsym(libc, std::string(name).c_str()) != nullptr;
 }
-#endif
 
 }  // namespace
 
 void RegisterSymbol(const std::string& name, void* addr) {
-#ifdef BLOX7_WIN32
   if (WindowsPortDropsOverride(name)) return;
-#endif
   std::lock_guard<std::mutex> lock(g_registry_mutex);
   g_legacy_bionic_symbols[name] = addr;
 }
@@ -277,9 +273,7 @@ std::uintptr_t FindLoadedAndroidLibraryBase(
 
 void RegisterSyntheticSymbol(const std::string& soname,
                              const std::string& name, void* address) {
-#ifdef BLOX7_WIN32
   if (WindowsPortDropsOverride(name)) return;
-#endif
   LibraryHandle loaded_handle = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_registry_mutex);

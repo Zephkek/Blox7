@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include "blox7/graphics/roblox_renderer_checks.h"
+
 extern char** environ;
 
 namespace blox7::update {
@@ -215,10 +217,6 @@ std::string_view CanaryGraphicsBackendName(CanaryGraphicsBackend backend) {
       return "opengl";
     case CanaryGraphicsBackend::kSystemEgl:
       return "system";
-    case CanaryGraphicsBackend::kAngleVulkan:
-      return "angle-vulkan";
-    case CanaryGraphicsBackend::kAngleSwiftShader:
-      return "angle-swiftshader";
   }
   return "direct-vulkan";
 }
@@ -237,14 +235,6 @@ bool ParseCanaryGraphicsBackend(std::string_view name,
   }
   if (name == "auto" || name == "system") {
     *backend = CanaryGraphicsBackend::kSystemEgl;
-    return true;
-  }
-  if (name == "angle-vulkan") {
-    *backend = CanaryGraphicsBackend::kAngleVulkan;
-    return true;
-  }
-  if (name == "angle-swiftshader") {
-    *backend = CanaryGraphicsBackend::kAngleSwiftShader;
     return true;
   }
   return false;
@@ -440,11 +430,7 @@ CanaryResult RunReadinessCanary(const CanaryOptions& options) {
         {"BLOX7_GRAPHICS_BACKEND=" +
              std::string(CanaryGraphicsBackendName(options.graphics_backend)),
          "BLOX7_PRELOAD_VULKAN_SHIM=0",
-         "BLOX7_SOFTWARE_WINDOW_FALLBACK=0",
          "BLOX7_CLIENT_SETTINGS_OVERRIDES_JSON={}"});
-    if (options.graphics_backend == CanaryGraphicsBackend::kOpenGlEs) {
-      environment.push_back("BLOX7_DISABLE_AUTO_ANGLE_FALLBACK=1");
-    }
   }
   std::vector<char*> environment_pointers;
   for (std::string& entry : environment)
@@ -519,8 +505,10 @@ CanaryResult RunReadinessCanary(const CanaryOptions& options) {
       (WIFEXITED(status) && WEXITSTATUS(status) == 128);
   if (result.exit_code != 0) {
     result.error =
-        "graphics canary exited with status " +
-        std::to_string(result.exit_code);
+        log.find(graphics::kNoGles3Line) != log.npos
+            ? std::string(graphics::kNoGles3Reason)
+            : "graphics canary exited with status " +
+                  std::to_string(result.exit_code);
     if (driver_teardown_crash && log_error.empty() &&
         ValidateTeardownCrashLog(options.graphics_backend, log,
                                  &log_error)) {

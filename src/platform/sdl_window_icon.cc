@@ -29,12 +29,10 @@ Status ApplySdlWindowIcon(SDL_Window* window) {
   }
 
   SDL_IOStream* stream = nullptr;
-#ifdef BLOX7_WIN32
   if (const char* file = std::getenv("BLOX7_WINDOW_ICON_FILE");
       file != nullptr && file[0] != '\0') {
     stream = SDL_IOFromFile(file, "rb");
   }
-#endif
   if (stream == nullptr) {
     stream = SDL_IOFromConstMem(internal::kBlox7WindowIconPng,
                                 internal::kBlox7WindowIconPngSize);

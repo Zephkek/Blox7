@@ -19,8 +19,6 @@ enum class GraphicsBackend {
   kAuto,
   kSystem,
   kVulkan,
-  kAngleVulkan,
-  kAngleSwiftShader,
   kUnknown,
 };
 

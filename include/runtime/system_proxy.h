@@ -3,7 +3,6 @@
 
 #include <optional>
 #include <string>
-#include <vector>
 
 #include "runtime/runtime_config.h"
 
@@ -16,9 +15,6 @@ struct SystemProxyResult {
 
   explicit operator bool() const { return error.empty(); }
 };
-
-SystemProxyResult SelectSystemProxy(
-    const std::vector<std::string>& candidates);
 
 SystemProxyResult ResolveSystemProxy();
 

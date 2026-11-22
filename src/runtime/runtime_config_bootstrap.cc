@@ -60,7 +60,7 @@ appearance:
 graphics:
   # String (default: direct-vulkan): graphics backend. Use opengl on hardware
   # without a working Vulkan driver; OpenGL ES 3.0 or newer is required.
-  # Recommended values: direct-vulkan, opengl, system, angle-vulkan.
+  # Values: direct-vulkan, opengl.
   backend: direct-vulkan
   # Optional string or integer: Blox7 frame-rate override. Leave commented
   # (or use -1) to let Roblox Basic Settings own the cap. Supported overrides:

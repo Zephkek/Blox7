@@ -48,47 +48,6 @@ const char* GuestAbiPropertyValue() {
 #endif
 }
 
-#ifndef BLOX7_WIN32
-int CallHostVsnprintf(char* dst, size_t count, const char* format,
-                      va_list args) {
-  using HostVsnprintf = int (*)(char*, size_t, const char*, va_list);
-  HostVsnprintf volatile host_vsnprintf = &std::vsnprintf;
-  return host_vsnprintf(dst, count, format, args);
-}
-
-ssize_t CallHostRead(int fd, void* buf, size_t count) {
-  using HostRead = ssize_t (*)(int, void*, size_t);
-  HostRead volatile host_read = &::read;
-  return host_read(fd, buf, count);
-}
-
-ssize_t CallHostWrite(int fd, const void* buf, size_t count) {
-  using HostWrite = ssize_t (*)(int, const void*, size_t);
-  HostWrite volatile host_write = &::write;
-  return host_write(fd, buf, count);
-}
-
-ssize_t CallHostPread(int fd, void* buf, size_t count, off_t offset) {
-  using HostPread = ssize_t (*)(int, void*, size_t, off_t);
-  HostPread volatile host_pread = &::pread;
-  return host_pread(fd, buf, count, offset);
-}
-
-int CallHostPoll(struct pollfd* fds, nfds_t nfds, int timeout) {
-  using HostPoll = int (*)(struct pollfd*, nfds_t, int);
-  HostPoll volatile host_poll = &::poll;
-  return host_poll(fds, nfds, timeout);
-}
-
-ssize_t CallHostSendto(int socket_fd, const void* buf, size_t len, int flags,
-                       const struct sockaddr* dest, socklen_t dest_len) {
-  using HostSendto = ssize_t (*)(int, const void*, size_t, int,
-                                 const struct sockaddr*, socklen_t);
-  HostSendto volatile host_sendto = &::sendto;
-  return host_sendto(socket_fd, buf, len, flags, dest, dest_len);
-}
-#endif
-
 }  // namespace
 
 namespace blox7::compat {
@@ -112,29 +71,6 @@ __attribute__((visibility("default"))) void blox7_set_current_jni_env(
 __attribute__((visibility("default"))) void* blox7_get_current_jni_env() {
   return g_current_jni_env_for_publish.load(std::memory_order_acquire);
 }
-#ifndef BLOX7_WIN32
-__attribute__((visibility("default"))) uintptr_t __stack_chk_guard =
-    0x595e9fbd94fda766ULL;
-int* __errno() { return &errno; }
-#endif
-#ifndef BLOX7_WIN32
-void __assert(const char* file, int line, const char* failed_expression) {
-  std::fprintf(stderr, "Bionic assertion failed: %s:%d: %s\n",
-               file ? file : "(unknown)", line,
-               failed_expression ? failed_expression : "(unknown)");
-  std::abort();
-}
-#endif
-#ifndef BLOX7_WIN32
-void __assert2(const char* file, int line, const char* function,
-               const char* failed_expression) {
-  std::fprintf(stderr, "Bionic assertion failed: %s:%d: %s: %s\n",
-               file ? file : "(unknown)", line,
-               function ? function : "(unknown)",
-               failed_expression ? failed_expression : "(unknown)");
-  std::abort();
-}
-#endif
 __attribute__((noreturn)) void blox7_abort() {
   uintptr_t caller = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
   uintptr_t rax = 0;
@@ -172,21 +108,6 @@ __attribute__((noreturn)) void blox7_abort() {
   std::fflush(stderr);
   std::abort();
 }
-#ifndef BLOX7_WIN32
-char* __gnu_strerror_r(int error_number, char* buf, size_t buf_len) {
-  if (buf == nullptr || buf_len == 0) {
-    errno = ERANGE;
-    return buf;
-  }
-  const char* message = std::strerror(error_number);
-  if (message == nullptr) {
-    std::snprintf(buf, buf_len, "Unknown error %d", error_number);
-  } else {
-    std::snprintf(buf, buf_len, "%s", message);
-  }
-  return buf;
-}
-#endif
 // our libc's own __system_property_get finds no property area, so roblox gets ours under that name
 int blox7_system_property_get(const char* name, char* value) {
   if (value == nullptr) {
@@ -240,143 +161,10 @@ int blox7_system_property_get(const char* name, char* value) {
   value[kAndroidPropertyValueMax - 1] = '\0';
   return static_cast<int>(std::strlen(value));
 }
-#ifndef BLOX7_WIN32
-int __system_property_get(const char* name, char* value) {
-  return blox7_system_property_get(name, value);
-}
-#endif
 
 }  // extern "C"
 
 extern "C" {
-#ifndef BLOX7_WIN32
-void* __memcpy_chk(void* dst, const void* src, size_t count, size_t dst_len) {
-  if (count > dst_len) {
-    errno = ERANGE;
-    count = dst_len;
-  }
-  return std::memcpy(dst, src, count);
-}
-#endif
-#ifndef BLOX7_WIN32
-void* __memmove_chk(void* dst, const void* src, size_t count, size_t dst_len) {
-  if (count > dst_len) {
-    errno = ERANGE;
-    count = dst_len;
-  }
-  return std::memmove(dst, src, count);
-}
-#endif
-#ifndef BLOX7_WIN32
-void* __memset_chk(void* dst, int value, size_t count, size_t dst_len) {
-  if (count > dst_len) {
-    errno = ERANGE;
-    count = dst_len;
-  }
-  return std::memset(dst, value, count);
-}
-#endif
-#ifndef BLOX7_WIN32
-size_t __strlen_chk(const char* value, size_t) {
-  return std::strlen(value);
-}
-#endif
-#ifndef BLOX7_WIN32
-char* __strchr_chk(const char* value, int ch, size_t) {
-  return const_cast<char*>(std::strchr(value, ch));
-}
-#endif
-#ifndef BLOX7_WIN32
-char* __strcpy_chk(char* dst, const char* src, size_t dst_len) {
-  size_t src_len = std::strlen(src) + 1;
-  if (src_len > dst_len) {
-    errno = ERANGE;
-    src_len = dst_len;
-  }
-  if (src_len > 0) {
-    std::memcpy(dst, src, src_len);
-    dst[src_len - 1] = '\0';
-  }
-  return dst;
-}
-#endif
-#ifndef BLOX7_WIN32
-char* __strncpy_chk(char* dst, const char* src, size_t count, size_t dst_len) {
-  if (count > dst_len) {
-    errno = ERANGE;
-    count = dst_len;
-  }
-  return std::strncpy(dst, src, count);
-}
-#endif
-#ifndef BLOX7_WIN32
-char* __strncpy_chk2(char* dst, const char* src, size_t count, size_t dst_len,
-                     size_t src_len) {
-  size_t bounded_count = count;
-  if (bounded_count > dst_len) {
-    errno = ERANGE;
-    bounded_count = dst_len;
-  }
-  if (bounded_count > src_len) {
-    errno = ERANGE;
-    bounded_count = src_len;
-  }
-  return std::strncpy(dst, src, bounded_count);
-}
-#endif
-#ifndef BLOX7_WIN32
-char* __strcat_chk(char* dst, const char* src, size_t dst_len) {
-  size_t dst_used = std::strlen(dst);
-  if (dst_used >= dst_len) {
-    errno = ERANGE;
-    return dst;
-  }
-  size_t remaining = dst_len - dst_used - 1;
-  std::strncat(dst, src, remaining);
-  return dst;
-}
-#endif
-#ifndef BLOX7_WIN32
-int __vsprintf_chk(char* dst, int, size_t dst_len, const char* format,
-                   va_list args) {
-  return CallHostVsnprintf(dst, dst_len, format, args);
-}
-#endif
-#ifndef BLOX7_WIN32
-int __vsnprintf_chk(char* dst, size_t count, int, size_t dst_len,
-                    const char* format, va_list args) {
-  size_t bounded_count = std::min(count, dst_len);
-  return CallHostVsnprintf(dst, bounded_count, format, args);
-}
-#endif
-#ifndef BLOX7_WIN32
-ssize_t __read_chk(int fd, void* buf, size_t count, size_t buf_len) {
-  if (count > buf_len) {
-    errno = ERANGE;
-    count = buf_len;
-  }
-  return CallHostRead(fd, buf, count);
-}
-#endif
-#ifndef BLOX7_WIN32
-ssize_t __write_chk(int fd, const void* buf, size_t count, size_t buf_len) {
-  if (count > buf_len) {
-    errno = ERANGE;
-    count = buf_len;
-  }
-  return CallHostWrite(fd, buf, count);
-}
-#endif
-#ifndef BLOX7_WIN32
-ssize_t __pread64_chk(int fd, void* buf, size_t count, off_t offset,
-                      size_t buf_len) {
-  if (count > buf_len) {
-    errno = ERANGE;
-    count = buf_len;
-  }
-  return CallHostPread(fd, buf, count, offset);
-}
-#endif
 bool blox7_is_low_bionic_pointer(const void* ptr) {
   return reinterpret_cast<uintptr_t>(ptr) < 4096;
 }
@@ -1167,53 +955,6 @@ int blox7_pthread_barrier_wait(pthread_barrier_t* barrier) {
   }
   return result;
 }
-#ifndef BLOX7_WIN32
-int __poll_chk(struct pollfd* fds, nfds_t nfds, int timeout, size_t fds_len) {
-  if (nfds > fds_len / sizeof(struct pollfd)) {
-    errno = ERANGE;
-    nfds = static_cast<nfds_t>(fds_len / sizeof(struct pollfd));
-  }
-  return CallHostPoll(fds, nfds, timeout);
-}
-#endif
-#ifndef BLOX7_WIN32
-ssize_t __sendto_chk(int socket_fd, const void* buf, size_t len, size_t buf_len,
-                     int flags, const struct sockaddr* dest,
-                     socklen_t dest_len) {
-  if (len > buf_len) {
-    errno = ERANGE;
-    len = buf_len;
-  }
-  return CallHostSendto(socket_fd, buf, len, flags, dest, dest_len);
-}
-#endif
-#ifndef BLOX7_WIN32
-void __FD_SET_chk(int fd, fd_set* set, size_t set_len) {
-  if (set_len < sizeof(fd_set)) {
-    errno = ERANGE;
-    return;
-  }
-  FD_SET(fd, set);
-}
-#endif
-#ifndef BLOX7_WIN32
-void __FD_CLR_chk(int fd, fd_set* set, size_t set_len) {
-  if (set_len < sizeof(fd_set)) {
-    errno = ERANGE;
-    return;
-  }
-  FD_CLR(fd, set);
-}
-#endif
-#ifndef BLOX7_WIN32
-int __FD_ISSET_chk(int fd, fd_set* set, size_t set_len) {
-  if (set_len < sizeof(fd_set)) {
-    errno = ERANGE;
-    return 0;
-  }
-  return FD_ISSET(fd, set);
-}
-#endif
 extern void* blox7_gameactivity_on_start_native;
 extern void* blox7_gameactivity_on_resume_native;
 extern void* blox7_gameactivity_on_surface_created_native;

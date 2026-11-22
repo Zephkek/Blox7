@@ -502,17 +502,8 @@ bool StubOwnsSymbolAddress(void* handle, void* address) {
     return false;
   }
 
-#ifdef BLOX7_WIN32
   // our loader has no dlinfo
   return info.dli_sname != nullptr && ::dlsym(handle, info.dli_sname) == address;
-#else
-	link_map* map = nullptr;
-  if (::dlinfo(handle, RTLD_DI_LINKMAP, &map) != 0 || map == nullptr) {
-    return false;
-  }
-
-  return reinterpret_cast<void*>(map->l_addr) == info.dli_fbase;
-#endif
 }
 
 SymbolResolveResult ResolveSymbolForBionic(const char* name, bool has_window,
@@ -684,7 +675,7 @@ void ApplyRuntimeDefaults() {
   SetEnvDefault("BLOX7_MAIN_THREAD_MESSAGE_PUMP", "0");
   SetEnvDefault("BLOX7_IGNORE_WINDOW_CLOSE", "0");
   SetEnvDefault("BLOX7_WIN_TITLE", "Roblox");
-  SetEnvDefault("BLOX7_GRAPHICS_BACKEND", "angle-vulkan");
+  SetEnvDefault("BLOX7_GRAPHICS_BACKEND", "direct-vulkan");
   SetEnvDefault("BLOX7_REQUIRE_REAL_GRAPHICS", "0");
 }
 
@@ -3220,10 +3211,8 @@ void ConfigureLocalStorage(JNIEnv* env, const EngineStartupContext* context) {
   EnsureAndroidDirectory(files_dir + "/appData/rbx-storage");
   EnsureAndroidDirectory(data_dir + "/rbx-storage");
   EnsureAndroidDirectory(data_dir + "/shared_prefs");
-#if defined(BLOX7_WIN32)
   blox7::runtime::MoveFinishedVideos(
       libc_shim::TranslatePath(files_dir + "/video"));
-#endif
   EnsureAndroidDirectory(cache_dir);
   EnsureAndroidDirectory(cache_dir + "/ContentProvider_2");
   EnsureAndroidDirectory(cache_dir + "/rbx-storage");
@@ -4722,16 +4711,9 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
     window_initialised = blox7::window::Init(win_w, win_h, win_title);
     if (!window_initialised) {
       if (IsEnabled("BLOX7_SOBER_MODE")) {
-#ifdef BLOX7_WIN32
         std::cerr << "  [window] FATAL: the game window could not be "
                   << "created; the [window] lines above say why.\n"
                   << std::flush;
-#else
-        std::cerr << "  [window] FATAL: Sober-style startup requires a "
-                  << "working SDL video device. Check DISPLAY/WAYLAND_DISPLAY "
-                  << "and SDL3.\n"
-                  << std::flush;
-#endif
         return EXIT_FAILURE;
       }
       std::cerr
@@ -5468,10 +5450,8 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
   linker::RegisterSymbol("sendmsg",
                          reinterpret_cast<void*>(blox7_bionic_sendmsg));
   linker::RegisterSymbol("mprotect", reinterpret_cast<void*>(blox7_mprotect));
-#ifdef BLOX7_WIN32
   linker::RegisterSymbol("__system_property_get",
                          reinterpret_cast<void*>(blox7_system_property_get));
-#endif
   linker::RegisterSymbol("pthread_condattr_init",
                          reinterpret_cast<void*>(blox7_pthread_condattr_init));
   linker::RegisterSymbol("pthread_condattr_destroy",
@@ -5576,9 +5556,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
                 << "  Set BLOX7_GLES_FORCE_STUB=1 or "
                    "BLOX7_GLES_NOOP_DRAW_CALLS=1 to continue with stubs.\n"
                    "  Or clear BLOX7_REQUIRE_REAL_GRAPHICS and inspect "
-                   "logs above.\n"
-                << "  Consider setting BLOX7_GRAPHICS_BACKEND=angle-vulkan and "
-                   "BLOX7_GLES_LIBRARY=<path-to-real-libGLESv2.so>.\n";
+                   "logs above.\n";
       return EXIT_FAILURE;
     }
   }
@@ -5769,11 +5747,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       }
     }
   } else {
-#ifdef BLOX7_WIN32
     const bool alarm_watchdog = false;
-#else
-    const bool alarm_watchdog = jni_timeout_ms > 0;
-#endif
     if (alarm_watchdog) {
       g_jni_onload_in_progress = 1;
       g_jni_onload_timings_printed = 0;
@@ -5853,9 +5827,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
   std::unique_ptr<blox7::runtime::RobloxTextInputJniBridge>
       text_input_bridge;
   blox7::window::ScopedPresentObserver game_present_observer;
-#ifdef BLOX7_WIN32
   NativeUpdateSurfaceAppFn lua_app_surface_update = nullptr;
-#endif
   if (!IsDisabled("BLOX7_START_ENGINE")) {
     PrintStage(6, is_headless ? "Invoking headless Roblox startup entry points"
                               : "Invoking Roblox startup entry points");
@@ -5934,9 +5906,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
         startup_symbols.app_bridge_v2_start_app_with_params;
     NativeUpdateSurfaceAppFn native_update_surface_app =
         startup_symbols.app_bridge_v2_update_surface_app_with_platform_params;
-#ifdef BLOX7_WIN32
     lua_app_surface_update = native_update_surface_app;
-#endif
     NativeNoArgFn native_call_messages_from_main_thread =
         startup_symbols.call_messages_from_main_thread;
 
@@ -6069,7 +6039,6 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
             "Java_com_roblox_engine_jni_NativeSettingsInterface_"
             "nativeGetCookiesForDomain"));
     jni_vm->SetRobloxCookieGetter(native_get_cookies_for_domain);
-#if defined(BLOX7_WIN32)
     jni_vm->SetRobloxAlbumSaver(
         [](const std::string& path, std::string* message) {
           return blox7::runtime::SaveCaptureToWindowsMediaFolder(
@@ -6080,7 +6049,6 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
                 roblox_handle,
                 "Java_com_roblox_engine_jni_NativeGLInterface_"
                 "nativeImageSavedToAlbumFinished")));
-#endif
     auto* native_cookie_manager_set_cookie =
         reinterpret_cast<NativeSetTwoStringParamsFn>(linker::ResolveSymbol(
             roblox_handle,
@@ -6946,7 +6914,6 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       }
       return true;
     };
-#ifdef BLOX7_WIN32
     // before sign-in nothing resizes roblox's LuaApp, so we do
     const auto rebind_guest_lua_app_surface = [&]() {
       if (surface_bridge != nullptr || lua_app_surface_update == nullptr ||
@@ -7005,17 +6972,14 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
           if (!tick->failed && !tick->run()) tick->failed = true;
         },
         &live_resize_tick);
-#endif
     while (true) {
       const bool keep_window_open = blox7::window::PumpEvents();
       game_surface_events_completed = drain_game_surface_events();
-#ifdef BLOX7_WIN32
       rebind_guest_lua_app_surface();
       if (live_resize_tick.failed) {
         std::cerr << "[FATAL] Roblox surface update failed during a window resize\n";
         game_surface_events_completed = false;
       }
-#endif
       if (!game_surface_events_completed || !keep_window_open) {
         break;
       }
@@ -7061,9 +7025,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       }
       blox7::window::PaceInputPump();
     }
-#ifdef BLOX7_WIN32
     blox7::window::SetLiveResizeTick(nullptr, nullptr);
-#endif
     std::cout << "  [main] window closed, shutting down\n" << std::flush;
     real_frame_presented = blox7::window::HasPresentedFrame();
     if (text_input_bridge != nullptr) {

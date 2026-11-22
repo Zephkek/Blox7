@@ -11,8 +11,6 @@ enum class CanaryGraphicsBackend {
   kDirectVulkan,
   kOpenGlEs,
   kSystemEgl,
-  kAngleVulkan,
-  kAngleSwiftShader,
 };
 
 std::string_view CanaryGraphicsBackendName(CanaryGraphicsBackend backend);

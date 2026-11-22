@@ -2,11 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
-#ifndef BLOX7_WIN32
-#include <fontconfig/fontconfig.h>
-#else
 #include <unistd.h>
-#endif
 
 #include <algorithm>
 #include <atomic>
@@ -129,7 +125,6 @@ std::vector<std::string> ResolveFontFiles(
   } else if (!selection.primary_file.empty()) {
     files.push_back(selection.primary_file);
   }
-#ifdef BLOX7_WIN32
   static const char* const kWindowsFonts[] = {
       "/mnt/c/Windows/Fonts/segoeui.ttf", "/mnt/c/Windows/Fonts/arial.ttf",
       "/mnt/c/Windows/Fonts/msyh.ttf",    "/mnt/c/Windows/Fonts/meiryo.ttc",
@@ -142,39 +137,6 @@ std::vector<std::string> ResolveFontFiles(
     }
   }
   return files;
-#else
-  if (!FcInit()) {
-    return files;
-  }
-
-  FcPattern* pattern = FcNameParse(reinterpret_cast<const FcChar8*>("sans"));
-  if (pattern == nullptr) {
-    return files;
-  }
-  FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
-  FcDefaultSubstitute(pattern);
-  FcResult result = FcResultNoMatch;
-  FcFontSet* fonts = FcFontSort(nullptr, pattern, FcTrue, nullptr, &result);
-  FcPatternDestroy(pattern);
-  if (fonts == nullptr) {
-    return files;
-  }
-  for (int index = 0;
-       index < fonts->nfont && files.size() < kMaximumFallbackFonts; ++index) {
-    FcChar8* file = nullptr;
-    if (FcPatternGetString(fonts->fonts[index], FC_FILE, 0, &file) !=
-            FcResultMatch ||
-        file == nullptr || file[0] == '\0') {
-      continue;
-    }
-    const std::string candidate(reinterpret_cast<const char*>(file));
-    if (std::find(files.begin(), files.end(), candidate) == files.end()) {
-      files.push_back(candidate);
-    }
-  }
-  FcFontSetDestroy(fonts);
-  return files;
-#endif
 }
 
 void SetPixel(std::vector<std::uint8_t>* pixels, int width, int x, int y,
@@ -261,14 +223,10 @@ SDL_Color ResolveTextColor(std::int32_t packed_color) {
           static_cast<std::uint8_t>(packed), alpha};
 }
 
-#ifdef BLOX7_WIN32
 // windows shows this 1:1 on its own layer, so draw at display pixels or it's blurry
 float RasterScale(const RobloxTextOverlayViewport& viewport) {
   return viewport.density_scale;
 }
-#else
-float RasterScale(const RobloxTextOverlayViewport&) { return 1.0F; }
-#endif
 
 int Scaled(float value, float scale) {
   return static_cast<int>(std::lround(value * scale));

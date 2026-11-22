@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include "blox7/graphics/angle_probe.h"
 #include "blox7/graphics/gles_text_overlay_compositor.h"
 #include "blox7/graphics/present_mode_policy.h"
 #include "blox7/graphics/roblox_renderer_checks.h"
@@ -31,7 +30,6 @@
 #include "window/input_pump_pacer.h"
 #include "window/main_thread_command_gate.h"
 #include "window/roblox_fullscreen_menu_request_gate.h"
-#include "window/video_driver_policy.h"
 #include "window/vulkan_present_progress_gate.h"
 #include "window/vulkan_surface_recovery_gate.h"
 #include "window/window_fullscreen_request_gate.h"
@@ -42,7 +40,6 @@
 #include "window/window_state_store.h"
 #include "window/window_text_input_owner.h"
 
-#ifdef BLOX7_WIN32
 namespace blox7::win32 {
 bool UpdateTextLayer(void* game_window);
 void DestroyTextLayer();
@@ -51,14 +48,11 @@ extern "C" void* __w32_pe_open(const char* utf8_path);
 extern "C" void* __w32_pe_symbol(void* module, const char* name);
 extern "C" const char* __w32_exe_dir(void);
 extern "C" int blox7_angle_blob_cache(const char* dir);
-#endif
 
 namespace blox7 {
 namespace window {
 
-#ifdef BLOX7_WIN32
 bool SetWindowsSwapInterval(int interval);
-#endif
 
 using EGLDisplay = void*;
 using EGLConfig = void*;
@@ -72,26 +66,13 @@ using EGLNativeWindowType = void*;
 using __eglMustCastFP = void (*)();
 
 static constexpr EGLint EGL_NONE_VAL = 0x3038;
-static constexpr EGLint EGL_EXTENSIONS_VAL = 0x3055;
 static constexpr EGLint EGL_MIN_SWAP_INTERVAL_VAL = 0x303B;
 static constexpr EGLint EGL_MAX_SWAP_INTERVAL_VAL = 0x303C;
-static constexpr EGLint EGL_DEBUG_MSG_CRITICAL_KHR_VAL = 0x33B9;
-static constexpr EGLint EGL_DEBUG_MSG_ERROR_KHR_VAL = 0x33BA;
-static constexpr EGLint EGL_DEBUG_MSG_WARN_KHR_VAL = 0x33BB;
-static constexpr EGLint EGL_DEBUG_MSG_INFO_KHR_VAL = 0x33BC;
 static constexpr EGLint EGL_PLATFORM_ANGLE_ANGLE_VAL = 0x3202;
 static constexpr EGLint EGL_PLATFORM_ANGLE_TYPE_ANGLE_VAL = 0x3203;
 static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE_VAL = 0x3209;
 static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE_VAL =
     0x320a;
-static constexpr EGLint EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE_VAL =
-    0x3451;
-static constexpr EGLint EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE_VAL = 0x3450;
-static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE_VAL =
-    0x3487;
-static constexpr EGLint EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE_VAL =
-    0x348F;
-#ifdef BLOX7_WIN32
 static constexpr EGLint EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE_VAL = 0x3204;
 static constexpr EGLint EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE_VAL = 0x3205;
 static constexpr EGLint EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE_VAL = 0x3208;
@@ -100,14 +81,8 @@ static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE_VAL =
 static constexpr EGLint EGL_FEATURE_OVERRIDES_ENABLED_ANGLE_VAL = 0x3466;
 static constexpr EGLint EGL_EXPERIMENTAL_PRESENT_PATH_ANGLE_VAL = 0x33A4;
 static constexpr EGLint EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE_VAL = 0x33A9;
-#endif
-static constexpr EGLint EGL_PLATFORM_X11_EXT_VAL = 0x31D5;
-static constexpr EGLint EGL_PLATFORM_WAYLAND_EXT_VAL = 0x31D8;
-static constexpr EGLint EGL_TRUE_VAL = 1;
-static constexpr EGLint EGL_FALSE_VAL = 0;
 static constexpr EGLBoolean EGL_TRUE_B = 1;
 static constexpr EGLBoolean EGL_FALSE_B = 0;
-static constexpr EGLDisplay EGL_NO_DISPLAY = nullptr;
 
 using PFN_eglGetDisplay = EGLDisplay (*)(EGLNativeDisplayType);
 using PFN_eglInitialize = EGLBoolean (*)(EGLDisplay, EGLint*, EGLint*);
@@ -148,7 +123,6 @@ struct WindowState {
   bool initialised = false;
   bool quit_requested = false;
   bool visible = false;
-  bool software_window = false;
   bool direct_vulkan = false;
   bool input_test_sequence_queued = false;
   bool fullscreen_readiness_requested = false;
@@ -168,7 +142,6 @@ static WindowState g_state;
 static std::atomic<int> g_real_swap_count{0};
 static std::atomic<uint64_t> g_first_present_ticks_ns{0};
 static std::atomic<bool> g_fullscreen_switching{false};
-#ifdef BLOX7_WIN32
 static std::atomic<SDL_ThreadID> g_pump_thread_id{0};
 static std::atomic<bool> g_show_requested{false};
 static void (*g_live_resize_tick)(void*) = nullptr;
@@ -185,19 +158,13 @@ static bool SDLCALL LiveResizeWatch(void*, SDL_Event* event) {
   }
   return true;
 }
-#endif
 
 void SetLiveResizeTick(void (*tick)(void*), void* context) {
-#ifdef BLOX7_WIN32
   g_live_resize_tick = tick;
   g_live_resize_context = context;
   if (tick != nullptr && !g_live_resize_watch_added) {
     g_live_resize_watch_added = SDL_AddEventWatch(LiveResizeWatch, nullptr);
   }
-#else
-  (void)tick;
-  (void)context;
-#endif
 }
 static InputPumpPacer g_input_pump_pacer;
 static PresentLifecycleGate g_present_lifecycle;
@@ -217,6 +184,7 @@ static std::unique_ptr<SdlPointerCaptureBackend> g_pointer_capture_backend;
 static std::unique_ptr<WindowPointerCaptureOwner> g_pointer_capture_owner;
 static std::unique_ptr<graphics::GlesTextOverlayCompositor> g_gles_text_overlay;
 static bool g_auto_angle_retry_attempted = false;
+static bool g_gpu_lacks_gles3 = false;
 static std::filesystem::path g_window_state_path;
 
 WindowStartupPresentationPlan RestoredWindowPresentationPlan() {
@@ -256,7 +224,6 @@ void ApplyWindowIcon(SDL_Window* window) {
   }
 }
 
-#ifdef BLOX7_WIN32
 void RedrawWholeClientOnResize(SDL_Window* window) {
   using GetClassLongPtrFn = uintptr_t(__attribute__((ms_abi)) *)(void*, int32_t);
   using SetClassLongPtrFn =
@@ -281,7 +248,6 @@ void RedrawWholeClientOnResize(SDL_Window* window) {
   set_class_long(hwnd, kGclStyle,
                  get_class_long(hwnd, kGclStyle) | kCsVRedraw | kCsHRedraw);
 }
-#endif
 
 // borderless just inherits the desktop rate, so ask for exclusive fullscreen
 void ApplyFullscreenRefreshMode(SDL_Window* window) {
@@ -354,11 +320,6 @@ bool WindowStatePersistenceSuppressed() {
          IsEnabledEnv("BLOX7_AUTO_EXIT_AFTER_PRESENT_MS");
 }
 
-bool IsWaylandVideoDriver() {
-  const char* driver = SDL_GetCurrentVideoDriver();
-  return driver != nullptr && std::strcmp(driver, "wayland") == 0;
-}
-
 bool SavedPositionIntersectsDisplay(const PersistedWindowState& state) {
   if (!state.has_position) {
     return false;
@@ -383,8 +344,7 @@ bool SavedPositionIntersectsDisplay(const PersistedWindowState& state) {
 }
 
 void ApplyRestoredWindowPosition() {
-  if (g_state.sdl_window == nullptr || !g_state.persisted_window.has_position ||
-      IsWaylandVideoDriver()) {
+  if (g_state.sdl_window == nullptr || !g_state.persisted_window.has_position) {
     return;
   }
   if (!SavedPositionIntersectsDisplay(g_state.persisted_window)) {
@@ -418,14 +378,12 @@ void CaptureWindowState() {
     g_state.persisted_window.width = width;
     g_state.persisted_window.height = height;
   }
-  if (!IsWaylandVideoDriver()) {
-    int x = 0;
-    int y = 0;
-    if (SDL_GetWindowPosition(g_state.sdl_window, &x, &y)) {
-      g_state.persisted_window.x = x;
-      g_state.persisted_window.y = y;
-      g_state.persisted_window.has_position = true;
-    }
+  int x = 0;
+  int y = 0;
+  if (SDL_GetWindowPosition(g_state.sdl_window, &x, &y)) {
+    g_state.persisted_window.x = x;
+    g_state.persisted_window.y = y;
+    g_state.persisted_window.has_position = true;
   }
 }
 
@@ -503,46 +461,10 @@ bool ParsePositiveInt(const char* name, int fallback, int* value) {
   return true;
 }
 
-bool IsAutoGraphicsBackend(const char* backend) {
-  return backend == nullptr || StringEquals(backend, "auto");
-}
-
-bool StartsWith(const char* value, const char* prefix) {
-  if (value == nullptr || prefix == nullptr) {
-    return false;
-  }
-  return std::strncmp(value, prefix, std::strlen(prefix)) == 0;
-}
-
 bool FileExists(const char* path) {
   return path != nullptr && path[0] != '\0' && access(path, R_OK) == 0;
 }
 
-bool ShouldUseAngleBackend() {
-  const char* backend = GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND");
-  return StartsWith(backend, "angle") ||
-         GetEnvNonEmpty("BLOX7_ANGLE_LIB_DIR") != nullptr;
-}
-
-bool ShouldUseNativeVulkanBackend() {
-  const char* backend = GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND");
-  return StringEquals(backend, "vulkan") ||
-         StringEquals(backend, "native-vulkan") ||
-         StringEquals(backend, "direct-vulkan");
-}
-
-bool ShouldUseAngleVulkanBackend() {
-  const char* backend = GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND");
-  return StringEquals(backend, "angle-vulkan") ||
-         StringEquals(backend, "angle-swiftshader");
-}
-
-bool ShouldUseAngleSwiftShader() {
-  return StringEquals(GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND"),
-                      "angle-swiftshader");
-}
-
-#ifdef BLOX7_WIN32
 const char* WindowsAngleMode() {
   const char* mode = GetEnvNonEmpty("BLOX7_ANGLE");
   return mode != nullptr ? mode : "auto";
@@ -731,80 +653,6 @@ void EnableAngleShaderCache() {
             dir.c_str());
   }
 }
-#endif
-
-bool HasWaylandSession() {
-  return GetEnvNonEmpty("WAYLAND_DISPLAY") != nullptr &&
-         GetEnvNonEmpty("XDG_RUNTIME_DIR") != nullptr;
-}
-
-VideoDriverChoice ResolveConfiguredVideoDriverChoice() {
-  VideoDriverPolicyInput input;
-  input.has_explicit_sdl_driver =
-      GetEnvNonEmpty("SDL_VIDEODRIVER") != nullptr ||
-      GetEnvNonEmpty("SDL_VIDEO_DRIVER") != nullptr;
-  input.force_wayland = IsEnabledEnv("BLOX7_FORCE_WAYLAND");
-  input.force_x11 = IsEnabledEnv("BLOX7_FORCE_X11") ||
-                    IsEnabledEnv("BLOX7_ANGLE_FORCE_X11");
-  input.prefer_wayland =
-      !IsDisabledEnv("BLOX7_PREFER_WAYLAND") &&
-      !StringEquals(GetEnvNonEmpty("BLOX7_FORCE_WAYLAND"), "0");
-  input.has_wayland_session = HasWaylandSession();
-  input.has_x11_display = GetEnvNonEmpty("DISPLAY") != nullptr;
-  input.uses_direct_vulkan = ShouldUseNativeVulkanBackend();
-  input.has_nvidia_kernel_driver = HasNvidiaKernelDriver();
-  return ResolveVideoDriverChoice(input);
-}
-
-std::vector<std::string_view> AvailableSdlVideoDrivers() {
-  std::vector<std::string_view> drivers;
-  const int count = SDL_GetNumVideoDrivers();
-  if (count > 0) {
-    drivers.reserve(static_cast<std::size_t>(count));
-  }
-  for (int index = 0; index < count; ++index) {
-    const char* driver = SDL_GetVideoDriver(index);
-    if (driver != nullptr && driver[0] != '\0') {
-      drivers.emplace_back(driver);
-    }
-  }
-  return drivers;
-}
-
-bool DropUnavailableSdlVideoDriverOverride(
-    const char* variable,
-    const std::vector<std::string_view>& available_drivers) {
-  const char* requested = std::getenv(variable);
-  if (requested == nullptr || requested[0] == '\0' ||
-      HasAvailableVideoDriverCandidate(requested, available_drivers)) {
-    return false;
-  }
-  if (unsetenv(variable) != 0) {
-    std::fprintf(stderr,
-                 "  [window] cannot clear unavailable %s override: %s\n",
-                 variable, std::strerror(errno));
-    return false;
-  }
-  std::fprintf(stderr,
-               "  [window] ignoring unavailable %s override; using SDL "
-               "automatic video-driver detection\n",
-               variable);
-  return true;
-}
-
-void SanitizeSdlVideoDriverOverrides() {
-  const std::vector<std::string_view> available_drivers =
-      AvailableSdlVideoDrivers();
-  if (available_drivers.empty()) {
-    return;
-  }
-  (void)DropUnavailableSdlVideoDriverOverride("SDL_VIDEODRIVER",
-                                              available_drivers);
-  if (DropUnavailableSdlVideoDriverOverride("SDL_VIDEO_DRIVER",
-                                            available_drivers)) {
-    SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
-  }
-}
 
 bool ShouldShowWindowImmediately() {
   if (IsEnabledEnv("BLOX7_HIDE_WINDOW_UNTIL_FIRST_SWAP")) {
@@ -813,118 +661,7 @@ bool ShouldShowWindowImmediately() {
   return IsEnabledEnv("BLOX7_DEBUG_SHOW_WINDOW_BEFORE_FRAME");
 }
 
-struct GraphicsLibraries {
-  std::string egl_path;
-  std::string gles_path;
-};
-
-GraphicsLibraries FindInstalledAngleLibraries() {
-  const char* runtime_directory =
-      GetEnvNonEmpty("BLOX7_RUNTIME_LIBRARY_DIR");
-  const std::string bundled_directory =
-      runtime_directory != nullptr
-          ? (std::filesystem::path(runtime_directory) / "angle").string()
-          : std::string();
-  const char* kAngleDirs[] = {
-      bundled_directory.empty() ? nullptr : bundled_directory.c_str(),
-      "/usr/lib64/chromium",
-      "/usr/lib64/chromium-browser",
-      "/usr/lib/chromium",
-      "/usr/lib/chromium-browser",
-      "/usr/lib64/electron43",
-      "/usr/lib/electron43",
-      "/usr/lib/electron42",
-      "/usr/lib/electron41",
-      "/usr/lib/electron40",
-      "/usr/lib/electron39",
-      "/usr/lib/cef",
-      "/opt/google/chrome",
-      "/opt/google/chrome-beta",
-      "/opt/google/chrome-unstable",
-  };
-  for (const char* dir : kAngleDirs) {
-    if (dir == nullptr) {
-      continue;
-    }
-    const std::filesystem::path directory(dir);
-    GraphicsLibraries libraries{(directory / "libEGL.so").string(),
-                                (directory / "libGLESv2.so").string()};
-    if (FileExists(libraries.egl_path.c_str()) &&
-        FileExists(libraries.gles_path.c_str()) &&
-        graphics::InspectAngleLibraries(
-            {libraries.egl_path, libraries.gles_path})
-                .state == graphics::CapabilityState::kLoadable) {
-      return libraries;
-    }
-  }
-  return {};
-}
-
-GraphicsLibraries ResolveGraphicsLibraries() {
-  const char* egl_path = GetEnvNonEmpty("BLOX7_EGL_LIBRARY");
-  const char* gles_path = GetEnvNonEmpty("BLOX7_GLES_LIBRARY");
-  GraphicsLibraries libraries{egl_path != nullptr ? egl_path : "",
-                              gles_path != nullptr ? gles_path : ""};
-  std::filesystem::path directory;
-  const char* angle_dir = GetEnvNonEmpty("BLOX7_ANGLE_LIB_DIR");
-  if (angle_dir != nullptr) {
-    directory = angle_dir;
-  } else if (ShouldUseAngleBackend()) {
-    if (libraries.egl_path.empty() && libraries.gles_path.empty()) {
-      return FindInstalledAngleLibraries();
-    }
-    directory =
-        std::filesystem::path(libraries.egl_path.empty() ? libraries.gles_path
-                                                         : libraries.egl_path)
-            .parent_path();
-  } else {
-    return libraries;
-  }
-  if (libraries.egl_path.empty()) {
-    libraries.egl_path = (directory / "libEGL.so").string();
-  }
-  if (libraries.gles_path.empty()) {
-    libraries.gles_path = (directory / "libGLESv2.so").string();
-  }
-  return libraries;
-}
-
-bool HasInstalledAnglePair() {
-  return !FindInstalledAngleLibraries().egl_path.empty();
-}
-
-SDL_EGLAttrib* SDLCALL AnglePlatformAttributes(void*) {
-  SDL_EGLAttrib* attrs =
-      static_cast<SDL_EGLAttrib*>(SDL_malloc(sizeof(SDL_EGLAttrib) * 9));
-  if (attrs == nullptr) {
-    return nullptr;
-  }
-  int i = 0;
-  attrs[i++] = EGL_PLATFORM_ANGLE_TYPE_ANGLE_VAL;
-  attrs[i++] = EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE_VAL;
-  attrs[i++] = EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE_VAL;
-  attrs[i++] = ShouldUseAngleSwiftShader()
-                   ? EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE_VAL
-                   : EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE_VAL;
-  const char* video_driver = SDL_GetCurrentVideoDriver();
-  if (StringEquals(video_driver, "x11") || StringEquals(video_driver, "wayland")) {
-    attrs[i++] = EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE_VAL;
-    attrs[i++] = StringEquals(video_driver, "x11")
-                     ? EGL_PLATFORM_X11_EXT_VAL
-                     : EGL_PLATFORM_WAYLAND_EXT_VAL;
-  }
-  if (IsEnabledEnv("BLOX7_ANGLE_DEBUG_LAYERS")) {
-    attrs[i++] = EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE_VAL;
-    attrs[i++] = EGL_TRUE_VAL;
-  }
-  attrs[i++] = EGL_NONE_VAL;
-  return attrs;
-}
-
 bool ConfigureGraphicsBackendBeforeSDL() {
-  SanitizeSdlVideoDriverOverrides();
-
-#ifdef BLOX7_WIN32
   WarnAboutUnknownWindowsAngleSettings();
   if (WindowsAngleForced()) {
     if (!WindowsAngleReady()) {
@@ -955,132 +692,17 @@ bool ConfigureGraphicsBackendBeforeSDL() {
     SDL_SetHintWithPriority(SDL_HINT_VIDEO_EGL_ALLOW_GETDISPLAY_FALLBACK, "0",
                             SDL_HINT_OVERRIDE);
   }
-#endif
 
-#ifndef BLOX7_WIN32
-  SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");
-#endif
-
-  if (ShouldUseAngleVulkanBackend() || ShouldUseNativeVulkanBackend()) {
-    setenv("NODEVICE_SELECT", "1", 0);
-    setenv("DISABLE_LAYER_MESA_ANTI_LAG", "1", 0);
-  }
-
-  const VideoDriverChoice video_driver_choice =
-      ResolveConfiguredVideoDriverChoice();
-  const char* video_driver = VideoDriverChoiceName(video_driver_choice);
-  if (video_driver != nullptr) {
-    setenv("SDL_VIDEODRIVER", video_driver, 1);
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, video_driver);
-  }
-  if (video_driver_choice == VideoDriverChoice::kNvidiaDirectVulkanX11) {
-    fprintf(stderr,
-            "  [window] NVIDIA direct Vulkan on Wayland session: using "
-            "X11/XWayland WSI; set SDL_VIDEODRIVER=wayland to override\n");
-  }
-
-  const GraphicsLibraries libraries = ResolveGraphicsLibraries();
-  const char* egl_library =
-      libraries.egl_path.empty() ? nullptr : libraries.egl_path.c_str();
-  const char* gles_library =
-      libraries.gles_path.empty() ? nullptr : libraries.gles_path.c_str();
-
-  if (ShouldUseAngleBackend() && !ShouldUseNativeVulkanBackend() &&
-      (!FileExists(egl_library) || !FileExists(gles_library))) {
-    const char* directory = GetEnvNonEmpty("BLOX7_ANGLE_LIB_DIR");
-    SDL_SetError(
-        "ANGLE requires compatible libEGL.so and libGLESv2.so; "
-        "directory=%s egl=%s gles=%s",
-        directory != nullptr ? directory : "(automatic)",
-        egl_library != nullptr ? egl_library : "(missing)",
-        gles_library != nullptr ? gles_library : "(missing)");
-    fprintf(stderr, "  [window] %s\n", SDL_GetError());
-    return false;
-  }
-
-  if (ShouldUseAngleVulkanBackend()) {
-    const auto capability =
-        graphics::InspectAngleLibraries({egl_library, gles_library});
-    if (capability.state != graphics::CapabilityState::kLoadable) {
-      SDL_SetError("ANGLE unavailable: %s", capability.detail.c_str());
-      fprintf(stderr, "  [window] %s\n", SDL_GetError());
-      return false;
-    }
-  }
-
-  if (egl_library != nullptr) {
-    setenv("BLOX7_EGL_LIBRARY", egl_library, 0);
-    SDL_SetHintWithPriority(SDL_HINT_EGL_LIBRARY, egl_library,
-                            ShouldUseAngleBackend() ? SDL_HINT_OVERRIDE
-                                                    : SDL_HINT_NORMAL);
-  }
-  if (gles_library != nullptr) {
-    setenv("BLOX7_GLES_LIBRARY", gles_library, 0);
-    const auto priority = ShouldUseAngleBackend() ? SDL_HINT_OVERRIDE
-                                                 : SDL_HINT_NORMAL;
-    SDL_SetHintWithPriority(SDL_HINT_OPENGL_LIBRARY, gles_library, priority);
-    SDL_SetHintWithPriority(SDL_HINT_OPENGL_ES_DRIVER, "1", priority);
-  }
-
-  if (ShouldUseAngleVulkanBackend()) {
-    setenv("ANGLE_DEFAULT_PLATFORM", "vulkan", 0);
-  }
-
-  if (ShouldUseAngleBackend() || egl_library != nullptr ||
-      gles_library != nullptr || WindowTraceEnabled()) {
-    const char* requested_video_driver = GetEnvNonEmpty("SDL_VIDEO_DRIVER");
-    if (requested_video_driver == nullptr) {
-      requested_video_driver = GetEnvNonEmpty("SDL_VIDEODRIVER");
-    }
-    fprintf(stderr, "  [window] graphics backend=%s video=%s egl=%s gles=%s\n",
+  if (WindowTraceEnabled()) {
+    fprintf(stderr, "  [window] graphics backend=%s\n",
             GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND")
                 ? GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND")
-                : "system",
-            requested_video_driver ? requested_video_driver : "(SDL default)",
-            egl_library ? egl_library : "(system)",
-            gles_library ? gles_library : "(system)");
+                : "system");
   }
   return true;
 }
 
-void LogEglError(EGLenum error, const char* command, EGLint,
-                 void*, void*,
-                 const char* message) {
-  fprintf(stderr, "  [window][EGL] %s: error=0x%04x %s\n",
-          command != nullptr ? command : "(unknown call)", error,
-          message != nullptr ? message : "(no details)");
-}
-
-void EnableEglErrorLogging() {
-  using QueryString = const char* (*)(EGLDisplay, EGLint);
-  using DebugCallback = void (*)(EGLenum, const char*, EGLint, void*, void*,
-                                 const char*);
-  using DebugMessageControl = EGLint (*)(DebugCallback, const SDL_EGLAttrib*);
-  const auto query_string = reinterpret_cast<QueryString>(
-      SDL_EGL_GetProcAddress("eglQueryString"));
-  if (query_string == nullptr) {
-    return;
-  }
-  const char* extensions = query_string(EGL_NO_DISPLAY, EGL_EXTENSIONS_VAL);
-  const std::string extension_list =
-      std::string(" ") + (extensions != nullptr ? extensions : "") + " ";
-  if (extension_list.find(" EGL_KHR_debug ") == std::string::npos) {
-    return;
-  }
-  const auto debug_message_control = reinterpret_cast<DebugMessageControl>(
-      SDL_EGL_GetProcAddress("eglDebugMessageControlKHR"));
-  if (debug_message_control != nullptr) {
-    const SDL_EGLAttrib attributes[] = {
-        EGL_DEBUG_MSG_CRITICAL_KHR_VAL, EGL_TRUE_VAL,
-        EGL_DEBUG_MSG_ERROR_KHR_VAL, EGL_TRUE_VAL,
-        EGL_DEBUG_MSG_WARN_KHR_VAL, EGL_FALSE_VAL,
-        EGL_DEBUG_MSG_INFO_KHR_VAL, EGL_FALSE_VAL, EGL_NONE_VAL};
-    debug_message_control(LogEglError, attributes);
-  }
-}
-
 bool ConfigureGraphicsBackendAfterSDLInit() {
-#ifdef BLOX7_WIN32
   if (WindowsAngleForced()) {
     if (!SDL_GL_SetAttribute(SDL_GL_EGL_PLATFORM, EGL_PLATFORM_ANGLE_ANGLE_VAL)) {
       fprintf(stderr, "  [window] cannot select the ANGLE EGL platform: %s\n",
@@ -1101,36 +723,6 @@ bool ConfigureGraphicsBackendAfterSDLInit() {
             "  [window] ANGLE (Direct3D 11) takes over if the graphics driver "
             "has no OpenGL ES 3.0\n");
   }
-#endif
-  if (ShouldUseAngleVulkanBackend()) {
-    if (!SDL_GL_SetAttribute(SDL_GL_EGL_PLATFORM, EGL_PLATFORM_ANGLE_ANGLE_VAL)) {
-      fprintf(stderr, "  [window] cannot select ANGLE EGL platform: %s\n",
-              SDL_GetError());
-      return false;
-    }
-    SDL_EGL_SetAttributeCallbacks(AnglePlatformAttributes, nullptr, nullptr,
-                                  nullptr);
-    fprintf(stderr,
-            "  [window] ANGLE Vulkan EGL platform attributes enabled "
-            "(video=%s)\n", SDL_GetCurrentVideoDriver());
-  }
-
-  const char* gles_library = GetEnvNonEmpty("BLOX7_GLES_LIBRARY");
-  if (gles_library != nullptr) {
-    if (!SDL_GL_LoadLibrary(gles_library)) {
-      fprintf(stderr, "  [window] SDL_GL_LoadLibrary(%s) failed: %s\n",
-              gles_library, SDL_GetError());
-      return false;
-    }
-    if (WindowTraceEnabled() || ShouldUseAngleBackend()) {
-      fprintf(stderr, "  [window] SDL_GL_LoadLibrary(%s) succeeded\n",
-              gles_library);
-    }
-    if (WindowTraceEnabled() || TraceFlagEnabled("BLOX7_EGL_TRACE")) {
-      EnableEglErrorLogging();
-    }
-  }
-
   return true;
 }
 
@@ -1146,25 +738,11 @@ void ShowWindowAccordingToStartupMode() {
 
 void* QueryNativeWindowHandle() {
   SDL_PropertiesID props = SDL_GetWindowProperties(g_state.sdl_window);
-  unsigned long xid = static_cast<unsigned long>(
-      SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
-  if (xid != 0) {
-    return reinterpret_cast<void*>(xid);
-  }
-
-  void* wl_egl_win = SDL_GetPointerProperty(
-      props, SDL_PROP_WINDOW_WAYLAND_EGL_WINDOW_POINTER, nullptr);
-  if (wl_egl_win != nullptr) {
-    return wl_egl_win;
-  }
-
-#ifdef BLOX7_WIN32
   void* hwnd = SDL_GetPointerProperty(
       props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
   if (hwnd != nullptr) {
     return hwnd;
   }
-#endif
 
   return g_state.direct_vulkan ? g_state.sdl_window : nullptr;
 }
@@ -1179,7 +757,7 @@ float QueryWindowDpiScale() {
 void ResolveNativeWindowHandle() {
   g_state.native_window = QueryNativeWindowHandle();
   if (g_state.native_window == nullptr) {
-    fprintf(stderr, "  [window] WARNING: no X11 XID or Wayland window found\n");
+    fprintf(stderr, "  [window] WARNING: no native window found\n");
     return;
   }
   fprintf(stderr, "  [window] native window=%p\n", g_state.native_window);
@@ -1307,59 +885,8 @@ bool ActivateWindowEventLifecycles() {
   return true;
 }
 
-bool CreateSoftwareWaitingWindow(int width, int height, const char* title) {
-  if (!StringEquals(GetEnvNonEmpty("BLOX7_ENABLE_TEST_GRAPHICS_STUBS"),
-                    "1")) {
-    fprintf(stderr,
-            "  [window] real EGL window setup failed; software waiting "
-            "window is test-only and production is fail-closed\n");
-    SDL_Quit();
-    return false;
-  }
-  fprintf(stderr,
-          "  [window] TEST-ONLY graphics stubs explicitly enabled; creating "
-          "a non-rendering waiting window\n");
-  const WindowStartupPresentationPlan presentation =
-      RestoredWindowPresentationPlan();
-  SDL_WindowFlags window_flags = ApplyHighPixelDensityWindowFlag(
-      SDL_WINDOW_RESIZABLE, IsEnabledEnv("BLOX7_WIN_HIGH_DPI"));
-  if (presentation.fullscreen_at_creation) {
-    window_flags |= SDL_WINDOW_FULLSCREEN;
-  }
-  if (!ShouldShowWindowImmediately()) {
-    window_flags |= SDL_WINDOW_HIDDEN;
-  }
-
-  g_state.sdl_window = SDL_CreateWindow(title ? title : "Roblox",
-                                        width, height, window_flags);
-  if (g_state.sdl_window == nullptr) {
-    fprintf(stderr, "  [window] SDL fallback window failed: %s\n",
-            SDL_GetError());
-    return false;
-  }
-  ApplyWindowIcon(g_state.sdl_window);
-  ApplyMinimumWindowSize(g_state.sdl_window);
-  ApplyRestoredWindowPosition();
-  ApplyRestoredWindowMaximization(g_state.sdl_window, presentation);
-  ApplyFullscreenRefreshMode(g_state.sdl_window);
-
-  g_state.software_window = true;
-  fprintf(stderr, "  [window] software SDL waiting window created (%dx%d)\n",
-          width, height);
-  ResolveNativeWindowHandle();
-  fprintf(stderr,
-          "  [window] software fallback waiting hidden; no Roblox frame "
-          "presented yet\n");
-  g_state.initialised = true;
-  fprintf(stderr,
-          "  [window] window initialisation complete (software fallback; "
-          "EGL handles unavailable)\n");
-  return true;
-}
-
 bool RetryWithAutoAngleFallback(int width, int height, const char* title,
                                 const char* failed_step, bool* retried_ok) {
-#ifdef BLOX7_WIN32
   if (g_auto_angle_retry_attempted || WindowsAngleOff() ||
       WindowsAngleForced() || !WindowsAngleBundled()) {
     fprintf(stderr, "  [window] no ANGLE retry (%s)\n",
@@ -1381,33 +908,6 @@ bool RetryWithAutoAngleFallback(int width, int height, const char* title,
           failed_step ? failed_step : "OpenGL ES setup");
   *retried_ok = Init(width, height, title);
   return true;
-#else
-  const bool disable_auto =
-      IsEnabledEnv("BLOX7_DISABLE_AUTO_ANGLE_FALLBACK");
-  const char* backend = GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND");
-  const bool explicit_backend = backend != nullptr &&
-                                !StringEquals(backend, "system") &&
-                                !IsAutoGraphicsBackend(backend);
-  const bool has_angle_pair = HasInstalledAnglePair();
-  if (g_auto_angle_retry_attempted || disable_auto || explicit_backend ||
-      !has_angle_pair) {
-    if (WindowTraceEnabled()) {
-      fprintf(stderr,
-              "  [window] auto ANGLE fallback skipped "
-              "(attempted=%d disable=%d explicit_backend=%d has_angle=%d)\n",
-              g_auto_angle_retry_attempted ? 1 : 0, disable_auto ? 1 : 0,
-              explicit_backend ? 1 : 0, has_angle_pair ? 1 : 0);
-    }
-    return false;
-  }
-  g_auto_angle_retry_attempted = true;
-  fprintf(stderr, "  [window] %s failed; retrying with ANGLE Vulkan backend\n",
-          failed_step ? failed_step : "EGL window setup");
-  SDL_Quit();
-  setenv("BLOX7_GRAPHICS_BACKEND", "angle-vulkan", 1);
-  *retried_ok = Init(width, height, title);
-  return true;
-#endif
 }
 
 Status ConfigureWindowStatePersistence(const std::filesystem::path& path) {
@@ -1422,6 +922,14 @@ Status ConfigureWindowStatePersistence(const std::filesystem::path& path) {
   }
   g_window_state_path = path.lexically_normal();
   return Status::Ok();
+}
+
+static void NoteAngleCannotDraw() {
+  if (!WindowsAngleForced() || g_gpu_lacks_gles3) {
+    return;
+  }
+  g_gpu_lacks_gles3 = true;
+  fprintf(stderr, "  %s\n", graphics::kNoGles3Line);
 }
 
 bool Init(int width, int height, const char* title) {
@@ -1439,10 +947,8 @@ bool Init(int width, int height, const char* title) {
   }
 
   SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
-#ifdef BLOX7_WIN32
   // sdl eats the activation click and skips clipping until that button comes back up
   SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
-#endif
 
   g_state.state_persistence_active =
       !g_window_state_path.empty() && !WindowStatePersistenceSuppressed();
@@ -1518,9 +1024,7 @@ bool Init(int width, int height, const char* title) {
     if (!ShouldShowWindowImmediately()) {
       window_flags |= SDL_WINDOW_HIDDEN;
     }
-#ifdef BLOX7_WIN32
     SDL_SetHint(SDL_HINT_WINDOWS_ERASE_BACKGROUND_MODE, "0");
-#endif
     g_state.sdl_window = SDL_CreateWindow(title ? title : "Roblox",
                                           width, height, window_flags);
     if (g_state.sdl_window == nullptr) {
@@ -1540,42 +1044,8 @@ bool Init(int width, int height, const char* title) {
     if (g_state.native_window == nullptr) {
       g_state.native_window = g_state.sdl_window;
     }
-#ifdef BLOX7_WIN32
     RedrawWholeClientOnResize(g_state.sdl_window);
     ShowWindowAccordingToStartupMode();
-#else
-    if (!SDL_ShowWindow(g_state.sdl_window)) {
-      fprintf(stderr, "  [window] SDL_ShowWindow failed: %s\n", SDL_GetError());
-      SDL_DestroyWindow(g_state.sdl_window);
-      g_state.sdl_window = nullptr;
-      SDL_Quit();
-      g_state.direct_vulkan = false;
-      g_state.initialised = false;
-      return false;
-    }
-    const char* active_video_driver = SDL_GetCurrentVideoDriver();
-    if (DirectVulkanWindowRequiresInitialSync(
-            active_video_driver != nullptr ? active_video_driver : "") &&
-        !SDL_SyncWindow(g_state.sdl_window)) {
-      fprintf(stderr,
-              "  [window] SDL_SyncWindow timed out waiting for the initial "
-              "Wayland configure\n");
-      SDL_DestroyWindow(g_state.sdl_window);
-      g_state.sdl_window = nullptr;
-      SDL_Quit();
-      g_state.direct_vulkan = false;
-      g_state.initialised = false;
-      return false;
-    }
-    int pixel_width = 0;
-    int pixel_height = 0;
-    SDL_GetWindowSizeInPixels(g_state.sdl_window, &pixel_width, &pixel_height);
-    g_state.visible = true;
-    fprintf(stderr,
-            "  [window] direct Vulkan window mapped for WSI configure "
-            "(%dx%d pixels)\n",
-            pixel_width, pixel_height);
-#endif
     fprintf(stderr, "  [window] SDL3 direct Vulkan window created (%dx%d)\n",
             width, height);
     if (!g_present_lifecycle.Activate()) {
@@ -1645,10 +1115,6 @@ bool Init(int width, int height, const char* title) {
             SDL_GetCurrentVideoDriver());
   }
 
-#ifndef BLOX7_WIN32
-  SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");
-#endif
-
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
@@ -1686,11 +1152,9 @@ bool Init(int width, int height, const char* title) {
                                    "SDL_CreateWindow", &retried_ok)) {
       return retried_ok;
     }
-    if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
-      SDL_Quit();
-      return false;
-    }
-    return CreateSoftwareWaitingWindow(width, height, title);
+    NoteAngleCannotDraw();
+    SDL_Quit();
+    return false;
   }
   ApplyWindowIcon(g_state.sdl_window);
   ApplyMinimumWindowSize(g_state.sdl_window);
@@ -1717,11 +1181,9 @@ bool Init(int width, int height, const char* title) {
                                    "SDL_GL_CreateContext", &retried_ok)) {
       return retried_ok;
     }
-    if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
-      SDL_Quit();
-      return false;
-    }
-    return CreateSoftwareWaitingWindow(width, height, title);
+    NoteAngleCannotDraw();
+    SDL_Quit();
+    return false;
   }
 
   if (!SDL_GL_MakeCurrent(g_state.sdl_window, sdl_context)) {
@@ -1735,11 +1197,9 @@ bool Init(int width, int height, const char* title) {
                                    "SDL_GL_MakeCurrent", &retried_ok)) {
       return retried_ok;
     }
-    if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
-      SDL_Quit();
-      return false;
-    }
-    return CreateSoftwareWaitingWindow(width, height, title);
+    NoteAngleCannotDraw();
+    SDL_Quit();
+    return false;
   }
   if (WindowTraceEnabled()) {
     fprintf(stderr, "  [window] SDL_GL_MakeCurrent succeeded (context=%p)\n",
@@ -1747,46 +1207,28 @@ bool Init(int width, int height, const char* title) {
   }
   int context_major = 0;
   int context_minor = 0;
-#ifdef BLOX7_WIN32
   if (LogWindowsGlesProvider()) {
     EnableAngleShaderCache();
   }
   const bool context_version_available =
       ReadWindowsGlesVersion(&context_major, &context_minor);
-#else
-  const bool context_version_available =
-      SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &context_major) &&
-      SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &context_minor);
-#endif
   if (context_version_available) {
     fprintf(stderr, "  [window] OpenGL ES context version=%d.%d\n",
             context_major, context_minor);
   } else {
-#ifdef BLOX7_WIN32
     fprintf(stderr, "  [window] the context is not OpenGL ES\n");
-#else
-    fprintf(stderr, "  [window] OpenGL ES context version unavailable: %s\n",
-            SDL_GetError());
-#endif
   }
-#ifdef BLOX7_WIN32
   const bool roblox_draws_here =
       graphics::RobloxAcceptsGlesVersion(WindowsGlString(0x1F02));
-#else
-  const bool roblox_draws_here =
-      context_version_available && context_major >= 3;
-#endif
   const bool unsupported_version =
       !roblox_draws_here && !IsEnabledEnv("BLOX7_ALLOW_GLES2_RESEARCH");
   bool refuse_context = unsupported_version;
-#ifdef BLOX7_WIN32
   if (!WindowsAngleForced() && StringEquals(WindowsAngleMode(), "retry-test")) {
     fprintf(stderr,
             "  [window] BLOX7_ANGLE=retry-test: refusing the graphics "
             "driver's context\n");
     refuse_context = true;
   }
-#endif
   if (refuse_context) {
     if (unsupported_version) {
       fprintf(stderr,
@@ -1802,25 +1244,16 @@ bool Init(int width, int height, const char* title) {
                                    "OpenGL ES version check", &retried_ok)) {
       return retried_ok;
     }
-    if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
-      SDL_Quit();
-      return false;
-    }
-    return CreateSoftwareWaitingWindow(width, height, title);
+    NoteAngleCannotDraw();
+    SDL_Quit();
+    return false;
   }
 
-#ifdef BLOX7_WIN32
   static int win32_egl_display, win32_egl_config;
   g_state.egl_display = &win32_egl_display;
   g_state.egl_config = &win32_egl_config;
   g_state.egl_surface = static_cast<EGLSurface>(g_state.sdl_window);
   g_state.egl_context = static_cast<EGLContext>(sdl_context);
-#else
-  g_state.egl_display = SDL_EGL_GetCurrentDisplay();
-  g_state.egl_config = SDL_EGL_GetCurrentConfig();
-  g_state.egl_surface = SDL_EGL_GetWindowSurface(g_state.sdl_window);
-  g_state.egl_context = static_cast<EGLContext>(sdl_context);
-#endif
 
   if (!g_state.egl_display || !g_state.egl_surface || !g_state.egl_context) {
     fprintf(stderr,
@@ -1839,11 +1272,8 @@ bool Init(int width, int height, const char* title) {
                                    "SDL_EGL handle query", &retried_ok)) {
       return retried_ok;
     }
-    if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
-      SDL_Quit();
-      return false;
-    }
-    return CreateSoftwareWaitingWindow(width, height, title);
+    SDL_Quit();
+    return false;
   }
   fprintf(stderr, "  [window] EGL context and surface initialized via SDL3\n");
   if (WindowTraceEnabled()) {
@@ -1854,7 +1284,6 @@ bool Init(int width, int height, const char* title) {
         g_state.egl_context);
   }
 
-#ifdef BLOX7_WIN32
   g_state.egl_swap_interval = [](EGLDisplay, EGLint interval) -> EGLBoolean {
     return SetWindowsSwapInterval(interval) ? EGL_TRUE_B : EGL_FALSE_B;
   };
@@ -1863,14 +1292,6 @@ bool Init(int width, int height, const char* title) {
   EGLint max_interval = 1;
   g_state.min_swap_interval = min_interval;
   g_state.max_swap_interval = max_interval;
-#else
-  g_state.egl_swap_interval = reinterpret_cast<PFN_eglSwapInterval>(
-      SDL_EGL_GetProcAddress("eglSwapInterval"));
-  const auto get_config_attrib = reinterpret_cast<PFN_eglGetConfigAttrib>(
-      SDL_EGL_GetProcAddress("eglGetConfigAttrib"));
-  EGLint min_interval = 1;
-  EGLint max_interval = 1;
-#endif
   if (get_config_attrib != nullptr &&
       get_config_attrib(g_state.egl_display, g_state.egl_config,
                         EGL_MIN_SWAP_INTERVAL_VAL, &min_interval) &&
@@ -1890,13 +1311,11 @@ bool Init(int width, int height, const char* title) {
     g_state.egl_surface = nullptr;
     g_state.egl_context = nullptr;
     g_state.egl_swap_interval = nullptr;
-#ifdef BLOX7_WIN32
     bool retried_ok = false;
     if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
                                    "SDL_GL_SetSwapInterval", &retried_ok)) {
       return retried_ok;
     }
-#endif
     SDL_Quit();
     return false;
   }
@@ -1988,7 +1407,6 @@ WindowSurfaceSnapshot GetWindowSurfaceSnapshot() {
   return g_window_surface_lifecycle.Snapshot();
 }
 
-#ifdef BLOX7_WIN32
 // vmware's own interval 1 blocked every other swap, so wait on dwm instead
 struct DesktopCompositorClock {
   int32_t (__attribute__((ms_abi)) * is_composition_enabled)(int32_t*) = nullptr;
@@ -2109,7 +1527,6 @@ extern "C" bool blox7_window_hides_presents() {
          !g_fullscreen_switching.load(std::memory_order_acquire) &&
          PresentWindowHidden();
 }
-#endif
 
 Status RecordResizeReadinessSurfaceCommit(const WindowSurfaceEvent& event) {
   if (g_resize_readiness_gate == nullptr) {
@@ -2230,13 +1647,11 @@ void ShowIfHidden() {
       IsDisabledEnv("BLOX7_SHOW_WINDOW_ON_FIRST_SWAP")) {
     return;
   }
-#ifdef BLOX7_WIN32
   // ShowWindow from another thread can deadlock on this very frame, the pump does it
   if (SDL_GetCurrentThreadID() != g_pump_thread_id.load(std::memory_order_acquire)) {
     g_show_requested.store(true, std::memory_order_release);
     return;
   }
-#endif
   SDL_ShowWindow(g_state.sdl_window);
   SDL_RaiseWindow(g_state.sdl_window);
   g_state.visible = true;
@@ -2331,21 +1746,6 @@ bool SwapBuffers() {
     return false;
   }
 
-#ifndef BLOX7_WIN32
-  if (g_gles_text_overlay == nullptr) {
-    graphics::GlesTextOverlaySource source;
-    source.may_present = reinterpret_cast<decltype(source.may_present)>(
-        dlsym(RTLD_DEFAULT, "blox7_text_overlay_may_present"));
-    source.query = reinterpret_cast<decltype(source.query)>(
-        dlsym(RTLD_DEFAULT, "blox7_text_overlay_query"));
-    source.copy = reinterpret_cast<decltype(source.copy)>(
-        dlsym(RTLD_DEFAULT, "blox7_text_overlay_copy"));
-    g_gles_text_overlay =
-        std::make_unique<graphics::GlesTextOverlayCompositor>(source);
-  }
-  (void)g_gles_text_overlay->Draw(g_state.sdl_window);
-#endif
-
   static const bool stall_log = std::getenv("BLOX7_STALL_LOG") != nullptr;
   const uint64_t stall_start_ns = stall_log ? SDL_GetTicksNS() : 0;
   if (!SDL_GL_SwapWindow(g_state.sdl_window)) {
@@ -2354,9 +1754,7 @@ bool SwapBuffers() {
     return false;
   }
   const uint64_t stall_swap_ns = stall_log ? SDL_GetTicksNS() : 0;
-#ifdef BLOX7_WIN32
   WaitForCompositor();
-#endif
   if (stall_log) {
     static uint64_t last_ns = 0;
     const uint64_t now_ns = SDL_GetTicksNS();
@@ -2878,12 +2276,10 @@ static void NotifyPointerWarp() {
 }
 
 bool PumpEvents() {
-#ifdef BLOX7_WIN32
   g_pump_thread_id.store(SDL_GetCurrentThreadID(), std::memory_order_release);
   if (g_show_requested.exchange(false, std::memory_order_acq_rel)) {
     ShowIfHidden();
   }
-#endif
   MaybeSynchronizeRestoredFullscreenState();
   MaybeApplyRobloxFullscreenMenuRequest();
   MaybeApplyAndroidFullscreenRequest();
@@ -2915,9 +2311,7 @@ bool PumpEvents() {
 
   SDL_Event event;
   bool pump_os_events = true;
-#ifdef BLOX7_WIN32
   pump_os_events = !g_in_live_resize_tick;
-#endif
   if (pump_os_events) {
     SDL_PumpEvents();
   }
@@ -3112,9 +2506,7 @@ bool PumpEvents() {
   }
   flush_motion();
   EmitSmoothWheel();
-#ifdef BLOX7_WIN32
   UpdateWindowTextLayer();
-#endif
   MaybePersistWindowState();
   MaybeRecoverVulkanSurface();
   MaybeReportVulkanPresentStall();
@@ -3136,9 +2528,7 @@ bool PumpEvents() {
       }
     }
   }
-#ifdef BLOX7_WIN32
   PublishPresentWindow();
-#endif
   return !g_state.quit_requested;
 }
 
@@ -3158,11 +2548,7 @@ uint64_t PaceInputPump() {
   const uint64_t delay_ns =
       g_input_pump_pacer.DelayBeforeNextPump(SDL_GetTicksNS());
   if (delay_ns != 0) {
-#ifdef BLOX7_WIN32
     SDL_WaitEventTimeout(nullptr, static_cast<Sint32>((delay_ns + 999999) / 1000000));
-#else
-    SDL_DelayPrecise(delay_ns);
-#endif
   }
   return delay_ns;
 }
@@ -3202,10 +2588,8 @@ void Shutdown() {
   g_text_input_owner.reset();
   g_text_input_backend.reset();
   g_gles_text_overlay.reset();
-#ifdef BLOX7_WIN32
   ::blox7::win32::DestroyTextLayer();
   g_present_window.store(nullptr, std::memory_order_release);
-#endif
   if (!g_state.direct_vulkan && g_state.egl_context != nullptr) {
     SDL_GL_MakeCurrent(g_state.sdl_window, nullptr);
   }
@@ -3223,7 +2607,6 @@ void Shutdown() {
   g_state.egl_swap_interval = nullptr;
   g_state.min_swap_interval = 1;
   g_state.max_swap_interval = 1;
-  g_state.software_window = false;
   g_state.direct_vulkan = false;
   g_state.display_refresh = {};
   g_state.input_test_sequence_queued = false;

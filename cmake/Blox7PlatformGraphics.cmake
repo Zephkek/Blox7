@@ -87,8 +87,6 @@ target_compile_definitions(blox7_platform_sdl PRIVATE
 add_library(Blox7::PlatformSdl ALIAS blox7_platform_sdl)
 
 add_library(blox7_graphics_foundation STATIC
-  ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/graphics_backend.cc
-  ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/angle_probe.cc
   ${BLOX7_PLATFORM_GRAPHICS_ROOT}/src/graphics/bionic_egl_bridge.cc
 )
 target_include_directories(blox7_graphics_foundation

@@ -41,10 +41,8 @@ MediaFormat AvcOutputFormat(const AvcSettings& settings,
                             const std::vector<std::uint8_t>& sps,
                             const std::vector<std::uint8_t>& pps);
 
-#if defined(BLOX7_WIN32)
 std::unique_ptr<VideoEncoder> CreateHardwareAvcEncoder(
     const AvcSettings& settings);
-#endif
 
 }  // namespace blox7::media
 

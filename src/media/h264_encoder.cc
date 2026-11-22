@@ -122,7 +122,6 @@ std::unique_ptr<VideoEncoder> CreateAvcEncoder(const MediaFormat& format) {
   if (!ReadAvcSettings(format, &settings)) {
     return nullptr;
   }
-#if defined(BLOX7_WIN32)
   const char* choice = std::getenv("BLOX7_VIDEO_ENCODER");
   if (choice == nullptr || std::strcmp(choice, "software") != 0) {
     if (std::unique_ptr<VideoEncoder> hardware =
@@ -130,7 +129,6 @@ std::unique_ptr<VideoEncoder> CreateAvcEncoder(const MediaFormat& format) {
       return hardware;
     }
   }
-#endif
   return H264Encoder::Create(settings);
 }
 

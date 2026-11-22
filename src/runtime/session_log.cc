@@ -275,18 +275,6 @@ void CopySessionStreams(int stdout_reader, int stderr_reader,
   close(original_stderr);
 }
 
-#ifndef BLOX7_WIN32
-void RunTeeProcess(int stdout_reader, int stderr_reader, int log_descriptor,
-                   int original_stdout, int original_stderr) {
-  (void)signal(SIGPIPE, SIG_IGN);
-  (void)signal(SIGINT, SIG_IGN);
-  (void)signal(SIGTERM, SIG_IGN);
-  (void)signal(SIGHUP, SIG_IGN);
-  CopySessionStreams(stdout_reader, stderr_reader, log_descriptor,
-                     original_stdout, original_stderr);
-}
-#endif
-
 std::filesystem::path ExecutablePath() {
   std::array<char, 4097> path{};
   const ssize_t size = readlink("/proc/self/exe", path.data(), path.size() - 1);
@@ -650,7 +638,6 @@ SessionLog SessionLog::Start(const Environment& environment,
     return result;
   }
 
-#ifdef BLOX7_WIN32
   // no fork on windows so the tee is a thread
   const int tee_stdout = fcntl(result.original_stdout_, F_DUPFD_CLOEXEC, 3);
   const int tee_stderr = fcntl(result.original_stderr_, F_DUPFD_CLOEXEC, 3);
@@ -675,35 +662,6 @@ SessionLog SessionLog::Start(const Environment& environment,
     (void)unlink(result.path_.c_str());
     return result;
   }
-#else
-  const pid_t child = fork();
-  if (child < 0) {
-    result.error_ =
-        "cannot start session log writer: " + std::string(std::strerror(errno));
-    close(stdout_pipe[0]);
-    close(stdout_pipe[1]);
-    close(stderr_pipe[0]);
-    close(stderr_pipe[1]);
-    close(result.original_stdout_);
-    close(result.original_stderr_);
-    result.original_stdout_ = -1;
-    result.original_stderr_ = -1;
-    close(log_descriptor);
-    (void)unlink(result.path_.c_str());
-    return result;
-  }
-  if (child == 0) {
-    close(stdout_pipe[1]);
-    close(stderr_pipe[1]);
-    RunTeeProcess(stdout_pipe[0], stderr_pipe[0], log_descriptor,
-                  result.original_stdout_, result.original_stderr_);
-    _exit(0);
-  }
-
-  close(stdout_pipe[0]);
-  close(stderr_pipe[0]);
-  close(log_descriptor);
-#endif
   int redirect_error = 0;
   const bool stdout_redirected =
       dup2(stdout_pipe[1], STDOUT_FILENO) == STDOUT_FILENO;
@@ -724,12 +682,7 @@ SessionLog SessionLog::Start(const Environment& environment,
     close(result.original_stderr_);
     result.original_stdout_ = -1;
     result.original_stderr_ = -1;
-#ifdef BLOX7_WIN32
     result.logger_thread_.join();
-#else
-    while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {
-    }
-#endif
     result.error_ = "cannot activate session log streams: " +
                     std::string(std::strerror(redirect_error));
     (void)unlink(result.path_.c_str());
@@ -737,9 +690,6 @@ SessionLog SessionLog::Start(const Environment& environment,
   }
   (void)setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
 
-#ifndef BLOX7_WIN32
-  result.logger_process_ = static_cast<int>(child);
-#endif
   result.active_ = true;
   (void)UpdateLatestLink(paths.logs_root(), result.path_, &result.warning_);
   return result;
@@ -801,13 +751,7 @@ void SessionLog::Stop() {
   close(original_stderr_);
   original_stdout_ = -1;
   original_stderr_ = -1;
-#ifdef BLOX7_WIN32
   if (logger_thread_.joinable()) logger_thread_.join();
-#else
-  const pid_t child = static_cast<pid_t>(logger_process_);
-  while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {
-  }
-#endif
   logger_process_ = -1;
   active_ = false;
 }

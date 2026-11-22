@@ -167,7 +167,6 @@ using NoteSurfaceOutOfDateFn = void (*)();
 using WindowHoldsPresentsFn = bool (*)();
 using WindowDimensionFn = int (*)();
 
-#if defined(BLOX7_WIN32)
 constexpr char kFullScreenExclusiveExtension[] = "VK_EXT_full_screen_exclusive";
 constexpr std::int32_t kFullScreenExclusiveDisallowed = 2;
 
@@ -178,7 +177,6 @@ struct SurfaceFullScreenExclusiveInfo {
 };
 static_assert(sizeof(SurfaceFullScreenExclusiveInfo) == 24,
               "VkSurfaceFullScreenExclusiveInfoEXT");
-#endif
 
 struct AdapterState {
   struct DeviceDispatch {
@@ -897,7 +895,6 @@ std::vector<VkExtensionProperties> AndroidVisibleExtensions(
   return output;
 }
 
-#if defined(BLOX7_WIN32)
 bool ListsExtension(const std::vector<VkExtensionProperties>& extensions,
                     const char* name) {
   return std::any_of(extensions.begin(), extensions.end(),
@@ -925,7 +922,6 @@ bool HostDeviceExtension(VkInstance instance, VkPhysicalDevice physical_device,
   extensions.resize(count);
   return ListsExtension(extensions, name);
 }
-#endif
 
 PFN_vkVoidFunction AdapterProc(const char* name) {
   if (name == nullptr) {
@@ -1678,7 +1674,6 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
     return VK_ERROR_EXTENSION_NOT_PRESENT;
   }
   bool surface_capabilities2 = false;
-#if defined(BLOX7_WIN32)
   VkResult listed = VK_SUCCESS;
   surface_capabilities2 =
       ListsExtension(AndroidVisibleExtensions(nullptr, &listed),
@@ -1689,7 +1684,6 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
           translated.end()) {
     translated.emplace_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
   }
-#endif
   std::vector<const char*> translated_names;
   translated_names.reserve(translated.size());
   for (const std::string& extension : translated) {
@@ -2004,7 +1998,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
 
   VkDeviceCreateInfo host_info = *create_info;
   bool full_screen_exclusive = false;
-#if defined(BLOX7_WIN32)
   bool surface_capabilities2 = false;
   {
     AdapterState& state = State();
@@ -2028,7 +2021,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     host_info.ppEnabledExtensionNames = host_extensions.data();
     full_screen_exclusive = true;
   }
-#endif
   std::uint32_t queue_family_count = 0;
   const auto host_get_queue_families =
       reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
@@ -2231,11 +2223,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     break;
   }
 
-#if defined(BLOX7_WIN32)
   const bool compositor_ready = true;
-#else
-  const bool compositor_ready = enabled.placebo_required;
-#endif
   const bool registered =
       compositor_ready && graphics_family != UINT32_MAX &&
       State().text_overlay.RegisterDevice(
@@ -2440,7 +2428,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
       }
     }
   }
-#if defined(BLOX7_WIN32)
   // the post pass copies the frame out of the swapchain image first
   if (const char* post_fx = std::getenv("BLOX7_POST_FX");
       post_fx != nullptr && post_fx[0] != '\0') {
@@ -2475,7 +2462,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
                    "disallowed\n");
     }
   }
-#endif
   VkSwapchainKHR chained = VK_NULL_HANDLE;
   {
     AdapterState& state = State();

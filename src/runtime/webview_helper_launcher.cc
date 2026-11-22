@@ -36,12 +36,10 @@
 
 extern char **environ;
 
-#ifdef BLOX7_WIN32
 extern "C" int __w32_win32_path(const char* path, char* out, size_t capacity);
 extern "C" void* blox7_native_window();
-#endif
 
-#if defined(BLOX7_WIN32) && __ANDROID_API__ < 30
+#if __ANDROID_API__ < 30
 extern "C" int memfd_create(const char* name, unsigned flags);
 #ifndef MFD_CLOEXEC
 #define MFD_CLOEXEC 1U
@@ -1016,7 +1014,6 @@ bool WebViewHelperProcess::RequestClose() const {
   return kill(current_child, SIGTERM) == 0 || errno == ESRCH;
 }
 
-#ifdef BLOX7_WIN32
 namespace {
 
 struct WindowsHelperStart {
@@ -1178,7 +1175,6 @@ WindowsHelperStart StartWindowsWebViewHelper(const std::filesystem::path& helper
 }
 
 }  // namespace
-#endif
 
 WebViewHelperLaunchResult LaunchWebViewHelper(
     const std::filesystem::path& helper, std::string_view url,
@@ -1189,7 +1185,6 @@ WebViewHelperLaunchResult LaunchWebViewHelper(
   if (!NormalizeWebViewUrl(url, &normalized_url, &result.error)) {
     return result;
   }
-#ifdef BLOX7_WIN32
   {
     WindowsHelperStart started = StartWindowsWebViewHelper(helper, std::move(exit_observer));
     if (!started.error.empty()) {
@@ -1206,7 +1201,6 @@ WebViewHelperLaunchResult LaunchWebViewHelper(
     }
     return result;
   }
-#endif
   if (HostIsFreeBsd()) {
     const int descriptor = ConnectToFreeBsdHost();
     if (descriptor < 0) {

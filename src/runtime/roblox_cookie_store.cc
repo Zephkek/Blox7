@@ -23,10 +23,8 @@
 
 extern char** environ;
 
-#ifdef BLOX7_WIN32
 extern "C" int __w32_protect(const void* in, size_t size, void** out, size_t* out_size);
 extern "C" int __w32_unprotect(const void* in, size_t size, void** out, size_t* out_size);
-#endif
 
 #ifndef BLOX7_INSTALL_LIBDIR
 #define BLOX7_INSTALL_LIBDIR "lib"
@@ -60,7 +58,6 @@ class DisabledSecretStore final : public NotifyingSecretStore {
   StoredCookie Load(const std::filesystem::path&) override { return {}; }
 };
 
-#ifdef BLOX7_WIN32
 // no keyring on windows, dpapi ties the cookie to the windows account instead
 class DpapiSecretStore final : public NotifyingSecretStore {
  public:
@@ -144,7 +141,6 @@ class DpapiSecretStore final : public NotifyingSecretStore {
     return false;
   }
 };
-#endif
 
 std::filesystem::path CookieHelper() {
   std::error_code error;
@@ -350,10 +346,8 @@ std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore() {
 
 std::shared_ptr<RobloxSecretStore> OpenRobloxSecretStore(
     const Environment& environment) {
-#ifdef BLOX7_WIN32
   (void)environment;
   return std::make_shared<DpapiSecretStore>();
-#endif
   const auto paths = RuntimePaths::FromEnvironment(environment);
   const auto loaded = LoadRuntimeConfig(environment, paths.config_file());
   if (loaded && loaded.config.use_libsecret())

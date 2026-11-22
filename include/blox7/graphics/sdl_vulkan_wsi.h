@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "blox7/graphics/graphics_backend.h"
 #include "blox7/platform/platform_runtime.h"
 #include "blox7/status.h"
 
@@ -34,7 +33,6 @@ class SdlVulkanWsi final {
   }
 
   SDL_FunctionPointer GetInstanceProcAddress() const;
-  BackendCapability DescribeCapability() const;
   Status CreateSurface(VkInstance instance,
                        const VkAllocationCallbacks* allocator,
                        VkSurfaceKHR* surface) const;

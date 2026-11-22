@@ -11,9 +11,7 @@
 #include <cstdlib>
 #include <thread>
 
-#ifdef BLOX7_WIN32
 extern "C" int pthread_tryjoin_np(pthread_t thread, void** result);
-#endif
 
 namespace blox7 {
 namespace runtime {
@@ -104,11 +102,7 @@ OwnedPthreadCancelResult OwnedPthread::CancelAndJoinFor(int timeout_ms,
     result.wait = {OwnedPthreadWaitStatus::kPlatformError, EINVAL};
     return result;
   }
-#ifdef BLOX7_WIN32
   result.cancel_error = ENOSYS;
-#else
-  result.cancel_error = pthread_cancel(thread_);
-#endif
   result.wait = WaitFor(timeout_ms, poll_interval_ms, pump, pump_context);
   return result;
 }

@@ -227,6 +227,7 @@ struct App {
   bool vulkan_driver = true;
   std::vector<std::wstring> error_lines;
   std::wstring wrong_date;
+  bool gpu_too_old = false;
   DWORD exit_code = 0;
   bool details = false;
   float clock = 0;
@@ -923,6 +924,7 @@ std::wstring status_line() {
     case Stage::Running: return g.detail.empty() ? L"Close Roblox to come back here." : g.detail;
     case Stage::Failed:
       if (!g.wrong_date.empty()) return L"Windows says it's " + g.wrong_date + L". Set the right date and try again.";
+      if (g.gpu_too_old) return L"Update the graphics driver, Roblox needs a DirectX 10 card or newer.";
       if (g.backend != L"Vulkan") std::swprintf(line, 160, L"It exited with code %lu.", g.exit_code);
       else std::swprintf(line, 160, L"It exited with code %lu. Try OpenGL ES in Settings if it keeps happening.", g.exit_code);
       return line;
@@ -2032,6 +2034,7 @@ bool child_has_window() {
 void launch() {
   if (!can_play()) return;
   g.wrong_date.clear();
+  g.gpu_too_old = false;
   if (!runtime_ready(g.paths)) {
     start_unpack();
     return;
@@ -2105,8 +2108,13 @@ void watch_child() {
     if (!g.window_seen && code != 0) {
       g.stage = Stage::Failed;
       FILETIME written{};
-      g.error_lines = log_tail(g.paths, 10, &written);
-      g.wrong_date = wrong_clock_date(CompareFileTime(&written, &g.launched) >= 0 ? g.error_lines : std::vector<std::wstring>());
+      const std::vector<std::wstring> log = session_log_lines(g.paths, &written);
+      const bool fresh = CompareFileTime(&written, &g.launched) >= 0;
+      g.error_lines.assign(log.end() - static_cast<long>(std::min<size_t>(10, log.size())), log.end());
+      g.wrong_date = wrong_clock_date(fresh ? g.error_lines : std::vector<std::wstring>());
+      g.gpu_too_old = fresh && std::any_of(log.begin(), log.end(), [](const std::wstring& line) {
+        return line.find(L"no OpenGL ES 3.0 from the graphics driver or from ANGLE") != std::wstring::npos;
+      });
     } else {
       g.stage = Stage::Ready;
       g.detail = g.window_seen ? L"Roblox closed. See you next time." : L"Roblox closed before it opened a window.";
@@ -2602,7 +2610,8 @@ int render_ui(const std::wstring& dir) {
                {L"main-launching", Stage::Launching, false, 0},
                {L"main-running", Stage::Running, false, 0},
                {L"main-failed", Stage::Failed, true, kDetailsButton},
-               {L"main-clock", Stage::Failed, false, 0}};
+               {L"main-clock", Stage::Failed, false, 0},
+               {L"main-old-gpu", Stage::Failed, false, 0}};
   struct DialogShot {
     const wchar_t* name;
     Tab tab;
@@ -2628,6 +2637,7 @@ int render_ui(const std::wstring& dir) {
       g.clock = 0.9f;
       g.exit_code = 1;
       g.wrong_date = wcscmp(shot.name, L"main-clock") == 0 ? L"1 January 2018" : L"";
+      g.gpu_too_old = wcscmp(shot.name, L"main-old-gpu") == 0;
       g.detail = shot.stage == Stage::Launching ? L"Checking for a newer Roblox..." : L"";
       g.main.springs.clear();
       g.main.hot = shot.hot;
