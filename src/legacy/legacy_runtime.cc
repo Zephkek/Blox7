@@ -4722,10 +4722,16 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
     window_initialised = blox7::window::Init(win_w, win_h, win_title);
     if (!window_initialised) {
       if (IsEnabled("BLOX7_SOBER_MODE")) {
+#ifdef BLOX7_WIN32
+        std::cerr << "  [window] FATAL: the game window could not be "
+                  << "created; the [window] lines above say why.\n"
+                  << std::flush;
+#else
         std::cerr << "  [window] FATAL: Sober-style startup requires a "
                   << "working SDL video device. Check DISPLAY/WAYLAND_DISPLAY "
                   << "and SDL3.\n"
                   << std::flush;
+#endif
         return EXIT_FAILURE;
       }
       std::cerr

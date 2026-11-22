@@ -56,6 +56,23 @@ PARTS = [
      [f'{SRC}/sdl3-win/LICENSE.txt']),
     ('SDL3_ttf', 'https://github.com/libsdl-org/SDL_ttf', 'Text rendering (SDL3_ttf.dll).',
      [f'{SRC}/sdl3ttf-win/LICENSE.txt']),
+    ('ANGLE', 'https://chromium.googlesource.com/angle/angle', 'OpenGL ES on Direct3D 11 (libEGL.dll and '
+     'libGLESv2.dll), used when the graphics driver can\'t give OpenGL ES 3.0 itself. Built from the Chromium 109 '
+     'branch with only the Direct3D 11 backend, plus changes to how it maps and updates buffers. libGLESv2.dll '
+     'also contains LLVM libc++ (license above) and the parts listed after this one.', [f'{SRC}/angle-win/LICENSE']),
+    ('Chromium base and zlib', 'https://chromium.googlesource.com/chromium/src',
+     'Chromium\'s SHA-1 code and its zlib changes, inside libGLESv2.dll.', [f'{SRC}/angle-win/LICENSE.chromium']),
+    ('zlib (in ANGLE)', 'https://chromium.googlesource.com/chromium/src/third_party/zlib',
+     'Compression inside libGLESv2.dll, the zlib 1.2.12 copy Chromium keeps.', [f'{SRC}/angle-win/LICENSE.zlib']),
+    ('Abseil', 'https://abseil.io', 'C++ support code inside libGLESv2.dll.', [f'{SRC}/angle-win/LICENSE.abseil-cpp']),
+    ('astc-encoder', 'https://github.com/ARM-software/astc-encoder', 'ASTC texture decoding inside libGLESv2.dll.',
+     [f'{SRC}/angle-win/LICENSE.astc-encoder']),
+    ('xxHash', 'https://github.com/Cyan4973/xxHash', 'Hashing inside libGLESv2.dll.', [f'{SRC}/angle-win/LICENSE.xxhash']),
+    ('SMHasher', 'https://github.com/aappleby/smhasher', 'MurmurHash inside libGLESv2.dll, which is in the public '
+     'domain.', [f'{SRC}/angle-win/LICENSE.smhasher']),
+    ('Direct3D shader compiler', 'https://learn.microsoft.com/windows/win32/directx-sdk--august-2009-',
+     'd3dcompiler_47.dll from the Windows SDK, which ANGLE uses to compile shaders. Microsoft lets apps ship it '
+     'next to themselves, under the Windows SDK license terms.', []),
     ('Microsoft WebView2 SDK', 'https://developer.microsoft.com/microsoft-edge/webview2/',
      'WebView2Loader.dll, which starts the web view Roblox\'s sign-in pages run in.',
      [f'{SRC}/webview2-sdk/pkg/LICENSE.txt', f'{SRC}/webview2-sdk/pkg/NOTICE.txt']),

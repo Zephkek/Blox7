@@ -464,12 +464,16 @@ void gles_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, G
            start);
 }
 
-static int g_window_srgb;
+static int g_window_srgb, g_window_checked;
+
+void gles_window_reset(void) {
+  g_window_checked = 0;
+  g_window_srgb = 0;
+}
 
 void gles_window_current(void) {
-  static int checked;
-  if (checked) return;
-  checked = 1;
+  if (g_window_checked) return;
+  g_window_checked = 1;
   GLint encoding = GL_LINEAR, count = 0;
   int control = 0;
   glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK, GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, &encoding);

@@ -41,6 +41,8 @@ for name in ('libSDL3.so', 'libSDL3_ttf.so', 'libGLESv2.so.2'):
     put(os.path.join(OUT, name), BIN, strip=True)
 put(os.path.join(deps.SRC, 'sdl3-win', 'SDL3.dll'), BIN)
 put(os.path.join(deps.SRC, 'sdl3ttf-win', 'SDL3_ttf.dll'), BIN)
+for name in ('libEGL.dll', 'libGLESv2.dll', 'd3dcompiler_47.dll'):
+    put(os.path.join(deps.SRC, 'angle-win', name), BIN)
 for name in ('libEGL.so', 'libGLESv2.so', 'libOpenMAXAL.so', 'libOpenSLES.so', 'libandroid.so', 'liblog.so',
              'libmediandk.so', 'libblox7_audio_sdl.so', 'libvulkan.so'):
     if os.path.exists(os.path.join(MB, name)):

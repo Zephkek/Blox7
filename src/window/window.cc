@@ -26,6 +26,7 @@
 #include "blox7/platform/sdl_application_metadata.h"
 #include "blox7/platform/sdl_event_converter.h"
 #include "blox7/platform/sdl_window_icon.h"
+#include "runtime/runtime_paths.h"
 #include "window/input_pump_pacer.h"
 #include "window/main_thread_command_gate.h"
 #include "window/roblox_fullscreen_menu_request_gate.h"
@@ -47,6 +48,8 @@ void DestroyTextLayer();
 }  // namespace blox7::win32
 extern "C" void* __w32_pe_open(const char* utf8_path);
 extern "C" void* __w32_pe_symbol(void* module, const char* name);
+extern "C" const char* __w32_exe_dir(void);
+extern "C" int blox7_angle_blob_cache(const char* dir);
 #endif
 
 namespace blox7 {
@@ -87,6 +90,16 @@ static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE_VAL =
     0x3487;
 static constexpr EGLint EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE_VAL =
     0x348F;
+#ifdef BLOX7_WIN32
+static constexpr EGLint EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE_VAL = 0x3204;
+static constexpr EGLint EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE_VAL = 0x3205;
+static constexpr EGLint EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE_VAL = 0x3208;
+static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE_VAL =
+    0x320B;
+static constexpr EGLint EGL_FEATURE_OVERRIDES_ENABLED_ANGLE_VAL = 0x3466;
+static constexpr EGLint EGL_EXPERIMENTAL_PRESENT_PATH_ANGLE_VAL = 0x33A4;
+static constexpr EGLint EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE_VAL = 0x33A9;
+#endif
 static constexpr EGLint EGL_PLATFORM_X11_EXT_VAL = 0x31D5;
 static constexpr EGLint EGL_PLATFORM_WAYLAND_EXT_VAL = 0x31D8;
 static constexpr EGLint EGL_TRUE_VAL = 1;
@@ -528,6 +541,197 @@ bool ShouldUseAngleSwiftShader() {
                       "angle-swiftshader");
 }
 
+#ifdef BLOX7_WIN32
+const char* WindowsAngleMode() {
+  const char* mode = GetEnvNonEmpty("BLOX7_ANGLE");
+  return mode != nullptr ? mode : "auto";
+}
+
+bool WindowsAngleOff() { return StringEquals(WindowsAngleMode(), "off"); }
+
+bool WindowsAngleWarp() { return StringEquals(WindowsAngleMode(), "warp"); }
+
+bool WindowsAngleForced() {
+  return g_auto_angle_retry_attempted ||
+         StringEquals(WindowsAngleMode(), "on") || WindowsAngleWarp();
+}
+
+std::string WindowsBinFile(const char* name) {
+  const char* dir = __w32_exe_dir();
+  return std::string(dir != nullptr ? dir : "") + name;
+}
+
+bool WindowsAngleBundled() {
+  static const bool bundled = [] {
+    char exe[4097] = {};
+    const ssize_t length = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (length <= 0 || static_cast<std::size_t>(length) >= sizeof exe - 1) {
+      return false;
+    }
+    const std::filesystem::path bin =
+        std::filesystem::path(std::string(exe, static_cast<std::size_t>(length)))
+            .parent_path();
+    for (const char* name : {"libEGL.dll", "libGLESv2.dll", "d3dcompiler_47.dll"}) {
+      if (!FileExists((bin / name).string().c_str())) {
+        return false;
+      }
+    }
+    return true;
+  }();
+  return bundled;
+}
+
+bool WindowsAngleReady() {
+  static const bool ready = [] {
+    if (!WindowsAngleBundled()) {
+      return false;
+    }
+    for (const char* name : {"d3dcompiler_47.dll", "libGLESv2.dll", "libEGL.dll"}) {
+      const std::string path = WindowsBinFile(name);
+      if (__w32_pe_open(path.c_str()) == nullptr) {
+        fprintf(stderr, "  [window] cannot load %s\n", path.c_str());
+        return false;
+      }
+    }
+    return true;
+  }();
+  return ready;
+}
+
+struct D3DFeatureLevel {
+  const char* name;
+  int major;
+  int minor;
+};
+
+bool ParseD3DFeatureLevel(const char* text, int* major, int* minor) {
+  static constexpr D3DFeatureLevel kLevels[] = {
+      {"9_3", 9, 3}, {"10_0", 10, 0}, {"10_1", 10, 1}, {"11_0", 11, 0},
+      {"11_1", 11, 1}};
+  if (text == nullptr) {
+    return false;
+  }
+  for (const D3DFeatureLevel& level : kLevels) {
+    if (StringEquals(text, level.name)) {
+      *major = level.major;
+      *minor = level.minor;
+      return true;
+    }
+  }
+  return false;
+}
+
+void WarnAboutUnknownWindowsAngleSettings() {
+  static bool checked = false;
+  if (checked) {
+    return;
+  }
+  checked = true;
+  const char* mode = GetEnvNonEmpty("BLOX7_ANGLE");
+  if (mode != nullptr && !StringEquals(mode, "auto") &&
+      !StringEquals(mode, "on") && !StringEquals(mode, "off") &&
+      !StringEquals(mode, "warp") && !StringEquals(mode, "retry-test")) {
+    fprintf(stderr,
+            "  [window] BLOX7_ANGLE=%s is not auto, on, warp or off; using "
+            "auto\n",
+            mode);
+  }
+  const char* level = GetEnvNonEmpty("BLOX7_ANGLE_FEATURE_LEVEL");
+  int major = 0;
+  int minor = 0;
+  if (level != nullptr && !ParseD3DFeatureLevel(level, &major, &minor)) {
+    fprintf(stderr,
+            "  [window] BLOX7_ANGLE_FEATURE_LEVEL=%s is not 9_3, 10_0, 10_1, "
+            "11_0 or 11_1; ignored\n",
+            level);
+  }
+}
+
+const char* kAngleD3D11Features[] = {"allowES3OnFL10_0", nullptr};
+
+SDL_EGLAttrib* SDLCALL AngleD3D11PlatformAttributes(void*) {
+  SDL_EGLAttrib* attrs =
+      static_cast<SDL_EGLAttrib*>(SDL_malloc(sizeof(SDL_EGLAttrib) * 13));
+  if (attrs == nullptr) {
+    return nullptr;
+  }
+  int i = 0;
+  if (!StringEquals(GetEnvNonEmpty("BLOX7_ANGLE_PRESENT"), "copy")) {
+    attrs[i++] = EGL_EXPERIMENTAL_PRESENT_PATH_ANGLE_VAL;
+    attrs[i++] = EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE_VAL;
+  }
+  attrs[i++] = EGL_PLATFORM_ANGLE_TYPE_ANGLE_VAL;
+  attrs[i++] = EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE_VAL;
+  attrs[i++] = EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE_VAL;
+  attrs[i++] = WindowsAngleWarp()
+                   ? EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE_VAL
+                   : EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE_VAL;
+  attrs[i++] = EGL_FEATURE_OVERRIDES_ENABLED_ANGLE_VAL;
+  attrs[i++] = reinterpret_cast<SDL_EGLAttrib>(kAngleD3D11Features);
+  int major = 0;
+  int minor = 0;
+  if (ParseD3DFeatureLevel(GetEnvNonEmpty("BLOX7_ANGLE_FEATURE_LEVEL"), &major,
+                           &minor)) {
+    attrs[i++] = EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE_VAL;
+    attrs[i++] = major;
+    attrs[i++] = EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE_VAL;
+    attrs[i++] = minor;
+  }
+  attrs[i++] = EGL_NONE_VAL;
+  return attrs;
+}
+
+const char* WindowsGlString(unsigned int name) {
+  using GetString = const unsigned char* (*)(unsigned int);
+  const auto get_string =
+      reinterpret_cast<GetString>(SDL_GL_GetProcAddress("glGetString"));
+  return get_string != nullptr
+             ? reinterpret_cast<const char*>(get_string(name))
+             : nullptr;
+}
+
+bool ReadWindowsGlesVersion(int* major, int* minor) {
+  const char* version = WindowsGlString(0x1F02);
+  int parsed_major = 0;
+  int parsed_minor = 0;
+  if (version == nullptr ||
+      std::sscanf(version, "OpenGL ES %d.%d", &parsed_major, &parsed_minor) !=
+          2) {
+    return false;
+  }
+  *major = parsed_major;
+  *minor = parsed_minor;
+  return true;
+}
+
+bool LogWindowsGlesProvider() {
+  const char* renderer = WindowsGlString(0x1F01);
+  const char* version = WindowsGlString(0x1F02);
+  const bool angle =
+      renderer != nullptr && std::strstr(renderer, "ANGLE") != nullptr;
+  fprintf(stderr, "  [window] OpenGL ES from %s: %s, %s\n",
+          angle ? "ANGLE" : "the graphics driver",
+          renderer != nullptr ? renderer : "(no renderer string)",
+          version != nullptr ? version : "(no version string)");
+  return angle;
+}
+
+void EnableAngleShaderCache() {
+  if (IsDisabledEnv("BLOX7_ANGLE_SHADER_CACHE")) {
+    return;
+  }
+  const blox7::runtime::ProcessEnvironment environment;
+  const std::string dir =
+      (blox7::runtime::RuntimePaths::FromEnvironment(environment).cache_root() /
+       "angle")
+          .string();
+  if (blox7_angle_blob_cache(dir.c_str())) {
+    fprintf(stderr, "  [window] ANGLE keeps compiled shaders in %s\n",
+            dir.c_str());
+  }
+}
+#endif
+
 bool HasWaylandSession() {
   return GetEnvNonEmpty("WAYLAND_DISPLAY") != nullptr &&
          GetEnvNonEmpty("XDG_RUNTIME_DIR") != nullptr;
@@ -719,6 +923,39 @@ SDL_EGLAttrib* SDLCALL AnglePlatformAttributes(void*) {
 bool ConfigureGraphicsBackendBeforeSDL() {
   SanitizeSdlVideoDriverOverrides();
 
+#ifdef BLOX7_WIN32
+  WarnAboutUnknownWindowsAngleSettings();
+  if (WindowsAngleForced()) {
+    if (!WindowsAngleReady()) {
+      if (g_auto_angle_retry_attempted) {
+        SDL_SetError("ANGLE could not be loaded from the runtime's bin folder");
+      } else {
+        SDL_SetError(
+            "BLOX7_ANGLE=%s needs libEGL.dll, libGLESv2.dll and "
+            "d3dcompiler_47.dll in the runtime's bin folder",
+            WindowsAngleMode());
+      }
+      fprintf(stderr, "  [window] %s\n", SDL_GetError());
+      return false;
+    }
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_FORCE_EGL, "1", SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_OPENGL_ES_DRIVER, "1", SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_OPENGL_LIBRARY,
+                            WindowsBinFile("libGLESv2.dll").c_str(),
+                            SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_EGL_LIBRARY,
+                            WindowsBinFile("libEGL.dll").c_str(),
+                            SDL_HINT_OVERRIDE);
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_WIN_D3DCOMPILER,
+                            WindowsBinFile("d3dcompiler_47.dll").c_str(),
+                            SDL_HINT_OVERRIDE);
+  }
+  if (!WindowsAngleOff() && WindowsAngleBundled()) {
+    SDL_SetHintWithPriority(SDL_HINT_VIDEO_EGL_ALLOW_GETDISPLAY_FALLBACK, "0",
+                            SDL_HINT_OVERRIDE);
+  }
+#endif
+
 #ifndef BLOX7_WIN32
   SDL_SetHint(SDL_HINT_VIDEO_FORCE_EGL, "1");
 #endif
@@ -842,6 +1079,28 @@ void EnableEglErrorLogging() {
 }
 
 bool ConfigureGraphicsBackendAfterSDLInit() {
+#ifdef BLOX7_WIN32
+  if (WindowsAngleForced()) {
+    if (!SDL_GL_SetAttribute(SDL_GL_EGL_PLATFORM, EGL_PLATFORM_ANGLE_ANGLE_VAL)) {
+      fprintf(stderr, "  [window] cannot select the ANGLE EGL platform: %s\n",
+              SDL_GetError());
+      return false;
+    }
+    SDL_EGL_SetAttributeCallbacks(AngleD3D11PlatformAttributes, nullptr,
+                                  nullptr, nullptr);
+    const char* level = GetEnvNonEmpty("BLOX7_ANGLE_FEATURE_LEVEL");
+    int major = 0;
+    int minor = 0;
+    const bool capped = ParseD3DFeatureLevel(level, &major, &minor);
+    fprintf(stderr, "  [window] OpenGL ES through ANGLE (Direct3D 11%s%s%s)\n",
+            WindowsAngleWarp() ? ", WARP" : "",
+            capped ? ", feature level " : "", capped ? level : "");
+  } else if (!WindowsAngleOff() && WindowsAngleBundled()) {
+    fprintf(stderr,
+            "  [window] ANGLE (Direct3D 11) takes over if the graphics driver "
+            "has no OpenGL ES 3.0\n");
+  }
+#endif
   if (ShouldUseAngleVulkanBackend()) {
     if (!SDL_GL_SetAttribute(SDL_GL_EGL_PLATFORM, EGL_PLATFORM_ANGLE_ANGLE_VAL)) {
       fprintf(stderr, "  [window] cannot select ANGLE EGL platform: %s\n",
@@ -1099,7 +1358,30 @@ bool CreateSoftwareWaitingWindow(int width, int height, const char* title) {
 }
 
 bool RetryWithAutoAngleFallback(int width, int height, const char* title,
-                                const char* failed_step) {
+                                const char* failed_step, bool* retried_ok) {
+#ifdef BLOX7_WIN32
+  if (g_auto_angle_retry_attempted || WindowsAngleOff() ||
+      WindowsAngleForced() || !WindowsAngleBundled()) {
+    fprintf(stderr, "  [window] no ANGLE retry (%s)\n",
+            g_auto_angle_retry_attempted ? "already retried"
+            : WindowsAngleOff()          ? "BLOX7_ANGLE=off"
+            : WindowsAngleForced()       ? "ANGLE was already in use"
+                                         : "ANGLE is not bundled");
+    return false;
+  }
+  SDL_QuitSubSystem(SDL_INIT_VIDEO);
+  if (SDL_WasInit(SDL_INIT_VIDEO) != 0) {
+    fprintf(stderr, "  [window] no ANGLE retry (SDL video is still in use)\n");
+    return false;
+  }
+  g_auto_angle_retry_attempted = true;
+  fprintf(stderr,
+          "  [window] %s failed; retrying OpenGL ES through ANGLE "
+          "(Direct3D 11)\n",
+          failed_step ? failed_step : "OpenGL ES setup");
+  *retried_ok = Init(width, height, title);
+  return true;
+#else
   const bool disable_auto =
       IsEnabledEnv("BLOX7_DISABLE_AUTO_ANGLE_FALLBACK");
   const char* backend = GetEnvNonEmpty("BLOX7_GRAPHICS_BACKEND");
@@ -1123,7 +1405,9 @@ bool RetryWithAutoAngleFallback(int width, int height, const char* title,
           failed_step ? failed_step : "EGL window setup");
   SDL_Quit();
   setenv("BLOX7_GRAPHICS_BACKEND", "angle-vulkan", 1);
-  return Init(width, height, title);
+  *retried_ok = Init(width, height, title);
+  return true;
+#endif
 }
 
 Status ConfigureWindowStatePersistence(const std::filesystem::path& path) {
@@ -1400,9 +1684,10 @@ bool Init(int width, int height, const char* title) {
                                         width, height, window_flags);
   if (!g_state.sdl_window) {
     fprintf(stderr, "  [window] SDL_CreateWindow failed: %s\n", SDL_GetError());
+    bool retried_ok = false;
     if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
-                                   "SDL_CreateWindow")) {
-      return true;
+                                   "SDL_CreateWindow", &retried_ok)) {
+      return retried_ok;
     }
     if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
       SDL_Quit();
@@ -1430,9 +1715,10 @@ bool Init(int width, int height, const char* title) {
             SDL_GetError());
     SDL_DestroyWindow(g_state.sdl_window);
     g_state.sdl_window = nullptr;
+    bool retried_ok = false;
     if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
-                                   "SDL_GL_CreateContext")) {
-      return true;
+                                   "SDL_GL_CreateContext", &retried_ok)) {
+      return retried_ok;
     }
     if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
       SDL_Quit();
@@ -1447,9 +1733,10 @@ bool Init(int width, int height, const char* title) {
     SDL_GL_DestroyContext(sdl_context);
     SDL_DestroyWindow(g_state.sdl_window);
     g_state.sdl_window = nullptr;
+    bool retried_ok = false;
     if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
-                                   "SDL_GL_MakeCurrent")) {
-      return true;
+                                   "SDL_GL_MakeCurrent", &retried_ok)) {
+      return retried_ok;
     }
     if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
       SDL_Quit();
@@ -1463,28 +1750,54 @@ bool Init(int width, int height, const char* title) {
   }
   int context_major = 0;
   int context_minor = 0;
+#ifdef BLOX7_WIN32
+  if (LogWindowsGlesProvider()) {
+    EnableAngleShaderCache();
+  }
+  const bool context_version_available =
+      ReadWindowsGlesVersion(&context_major, &context_minor);
+#else
   const bool context_version_available =
       SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, &context_major) &&
       SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, &context_minor);
+#endif
   if (context_version_available) {
     fprintf(stderr, "  [window] OpenGL ES context version=%d.%d\n",
             context_major, context_minor);
   } else {
+#ifdef BLOX7_WIN32
+    fprintf(stderr, "  [window] the context is not OpenGL ES\n");
+#else
     fprintf(stderr, "  [window] OpenGL ES context version unavailable: %s\n",
             SDL_GetError());
+#endif
   }
-  if ((!context_version_available || context_major < 3) &&
-      !IsEnabledEnv("BLOX7_ALLOW_GLES2_RESEARCH")) {
+  const bool unsupported_version =
+      (!context_version_available || context_major < 3) &&
+      !IsEnabledEnv("BLOX7_ALLOW_GLES2_RESEARCH");
+  bool refuse_context = unsupported_version;
+#ifdef BLOX7_WIN32
+  if (!WindowsAngleForced() && StringEquals(WindowsAngleMode(), "retry-test")) {
     fprintf(stderr,
-            "  [window] refusing unsupported OpenGL ES context; version "
-            "3.0 or newer is required\n");
+            "  [window] BLOX7_ANGLE=retry-test: refusing the graphics "
+            "driver's context\n");
+    refuse_context = true;
+  }
+#endif
+  if (refuse_context) {
+    if (unsupported_version) {
+      fprintf(stderr,
+              "  [window] refusing unsupported OpenGL ES context; version "
+              "3.0 or newer is required\n");
+    }
     SDL_GL_MakeCurrent(g_state.sdl_window, nullptr);
     SDL_GL_DestroyContext(sdl_context);
     SDL_DestroyWindow(g_state.sdl_window);
     g_state.sdl_window = nullptr;
+    bool retried_ok = false;
     if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
-                                   "OpenGL ES version check")) {
-      return true;
+                                   "OpenGL ES version check", &retried_ok)) {
+      return retried_ok;
     }
     if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
       SDL_Quit();
@@ -1518,9 +1831,10 @@ bool Init(int width, int height, const char* title) {
     g_state.egl_config = nullptr;
     g_state.egl_surface = nullptr;
     g_state.egl_context = nullptr;
+    bool retried_ok = false;
     if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
-                                   "SDL_EGL handle query")) {
-      return true;
+                                   "SDL_EGL handle query", &retried_ok)) {
+      return retried_ok;
     }
     if (IsDisabledEnv("BLOX7_SOFTWARE_WINDOW_FALLBACK")) {
       SDL_Quit();
@@ -1573,6 +1887,13 @@ bool Init(int width, int height, const char* title) {
     g_state.egl_surface = nullptr;
     g_state.egl_context = nullptr;
     g_state.egl_swap_interval = nullptr;
+#ifdef BLOX7_WIN32
+    bool retried_ok = false;
+    if (RetryWithAutoAngleFallback(requested_width, requested_height, title,
+                                   "SDL_GL_SetSwapInterval", &retried_ok)) {
+      return retried_ok;
+    }
+#endif
     SDL_Quit();
     return false;
   }
