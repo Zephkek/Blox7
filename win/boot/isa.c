@@ -2686,7 +2686,6 @@ typedef struct {
     uint64_t start, end;
     uint8_t *targets, *orig;
     int indirect;
-    unsigned xused, gused;
     deadrun runs[32];
     int nruns;
 } fninfo;
@@ -3438,7 +3437,6 @@ static void trk_leave(stktrack *k, const uint8_t *p, int len, uint64_t at) {
 static int patch_now(uint64_t site, const insn *in, fninfo *fi, int align) {
     uint8_t *p = (uint8_t *)(uintptr_t)site;
     uint64_t entry, hop = 0, next = site + in->len, chain = 0;
-    unsigned xfree = ~fi->xused & 0xFF00u, gfree = ~fi->gused & (1u << 10 | 1u << 11);
     slot *s;
     int32_t rel;
     int nlen = 0, ripfix = 0;
@@ -3451,14 +3449,14 @@ static int patch_now(uint64_t site, const insn *in, fninfo *fi, int align) {
         if (fi->targets[(next - fi->start) >> 3] >> ((next - fi->start) & 7) & 1) return 0;
         if (decode(q, next, &other)) {
             if (other.len != nlen || !(group_of(other.kind) & g_missing)) return 0;
-            chain = make_stub(next, &other, NULL, 0, 0, 0, xfree, gfree, align, fi);
+            chain = make_stub(next, &other, NULL, 0, 0, 0, 0, 0, align, fi);
             if (!chain) return 0;
         } else if (!movable(q, nlen, &ripfix)) {
             return 0;
         }
     }
     entry = make_stub(site, in, nlen && !chain ? (const uint8_t *)(uintptr_t)next : NULL, chain ? 0 : nlen, ripfix,
-                      chain ? chain : next + (uint64_t)nlen, xfree, gfree, align, fi);
+                      chain ? chain : next + (uint64_t)nlen, 0, 0, align, fi);
     s = entry ? slot_add(site) : NULL;
     if (!s) return 0;
     if (chain) {
@@ -3501,7 +3499,6 @@ static void scan_function(uint64_t start, uint64_t end, uint64_t next) {
         int len = insn_len(p);
         if (!len || at + (uint64_t)len > end) return;
         if (len == 4 && p[0] == 0xF3 && p[1] == 0x0F && p[2] == 0xB8) shorts = 1;
-        refs(p, len, &fi.xused, &fi.gused);
         if (is_padding(p, len) && (run || terminal)) {
             if (!run) run = at;
         } else {
