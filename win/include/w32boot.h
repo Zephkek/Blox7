@@ -18,6 +18,9 @@
 #define W32BOOT_FS_REGION_START 0xFF000000u
 #define W32BOOT_FS_REGION_END   0xFFFF0000u
 
+#define W32BOOT_NT_VERSION 0x7FFE026Cu
+#define W32BOOT_BEFORE_WINDOWS_8(nt) ((nt)[0] < 6 || ((nt)[0] == 6 && (nt)[1] < 2))
+
 #define W32BOOT_TLS_SLOT 63
 
 struct w32boot {

@@ -286,7 +286,6 @@ static int gen(tins *t, cpu *c, const kspec *k) {
     t->w = (int)(rnd() % 2);
     t->rexpad = rnd() % 8 == 0;
     t->op16 = gpr_reg && k->op != 0xF0 && rnd() % 4 == 0;
-    if (gpr_reg && t->op16) t->w = 0;
     t->reg = gpr_reg ? pick_gpr(-1, -1) : (int)(rnd() % 16);
     t->mem = kind == K_MOVNTDQA || rnd() % 2;
     t->base = t->index = -1;
@@ -303,7 +302,7 @@ static int gen(tins *t, cpu *c, const kspec *k) {
         return 1;
     }
     if (kind == K_POPCNT || kind == K_CRC32)
-        size = kind == K_CRC32 && k->op == 0xF0 ? 1 : t->op16 ? 2 : t->w ? 8 : 4;
+        size = kind == K_CRC32 && k->op == 0xF0 ? 1 : t->w ? 8 : t->op16 ? 2 : 4;
     else
         size = (kind == K_PEXTRD || kind == K_PINSRD) && t->w ? 8 : memsize(kind);
     {
@@ -473,9 +472,9 @@ static int differential(int iterations, const char *mode) {
                         memset(&probe, 0, sizeof probe);
                         probe.in = &in;
                         busy(&probe);
-                        g_dead_x = (unsigned)rnd() & 0xFF00u & ~probe.xbusy;
-                        g_dead_g = (unsigned)rnd() & (1u << 10 | 1u << 11) & ~probe.gbusy;
-                        entry = make_stub((uint64_t)(uintptr_t)g_site, &in, NULL, 0, 0, g_dead_x, g_dead_g, al);
+                        g_dead_x = (unsigned)rnd() & (rnd() % 2 ? 0xFFFFu : 0xFF00u) & ~probe.xbusy;
+                        g_dead_g = (unsigned)rnd() & (rnd() % 2 ? 0xFFFFu : 1u << 10 | 1u << 11) & ~probe.gbusy;
+                        entry = make_stub((uint64_t)(uintptr_t)g_site, &in, NULL, 0, 0, 0, g_dead_x, g_dead_g, al, NULL);
                         if (entry) {
                             int32_t rel = (int32_t)(entry - ((uint64_t)(uintptr_t)g_site + 5));
                             g_site[0] = 0xE9;
@@ -736,8 +735,8 @@ static int perf(uint64_t n, int with_free) {
                 memset(&probe, 0, sizeof probe);
                 probe.in = &in;
                 busy(&probe);
-                entry = make_stub((uint64_t)(uintptr_t)fn, &in, NULL, 0, 0, 0xFF00u & ~probe.xbusy,
-                                  (1u << 10 | 1u << 11) & ~probe.gbusy, al);
+                entry = make_stub((uint64_t)(uintptr_t)fn, &in, NULL, 0, 0, 0, 0xFF00u & ~probe.xbusy,
+                                  (1u << 10 | 1u << 11) & ~probe.gbusy, al, NULL);
                 if (entry) {
                     int32_t rel = (int32_t)(entry - ((uint64_t)(uintptr_t)fn + 5));
                     fn[0] = 0xE9;
@@ -834,7 +833,7 @@ int main(int argc, char **argv) {
         decode(code, (uint64_t)(uintptr_t)buf, &in);
         g_bulk = 1;
         QueryPerformanceCounter(&t0);
-        for (n = 0; n < 20000; n++) make_stub((uint64_t)(uintptr_t)buf, &in, NULL, 0, 0, 0, 0, -1);
+        for (n = 0; n < 20000; n++) make_stub((uint64_t)(uintptr_t)buf, &in, NULL, 0, 0, 0, 0, 0, -1, NULL);
         QueryPerformanceCounter(&t1);
         printf("make_stub %.2f us each, %d arenas\n",
                (double)(t1.QuadPart - t0.QuadPart) * 1e6 / (double)freq.QuadPart / 20000, g_narenas);

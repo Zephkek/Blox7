@@ -98,15 +98,15 @@ static int decode(const uint8_t *c, uint64_t at, insn *in) {
         i++;
         if (rep != 0xF3) return 0;
         in->kind = K_POPCNT;
-        in->op16 = (uint8_t)p66;
-        in->msize = p66 ? 2 : in->w ? 8 : 4;
+        in->op16 = (uint8_t)(p66 && !in->w);
+        in->msize = in->w ? 8 : p66 ? 2 : 4;
     } else if (c[i] == 0x38) {
         uint8_t op = c[i + 1];
         i += 2;
         if (rep == 0xF2 && (op == 0xF0 || op == 0xF1)) {
             in->kind = K_CRC32;
-            in->op16 = (uint8_t)p66;
-            in->msize = op == 0xF0 ? 1 : p66 ? 2 : in->w ? 8 : 4;
+            in->op16 = (uint8_t)(p66 && !in->w);
+            in->msize = op == 0xF0 ? 1 : in->w ? 8 : p66 ? 2 : 4;
         } else if (p66 && !rep) {
             in->kind = op38[op];
         }
@@ -754,7 +754,7 @@ static int run(const insn *in, regs *r, memfault *f) {
 enum {
     C_SIGN_PS, C_ABS_PS, C_MAGIC_PS, C_ONE_PS, C_SIGN_PD, C_ABS_PD, C_MAGIC_PD, C_ONE_PD,
     C_D8000, C_W8000, C_POP55, C_POP33, C_POP0F, C_POP01, C_ONEQ, C_B7F, C_B80, C_ONES, C_Q80, C_Q8000,
-    C_Q80000000, C_SWAPB, C_ZXBW, C_ZXBD, C_ZXBQ, C_ZXWD, C_ZXWQ, C_ZXDQ, C_SXBD, C_COUNT
+    C_Q80000000, C_SWAPB, C_ZXBW, C_ZXBD, C_ZXBQ, C_ZXWD, C_ZXWQ, C_ZXDQ, C_SXBD, C_B8F, C_B10, C_W1, C_COUNT
 };
 
 enum {
@@ -780,12 +780,12 @@ typedef struct {
     int bad;
     const insn *in;
     const uint8_t *k;
-    int delta, nx, ng, align;
+    int delta, nx, ng, align, local, loc;
     int xs[4], gs[6];
     unsigned xbusy, gbusy, xfree, gfree;
     uint8_t *entry, *body, *refault, *desc, *tail, *rest;
     const uint8_t *moved;
-    int nmoved;
+    int nmoved, ripfix;
     uint64_t resume;
     mref m;
 #ifdef BLOX7_ISA_COUNT
@@ -826,16 +826,18 @@ static void enc(tpl *t, int pfx, int w, int esc, int op, int reg, const mref *m,
         if (rel != (int32_t)rel) t->bad = 1;
         put32(t, (uint32_t)rel);
     } else {
+        unsigned mod = m->base < 0 || (!m->disp && (m->base & 7) != 5) ? 0 : m->disp == (int8_t)m->disp ? 1u : 2u;
         if (m->index < 0 && m->base >= 0 && (m->base & 7) != 4) {
-            put(t, 0x80u | r | (unsigned)(m->base & 7));
+            put(t, mod << 6 | r | (unsigned)(m->base & 7));
         } else {
             unsigned ss = m->scale == 8 ? 3u : m->scale == 4 ? 2u : m->scale == 2 ? 1u : 0;
             unsigned idx = m->index < 0 ? 4u : (unsigned)(m->index & 7);
-            put(t, (m->base < 0 ? 0x04u : 0x84u) | r);
+            put(t, mod << 6 | r | 4u);
             put(t, ss << 6 | idx << 3 | (m->base < 0 ? 5u : (unsigned)(m->base & 7)));
         }
         if (m->disp != (int32_t)m->disp) t->bad = 1;
-        put32(t, (uint32_t)m->disp);
+        if (m->base < 0 || mod == 2) put32(t, (uint32_t)m->disp);
+        else if (mod == 1) put(t, (unsigned)m->disp & 0xFF);
     }
     if (imm >= 0) put(t, (unsigned)imm);
 }
@@ -872,7 +874,7 @@ static uint8_t *consts(tpl *t, int n) {
 
 static int xscratch(tpl *t) {
     int r;
-    for (r = 15; r >= 8; r--)
+    for (r = 15; r >= 0; r--)
         if ((t->xfree >> r & 1) && !(t->xbusy >> r & 1)) {
             t->xbusy |= 1u << r;
             return r;
@@ -888,13 +890,16 @@ static int xscratch(tpl *t) {
 
 static int gscratch(tpl *t) {
     static const int order[] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 5};
+    static const int pick[] = {11, 10, 9, 8, 0, 1, 2, 3, 6, 7, 12, 13, 14, 15, 5};
     size_t i;
     int r;
-    for (r = 11; r >= 10; r--)
+    for (i = 0; i < sizeof pick / sizeof pick[0]; i++) {
+        r = pick[i];
         if ((t->gfree >> r & 1) && !(t->gbusy >> r & 1)) {
             t->gbusy |= 1u << r;
             return r;
         }
+    }
     for (i = 0; i < sizeof order / sizeof order[0]; i++)
         if (!(t->gbusy >> order[i] & 1)) {
             t->gbusy |= 1u << order[i];
@@ -925,7 +930,8 @@ static void prologue(tpl *t) {
     int cr = xscratch(t);
 #endif
     t->entry = t->p;
-    t->delta = t->nx || t->ng ? 128 + 16 * t->nx + 8 * t->ng : 0;
+    t->loc = (16 * t->nx + 8 * t->ng + 15) & ~15;
+    t->delta = t->local ? 128 + t->loc + t->local : t->nx || t->ng ? 128 + 16 * t->nx + 8 * t->ng : 0;
     if (!t->nx) t->align = -1;
     if (t->align >= 0) t->delta += (t->align - t->delta) & 15;
     if (t->delta) {
@@ -968,9 +974,19 @@ static void epilogue(tpl *t) {
         enc(t, 0, 1, -1, 0x8D, 4, &m, 0, -1, 0);
     }
     t->tail = t->p;
-    if (t->nmoved) raw(t, t->moved, (size_t)t->nmoved);
+    if (t->nmoved) {
+        raw(t, t->moved, (size_t)t->nmoved);
+        if (t->ripfix) {
+            int32_t disp;
+            memcpy(&disp, t->moved + t->ripfix, 4);
+            rel = (int64_t)disp + (int64_t)((uintptr_t)t->moved + (unsigned)t->nmoved) - (int64_t)(uintptr_t)t->p;
+            if (rel != (int32_t)rel) t->bad = 1;
+            disp = (int32_t)rel;
+            memcpy(t->p - t->nmoved + t->ripfix, &disp, 4);
+        }
+    }
     put(t, 0xE9);
-    rel = (int64_t)(t->nmoved ? t->resume : t->in->next) - (int64_t)((uintptr_t)t->p + 4);
+    rel = (int64_t)(t->resume ? t->resume : t->in->next) - (int64_t)((uintptr_t)t->p + 4);
     if (rel != (int32_t)rel) t->bad = 1;
     put32(t, (uint32_t)rel);
 }
@@ -979,19 +995,29 @@ static int g_pshufb;
 
 enum { O_PMINUB = 0xDA, O_PADDUSB = 0xDC, O_PMAXUB = 0xDE, O_PMAXSW = 0xEE, O_PSUBB = 0xF8, O_PADDB = 0xFC };
 
+enum { O_PCMPGTW = 0x65, O_PUNPCKHQDQ = 0x6D, O_PCMPEQW = 0x75, O_PMULLW = 0xD5, O_PMULHW = 0xE5, O_PSUBSW = 0xE9,
+       O_PADDSW = 0xED };
+
 enum { F_MOVLPS = 0x12, F_MOVHPS = 0x16, F_MOVHPS_ST = 0x17, F_SHUF = 0xC6 };
 
 static int xfree_count(const tpl *t) {
     int r, n = 0;
-    for (r = 15; r >= 8; r--)
+    for (r = 15; r >= 0; r--)
         if ((t->xfree >> r & 1) && !(t->xbusy >> r & 1)) n++;
     return n;
 }
 
 static int xfree_left(const tpl *t) { return xfree_count(t) > 0; }
 
+static int gfree_left(const tpl *t) { return (t->gfree & ~t->gbusy & 0xFFEFu) != 0; }
+
 static int gscratch_low(tpl *t) {
     int r;
+    for (r = 0; r < 4; r++)
+        if ((t->gfree >> r & 1) && !(t->gbusy >> r & 1)) {
+            t->gbusy |= 1u << r;
+            return r;
+        }
     for (r = 0; r < 4; r++)
         if (!(t->gbusy >> r & 1)) {
             t->gbusy |= 1u << r;
@@ -1205,6 +1231,30 @@ static int t_blendv(tpl *t) {
         return 1;
     }
     t->xbusy |= 1;
+    if ((t->xfree & 1) && d != 0 && (in->mem || s != 0)) {
+        mref b80 = kref(t, C_B80);
+        prologue(t);
+        if (in->mem) xm(t, O_PXOR, d, &t->m);
+        if (k == K_PBLENDVB) {
+            xm(t, O_PAND, 0, &b80);
+            xm(t, O_PCMPEQB, 0, &b80);
+        } else {
+            if (k == K_BLENDVPD) xri(t, O_PSHUFD, 0, 0, 0xF5);
+            xsh(t, O_SH32, SH_SRA, 0, 31);
+        }
+        if (in->mem) {
+            xr(t, O_PANDN, 0, d);
+            xm(t, O_PXOR, 0, &t->m);
+            xr(t, O_MOVDQA, d, 0);
+        } else {
+            xr(t, O_PXOR, d, s);
+            xr(t, O_PAND, 0, d);
+            xr(t, O_PXOR, d, s);
+            xr(t, O_PXOR, d, 0);
+        }
+        epilogue(t);
+        return 1;
+    }
     t1 = xscratch(t);
     if (in->mem) t0 = xscratch(t);
     prologue(t);
@@ -1239,6 +1289,19 @@ static int t_ptest(tpl *t) {
     mref c7f = kref(t, C_B7F);
     if (!in->mem && in->rm == d) {
         mref m;
+        if (xfree_left(t) && !gfree_left(t)) {
+            mref ones = kref(t, C_ONES), one = kref(t, C_ONE_PS);
+            t1 = xscratch(t);
+            prologue(t);
+            xr(t, O_PXOR, t1, t1);
+            xr(t, O_PCMPEQD, t1, d);
+            xr(t, O_PACKSSDW, t1, t1);
+            xr(t, 0x63, t1, t1);
+            xm(t, O_PCMPEQD, t1, &ones);
+            fm(t, 0, 0x2E, t1, &one, -1);
+            epilogue(t);
+            return 1;
+        }
         if (xfree_left(t)) {
             t1 = xscratch(t);
             g1 = gscratch(t);
@@ -2022,6 +2085,144 @@ static int t_phaddd(tpl *t) {
     return 1;
 }
 
+static int t_psign(tpl *t) {
+    const insn *in = t->in;
+    int k = in->kind, d = in->reg, t1;
+    int gt = k == K_PSIGNB ? O_PCMPGTB : k == K_PSIGNW ? O_PCMPGTW : O_PCMPGTD;
+    int eq = k == K_PSIGNB ? O_PCMPEQB : k == K_PSIGNW ? O_PCMPEQW : O_PCMPEQD;
+    int sub = k == K_PSIGNB ? O_PSUBB : k == K_PSIGNW ? O_PSUBW : O_PSUBD;
+    t1 = xscratch(t);
+    prologue(t);
+    xr(t, O_PXOR, t1, t1);
+    xs(t, gt, t1);
+    xr(t, O_PXOR, d, t1);
+    xr(t, sub, d, t1);
+    xr(t, O_PXOR, t1, t1);
+    xs(t, eq, t1);
+    xr(t, O_PANDN, t1, d);
+    xr(t, O_MOVDQA, d, t1);
+    epilogue(t);
+    return 1;
+}
+
+static int t_pmulhrsw(tpl *t) {
+    const insn *in = t->in;
+    int d = in->reg, t1;
+    mref one = kref(t, C_W1);
+    t1 = xscratch(t);
+    prologue(t);
+    if (!in->mem && in->rm == d) {
+        xr(t, O_MOVDQA, t1, d);
+        xr(t, O_PMULHW, d, t1);
+        xr(t, O_PMULLW, t1, t1);
+    } else {
+        if (in->mem) load16(t, t1);
+        else xr(t, O_MOVDQA, t1, in->rm);
+        xr(t, O_PMULLW, t1, d);
+        xs(t, O_PMULHW, d);
+    }
+    xsh(t, O_SH16, SH_SLL, d, 1);
+    xsh(t, O_SH16, SH_SRL, t1, 14);
+    xm(t, O_PADDW, t1, &one);
+    xsh(t, O_SH16, SH_SRL, t1, 1);
+    xr(t, O_PADDW, d, t1);
+    epilogue(t);
+    return 1;
+}
+
+static int t_pmaddubsw(tpl *t) {
+    const insn *in = t->in;
+    int d = in->reg, t1, t2;
+    t1 = xscratch(t);
+    t2 = xscratch(t);
+    prologue(t);
+    if (in->mem) load16(t, t1);
+    else xr(t, O_MOVDQA, t1, in->rm);
+    xsh(t, O_SH16, SH_SRA, t1, 8);
+    xr(t, O_MOVDQA, t2, d);
+    xsh(t, O_SH16, SH_SRL, t2, 8);
+    xr(t, O_PMULLW, t2, t1);
+    if (in->mem) load16(t, t1);
+    else xr(t, O_MOVDQA, t1, in->rm);
+    xsh(t, O_SH16, SH_SLL, t1, 8);
+    xsh(t, O_SH16, SH_SRA, t1, 8);
+    xsh(t, O_SH16, SH_SLL, d, 8);
+    xsh(t, O_SH16, SH_SRL, d, 8);
+    xr(t, O_PMULLW, d, t1);
+    xr(t, O_PADDSW, d, t2);
+    epilogue(t);
+    return 1;
+}
+
+static void evens_odds(tpl *t, int dst, const mref *m, int src) {
+    enc(t, 0xF2, 0, 0, O_PSHUFD, dst, m, src, 0xD8, 0);
+    enc(t, 0xF3, 0, 0, O_PSHUFD, dst, NULL, dst, 0xD8, 0);
+    xri(t, O_PSHUFD, dst, dst, 0xD8);
+}
+
+static int t_phaddw(tpl *t) {
+    const insn *in = t->in;
+    int k = in->kind, d = in->reg, t1, t2;
+    int op = k == K_PHADDW ? O_PADDW : k == K_PHSUBW ? O_PSUBW : k == K_PHADDSW ? O_PADDSW : O_PSUBSW;
+    t1 = xscratch(t);
+    if (!in->mem && in->rm == d) {
+        prologue(t);
+        evens_odds(t, d, NULL, d);
+        xr(t, O_MOVDQA, t1, d);
+        xr(t, O_PUNPCKLQDQ, d, d);
+        xr(t, O_PUNPCKHQDQ, t1, t1);
+        xr(t, op, d, t1);
+        epilogue(t);
+        return 1;
+    }
+    t2 = xscratch(t);
+    prologue(t);
+    evens_odds(t, t1, in->mem ? &t->m : NULL, in->rm);
+    evens_odds(t, d, NULL, d);
+    xr(t, O_MOVDQA, t2, d);
+    xr(t, O_PUNPCKLQDQ, d, t1);
+    xr(t, O_PUNPCKHQDQ, t2, t1);
+    xr(t, op, d, t2);
+    epilogue(t);
+    return 1;
+}
+
+static void local_x(tpl *t, int x, int off, int store) {
+    int align = t->align;
+    t->align = -1;
+    spill_x(t, x, off, store);
+    t->align = align;
+}
+
+static int t_pshufb(tpl *t) {
+    const insn *in = t->in;
+    int d = in->reg, t0, g, i, a, m;
+    mref low = kref(t, C_B8F), cap = kref(t, C_B10);
+    t0 = xscratch(t);
+    g = gscratch(t);
+    t->local = 48;
+    prologue(t);
+    a = t->loc;
+    m = t->loc + 32;
+    if (in->mem) load16(t, t0);
+    else xr(t, O_MOVDQA, t0, in->rm);
+    xm(t, O_PAND, t0, &low);
+    xm(t, O_PMINUB, t0, &cap);
+    local_x(t, t0, m, 1);
+    local_x(t, d, a, 1);
+    xr(t, O_PXOR, t0, t0);
+    local_x(t, t0, a + 16, 1);
+    for (i = 0; i < 16; i++) {
+        mref idx = at_rsp(m + i), src = {4, g, 1, a};
+        enc(t, 0, 0, 0, 0xB6, g, &idx, 0, -1, 0);
+        enc(t, 0, 0, 0, 0xB6, g, &src, 0, -1, 0);
+        enc(t, 0, 0, -1, 0x88, g, &idx, 0, -1, g >= 4 && g < 8);
+    }
+    local_x(t, d, m, 0);
+    epilogue(t);
+    return 1;
+}
+
 static int frame_run(uint64_t *g, v128 *x, const insn *in, const uint32_t *mxcsr);
 
 static const uint8_t k_gen_head[] = {0x48, 0x8D, 0x64, 0x24, 0x80, 0x9C, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54,
@@ -2062,7 +2263,7 @@ static int t_generic(tpl *t) {
     }
     raw(t, k_gen_pops, sizeof k_gen_pops);
     put(t, 0xE9);
-    rel = (int64_t)t->in->next - (int64_t)((uintptr_t)t->p + 4);
+    rel = (int64_t)(t->resume ? t->resume : t->in->next) - (int64_t)((uintptr_t)t->p + 4);
     if (rel != (int32_t)rel) t->bad = 1;
     put32(t, (uint32_t)rel);
     t->refault = t->p;
@@ -2207,6 +2408,16 @@ static tplfn template_for(int k) {
         return t_phaddd;
     case K_CRC32:
         return t_crc32;
+    case K_PSHUFB:
+        return t_pshufb;
+    case K_PSIGNB: case K_PSIGNW: case K_PSIGND:
+        return t_psign;
+    case K_PMULHRSW:
+        return t_pmulhrsw;
+    case K_PMADDUBSW:
+        return t_pmaddubsw;
+    case K_PHADDW: case K_PHSUBW: case K_PHADDSW: case K_PHSUBSW:
+        return t_phaddw;
     default:
         return NULL;
     }
@@ -2259,7 +2470,7 @@ typedef struct {
     uint32_t state, hits;
 } slot;
 
-enum { S_PENDING = 1, S_PATCHED, S_TRAP };
+enum { S_PENDING = 1, S_PATCHED, S_TRAP, S_CHAINED };
 
 typedef struct {
     uintptr_t base, lo, hi;
@@ -2384,6 +2595,12 @@ static void fill_consts(uint8_t *k) {
     fill_pmov(k + 16 * C_ZXWQ, 2, 8, 0);
     fill_pmov(k + 16 * C_ZXDQ, 4, 8, 0);
     fill_pmov(k + 16 * C_SXBD, 1, 4, 1);
+    memset(k + 16 * C_B8F, 0x8F, 16);
+    memset(k + 16 * C_B10, 0x10, 16);
+    for (i = 0; i < 8; i++) {
+        k[16 * C_W1 + 2 * i] = 1;
+        k[16 * C_W1 + 2 * i + 1] = 0;
+    }
 }
 
 static uint8_t *alloc_near(uint64_t site) {
@@ -2442,8 +2659,9 @@ static arena *arena_for(uint64_t site) {
 }
 
 static void stub_begin(tpl *t, uint8_t *at, const insn *in, const uint8_t *k, const uint8_t *moved, int nmoved,
-                       uint64_t resume, unsigned xfree, unsigned gfree, int align) {
+                       int ripfix, uint64_t resume, unsigned xfree, unsigned gfree, int align) {
     memset(t, 0, sizeof *t);
+    t->ripfix = ripfix;
     t->align = align;
     t->p = at;
     t->in = in;
@@ -2460,8 +2678,27 @@ static void stub_begin(tpl *t, uint8_t *at, const insn *in, const uint8_t *k, co
 #endif
 }
 
-static uint64_t make_stub(uint64_t site, const insn *in, const uint8_t *moved, int nmoved, uint64_t resume,
-                          unsigned xfree, unsigned gfree, int align) {
+typedef struct {
+    uint64_t lo, hi, from;
+} deadrun;
+
+typedef struct {
+    uint64_t start, end;
+    uint8_t *targets, *orig;
+    int indirect;
+    unsigned xused, gused;
+    deadrun runs[32];
+    int nruns;
+} fninfo;
+
+typedef struct {
+    unsigned x, g;
+} rset;
+
+static rset dead_after(const fninfo *fi, uint64_t at, rset want, int *steps, int depth);
+
+static uint64_t make_stub(uint64_t site, const insn *in, const uint8_t *moved, int nmoved, int ripfix,
+                          uint64_t resume, unsigned xfree, unsigned gfree, int align, const fninfo *fi) {
     tplfn fn = template_for(in->kind);
     arena *a;
     stubrec *rec;
@@ -2483,10 +2720,22 @@ static uint64_t make_stub(uint64_t site, const insn *in, const uint8_t *moved, i
     at = a->base + a->used;
     toggle = !g_bulk && ARENA_PROTECT != PAGE_EXECUTE_READWRITE;
     if (toggle && !VirtualProtect(at, STUB_MAX, PAGE_EXECUTE_READWRITE, &old)) return 0;
-    stub_begin(&t, at, in, a->base, moved, nmoved, resume, xfree, gfree, align);
+    stub_begin(&t, at, in, a->base, moved, nmoved, ripfix, resume, xfree, gfree, align);
     ok = fn && fn(&t) && !t.bad && t.p <= at + STUB_MAX;
+    if (ok && fi && fi->orig && (t.nx || t.ng)) {
+        rset want = {0xFFFFu & ~xfree, 0xFFCFu & ~gfree}, dead;
+        int steps = 96;
+        dead = dead_after(fi, in->next, want, &steps, 0);
+        if (dead.x | dead.g) {
+            stub_begin(&t, at, in, a->base, moved, nmoved, ripfix, resume, xfree | dead.x, gfree | dead.g, align);
+            if (!fn(&t) || t.bad || t.p > at + STUB_MAX) {
+                stub_begin(&t, at, in, a->base, moved, nmoved, ripfix, resume, xfree, gfree, align);
+                ok = fn(&t) && !t.bad && t.p <= at + STUB_MAX;
+            }
+        }
+    }
     if (!ok && !nmoved) {
-        stub_begin(&t, at, in, a->base, NULL, 0, 0, 0, 0, -1);
+        stub_begin(&t, at, in, a->base, NULL, 0, 0, resume, 0, 0, -1);
         ok = t_generic(&t) && !t.bad && t.p <= at + STUB_MAX;
         generic = 1;
     }
@@ -2558,7 +2807,8 @@ static int write_jump(uint64_t site, uint64_t entry) {
 
 static int patch(uint64_t site, const insn *in, int align) {
     slot *s;
-    uint64_t entry = in->len >= 5 && in_code(site, in->len) ? make_stub(site, in, NULL, 0, 0, 0, 0, align) : 0;
+    uint64_t entry = in->len >= 5 && in_code(site, in->len) ? make_stub(site, in, NULL, 0, 0, 0, 0, 0, align, NULL)
+                                                            : 0;
     s = slot_add(site);
     if (!s) return 0;
     if (!entry) {
@@ -2610,10 +2860,6 @@ static int fde_range(const uint8_t *h, uint32_t i, uint64_t *start, uint64_t *en
     return 1;
 }
 
-typedef struct {
-    uint64_t lo, hi;
-} deadrun;
-
 static int is_padding(const uint8_t *p, int len) {
     int i = 0;
     while (i < len && (p[i] == 0x66 || p[i] == 0x2E || p[i] == 0x3E)) i++;
@@ -2653,15 +2899,6 @@ static uint64_t take_hop(uint64_t site, deadrun *runs, int nruns) {
     return 0;
 }
 
-typedef struct {
-    uint64_t start, end;
-    uint8_t *targets;
-    int indirect;
-    unsigned xused, gused;
-    deadrun runs[32];
-    int nruns;
-} fninfo;
-
 static int branch_target(const uint8_t *p, int len, uint64_t at, uint64_t *target) {
     int i = 0;
     int32_t rel;
@@ -2680,11 +2917,14 @@ static int branch_target(const uint8_t *p, int len, uint64_t at, uint64_t *targe
     return 0;
 }
 
-static int movable(const uint8_t *p, int len) {
-    int i = 0, op;
+static int movable(const uint8_t *p, int len, int *ripfix) {
+    int i = 0, op, a32 = 0;
+    *ripfix = 0;
     while (i < len && (p[i] == 0x66 || p[i] == 0x67 || p[i] == 0xF2 || p[i] == 0xF3 || p[i] == 0x2E || p[i] == 0x3E ||
-                       p[i] == 0x26 || p[i] == 0x36 || p[i] == 0x64 || p[i] == 0x65 || p[i] == 0xF0))
+                       p[i] == 0x26 || p[i] == 0x36 || p[i] == 0x64 || p[i] == 0x65 || p[i] == 0xF0)) {
+        if (p[i] == 0x67) a32 = 1;
         i++;
+    }
     if (i < len && (p[i] & 0xF0) == 0x40) i++;
     if (i >= len) return 0;
     op = p[i];
@@ -2697,11 +2937,269 @@ static int movable(const uint8_t *p, int len) {
         int op2 = i + 1 < len ? p[i + 1] : -1;
         if ((op2 >= 0x80 && op2 <= 0x8F) || op2 == 0x05 || op2 == 0x0B || op2 == 0x38 || op2 == 0x3A || op2 == 0xB8)
             return 0;
-        if (k_map2[op2 & 0xFF] & L_M) return i + 2 < len && !((p[i + 2] & 0xC7) == 0x05);
+        if (!(k_map2[op2 & 0xFF] & L_M)) return 1;
+        i++;
+    } else if (!(k_map1[op] & L_M)) {
         return 1;
     }
-    if (k_map1[op] & L_M) return i + 1 < len && !((p[i + 1] & 0xC7) == 0x05);
+    if (i + 1 >= len) return 0;
+    if ((p[i + 1] & 0xC7) != 0x05) return 1;
+    if (a32 || i + 6 > len) return 0;
+    *ripfix = i + 2;
     return 1;
+}
+
+static unsigned implied(const uint8_t *p, int len) {
+    int i = 0, rex = 0, op, byte, at;
+    unsigned m = 0;
+    while (i < len && (p[i] == 0x66 || p[i] == 0x67 || p[i] == 0xF2 || p[i] == 0xF3 || p[i] == 0xF0 || p[i] == 0x2E ||
+                       p[i] == 0x3E || p[i] == 0x26 || p[i] == 0x36 || p[i] == 0x64 || p[i] == 0x65))
+        i++;
+    if (i < len && (p[i] & 0xF0) == 0x40) rex = p[i++];
+    if (i >= len) return 0xFFu;
+    op = p[i];
+    if (op == 0xC4 || op == 0xC5 || op == 0x62) return 0xFFu;
+    if (op == 0x0F) {
+        if (i + 1 >= len) return 0xFFu;
+        op = p[i + 1];
+        if (op == 0x38 || op == 0x3A) {
+            int op3 = i + 2 < len ? p[i + 2] : 0;
+            if (op == 0x3A && op3 >= 0x60 && op3 <= 0x63) return 0xFFu;
+            byte = op == 0x38 && op3 == 0xF0;
+            at = i + 3;
+        } else {
+            if (op == 0x00 || op == 0x01 || op == 0x05 || op == 0x07 || op == 0x0B || (op >= 0x30 && op <= 0x35) ||
+                op == 0xA2 || op == 0xA5 || op == 0xAD || op == 0xB0 || op == 0xB1 || op == 0xC7 || op == 0xF7)
+                return 0xFFu;
+            byte = (op >= 0x90 && op <= 0x9F) || op == 0xB6 || op == 0xBE || op == 0xC0;
+            at = i + 2;
+        }
+    } else {
+        if ((op < 0x40 && ((op & 7) == 4 || (op & 7) == 5)) || (op >= 0x6C && op <= 0x6F) || (op == 0x90 && rex) ||
+            (op >= 0x91 && op <= 0x99) || op == 0x9B || op == 0x9E || op == 0x9F || (op >= 0xA0 && op <= 0xAF) ||
+            op == 0xC8 || op == 0xC9 || op == 0xD2 || op == 0xD3 || (op >= 0xD7 && op <= 0xDF) ||
+            (op >= 0xE0 && op <= 0xE7) || (op >= 0xEC && op <= 0xEF) || op == 0xF6 || op == 0xF7)
+            return 0xFFu;
+        if (!rex && op >= 0xB4 && op <= 0xB7) m |= 1u << (op - 0xB4);
+        byte = (op < 0x40 && (op & 7) < 4 && !(op & 1)) || op == 0x80 || op == 0x82 || op == 0x84 || op == 0x86 ||
+               op == 0x88 || op == 0x8A || op == 0xC0 || op == 0xC6 || op == 0xD0 || op == 0xFE;
+        at = i + 1;
+    }
+    if (byte && !rex && at < len) {
+        if ((p[at] >> 3 & 7) >= 4) m |= 1u << ((p[at] >> 3 & 7) - 4);
+        if (p[at] >> 6 == 3 && (p[at] & 7) >= 4) m |= 1u << ((p[at] & 7) - 4);
+    }
+    return m;
+}
+
+static void named(const uint8_t *p, int len, rset *use, rset *def) {
+    int i = 0, rex = 0, p66 = 0, rep = 0, op, map = 0, at, mod, same, full = 0, store = 0, xx = 0, x0 = 0;
+    unsigned mem = 0, r, b;
+    use->x = use->g = def->x = def->g = 0;
+    refs(p, len, &use->x, &use->g);
+    while (i < len && (p[i] == 0x66 || p[i] == 0x67 || p[i] == 0xF2 || p[i] == 0xF3 || p[i] == 0xF0 || p[i] == 0x2E ||
+                       p[i] == 0x3E || p[i] == 0x26 || p[i] == 0x36 || p[i] == 0x64 || p[i] == 0x65)) {
+        if (p[i] == 0x66) p66 = 1;
+        else if (p[i] == 0xF2 || p[i] == 0xF3) rep = p[i];
+        i++;
+    }
+    if (i < len && (p[i] & 0xF0) == 0x40) rex = p[i++];
+    if (i >= len) return;
+    op = p[i];
+    if (op == 0xC4 || op == 0xC5 || op == 0x62) return;
+    if (op == 0x0F) {
+        if (i + 1 >= len) return;
+        op = p[++i];
+        map = 1;
+        if (op == 0x38 || op == 0x3A) {
+            if (i + 1 >= len) return;
+            map = op;
+            op = p[++i];
+        }
+    }
+    if (!map) {
+        if (p66) return;
+        if ((op >= 0xB8 && op <= 0xBF) || (op >= 0x58 && op <= 0x5F)) {
+            def->g = 1u << ((op & 7) | (rex & 1) << 3);
+            use->g &= ~def->g;
+            return;
+        }
+        if (!(k_map1[op] & L_M)) return;
+    } else if (map == 1 && !(k_map2[op] & L_M)) {
+        return;
+    }
+    at = i + 1;
+    if (at >= len) return;
+    mod = p[at] >> 6;
+    r = 1u << ((p[at] >> 3 & 7) | (rex & 4) << 1);
+    b = mod == 3 ? 1u << ((p[at] & 7) | (rex & 1) << 3) : 0;
+    same = b == r;
+    if (mod != 3) {
+        if ((p[at] & 7) == 4) {
+            int index;
+            if (at + 1 >= len) return;
+            index = (p[at + 1] >> 3 & 7) | (rex & 2) << 2;
+            if (!(mod == 0 && (p[at + 1] & 7) == 5)) mem |= 1u << ((p[at + 1] & 7) | (rex & 1) << 3);
+            if (index != 4) mem |= 1u << index;
+        } else if (!(mod == 0 && (p[at] & 7) == 5)) {
+            mem |= 1u << ((p[at] & 7) | (rex & 1) << 3);
+        }
+    }
+    if (!map) {
+        if (op == 0x8B || op == 0x63 || op == 0x8D || op == 0x69 || op == 0x6B) {
+            use->g = b | mem;
+            if (!(use->g & r)) def->g = r;
+        } else if (op == 0x89) {
+            use->g = r | mem;
+            if (mod == 3 && !same) def->g = b;
+        } else if ((op == 0x31 || op == 0x33) && same) {
+            use->g = 0;
+            def->g = r;
+        } else if (op == 0xC7 && mod == 3 && !(p[at] >> 3 & 7)) {
+            use->g = 0;
+            def->g = b;
+        } else {
+            return;
+        }
+    } else if (map == 1) {
+        if (op == 0xB6 || op == 0xB7 || op == 0xBE || op == 0xBF || (op == 0xB8 && rep == 0xF3)) {
+            if (p66) return;
+            use->g = b | mem;
+            if (!(use->g & r)) def->g = r;
+        } else if ((op == 0x50 && !rep && mod == 3) || ((op == 0xD7 || op == 0xC5) && p66 && !rep && mod == 3) ||
+                   ((op == 0x2C || op == 0x2D) && rep)) {
+            use->x = b;
+            use->g = mem;
+            def->g = r;
+        } else if (op == 0x6E && p66 && !rep) {
+            use->x = 0;
+            use->g = b | mem;
+            def->x = r;
+        } else if (op == 0x7E && p66 && !rep) {
+            use->x = r;
+            use->g = mem;
+            if (mod == 3) def->g = b;
+        } else if (op == 0x2A && rep) {
+            use->x = r;
+            use->g = b | mem;
+        } else if (op == 0xC4 && p66 && !rep) {
+            use->x = r;
+            use->g = b | mem;
+        } else if (op >= 0x71 && op <= 0x73 && p66 && !rep) {
+            use->x = b;
+            use->g = 0;
+        } else if (op == 0x28 || (op == 0x10 && (!rep || mod != 3)) || (op == 0x5B && rep != 0xF2) ||
+                   ((op == 0x6F || op == 0x70 || op == 0xE6) && (p66 || rep)) || (op == 0x7E && rep == 0xF3) ||
+                   ((op == 0x12 || op == 0x16) && rep) || (op == 0x51 && !rep) ||
+                   ((op == 0x52 || op == 0x53) && !rep && !p66)) {
+            full = 1;
+        } else if (op == 0x29 || (op == 0x11 && (!rep || mod != 3)) || (op == 0x7F && (p66 || rep == 0xF3)) ||
+                   (op == 0xD6 && p66 && !rep)) {
+            store = 1;
+        } else if (same && (op == 0x57 || (p66 && !rep && (op == 0xEF || (op >= 0x74 && op <= 0x76) ||
+                                                           (op >= 0xF8 && op <= 0xFB))))) {
+            use->x = use->g = 0;
+            def->x = r;
+        } else if ((op >= 0x10 && op <= 0x17) || op == 0x2E || op == 0x2F || (op >= 0x51 && op <= 0x5F) || op == 0xC2 ||
+                   op == 0xC6 || ((p66 || rep) && ((op >= 0x60 && op <= 0x6D) || op == 0x6F || op == 0x70 || op == 0x7C ||
+                                                   op == 0x7D || (op >= 0x74 && op <= 0x76) || (op >= 0xD0 && op <= 0xD5) ||
+                                                   (op >= 0xD8 && op <= 0xE6) || (op >= 0xE8 && op <= 0xEF) ||
+                                                   (op >= 0xF1 && op <= 0xF6) || (op >= 0xF8 && op <= 0xFE)))) {
+            xx = 1;
+        } else {
+            return;
+        }
+    } else if (map == 0x38) {
+        if (op == 0xCB) use->x |= 1;
+        if (!p66 || rep || (op >= 0x42 && !(op >= 0xDB && op <= 0xDF))) return;
+        if ((op >= 0x1C && op <= 0x1E) || (op >= 0x20 && op <= 0x25) || (op >= 0x30 && op <= 0x35) || op == 0x2A)
+            full = 1;
+        else
+            xx = 1;
+        if (op == 0x10 || op == 0x14 || op == 0x15) x0 = 1;
+    } else {
+        if (op >= 0x60 && op <= 0x63) use->x |= 1;
+        if (!p66 || rep || op < 0x08 || (op >= 0x18 && op <= 0x1F) || (op >= 0x23 && op <= 0x3F) ||
+            (op > 0x44 && op != 0xDF))
+            return;
+        if (op >= 0x14 && op <= 0x17) {
+            use->x = r;
+            use->g = mem;
+            if (mod == 3) def->g = b;
+        } else if (op == 0x20 || op == 0x22) {
+            use->x = r;
+            use->g = b | mem;
+        } else {
+            xx = 1;
+        }
+    }
+    if (full) {
+        use->x = b;
+        use->g = mem;
+        if (!same) def->x = r;
+    } else if (store) {
+        use->x = r;
+        use->g = mem;
+        if (mod == 3 && !same) def->x = b;
+    } else if (xx) {
+        use->x = r | b;
+        use->g = mem;
+    }
+    if (x0) use->x |= 1;
+}
+
+static void flow(const uint8_t *p, int len, rset *use, rset *def) {
+    named(p, len, use, def);
+    use->g |= implied(p, len);
+    def->g &= ~use->g;
+    def->x &= ~use->x;
+}
+
+static rset dead_after(const fninfo *fi, uint64_t at, rset want, int *steps, int depth) {
+    rset dead = {0, 0};
+    while ((want.x | want.g) && at >= fi->start && at < fi->end && (*steps)-- > 0) {
+        const uint8_t *p = fi->orig + (at - fi->start);
+        int len = insn_len(p), i = 0, op, op2;
+        uint64_t target;
+        rset use, def;
+        if (!len || at + (uint64_t)len > fi->end) break;
+        while (i < len && (p[i] == 0x66 || p[i] == 0x67 || p[i] == 0xF2 || p[i] == 0xF3 || p[i] == 0xF0 || p[i] == 0x2E ||
+                           p[i] == 0x3E || p[i] == 0x26 || p[i] == 0x36 || p[i] == 0x64 || p[i] == 0x65))
+            i++;
+        if (i < len && (p[i] & 0xF0) == 0x40) i++;
+        if (i >= len) break;
+        op = p[i];
+        op2 = i + 1 < len ? p[i + 1] : 0;
+        if (op == 0xC3 || op == 0xC2 || op == 0xE8 || op == 0xCC || op == 0xCD || op == 0xCF || op == 0xF4 ||
+            (op >= 0xE0 && op <= 0xE3) || op == 0xFF || (op == 0xC7 && op2 == 0xF8) ||
+            (op == 0x0F && (op2 == 0x05 || op2 == 0x0B || op2 == 0x34 || op2 == 0x35 || op2 == 0x07)))
+            break;
+        if (branch_target(p, len, at, &target)) {
+            rset taken, fall;
+            int half = *steps / 2;
+            if (target < fi->start || target >= fi->end) break;
+            if (op == 0xE9 || op == 0xEB) {
+                at = target;
+                continue;
+            }
+            if (depth >= 3) break;
+            *steps -= half;
+            taken = dead_after(fi, target, want, &half, depth + 1);
+            fall = dead_after(fi, at + (uint64_t)len, want, steps, depth + 1);
+            dead.x |= taken.x & fall.x;
+            dead.g |= taken.g & fall.g;
+            break;
+        }
+        flow(p, len, &use, &def);
+        want.x &= ~use.x;
+        want.g &= ~use.g;
+        dead.x |= want.x & def.x;
+        dead.g |= want.g & def.g;
+        want.x &= ~def.x;
+        want.g &= ~def.g;
+        at += (uint64_t)len;
+    }
+    return dead;
 }
 
 enum { A_UNK = -1 };
@@ -2939,23 +3437,34 @@ static void trk_leave(stktrack *k, const uint8_t *p, int len, uint64_t at) {
 
 static int patch_now(uint64_t site, const insn *in, fninfo *fi, int align) {
     uint8_t *p = (uint8_t *)(uintptr_t)site;
-    uint64_t entry, hop = 0, next = site + in->len;
+    uint64_t entry, hop = 0, next = site + in->len, chain = 0;
+    unsigned xfree = ~fi->xused & 0xFF00u, gfree = ~fi->gused & (1u << 10 | 1u << 11);
     slot *s;
     int32_t rel;
-    int nlen = 0;
+    int nlen = 0, ripfix = 0;
     if (in->len < 5 && !(hop = take_hop(site, fi->runs, fi->nruns))) {
+        const uint8_t *q = (const uint8_t *)(uintptr_t)next;
         insn other;
         if (fi->indirect || !fi->targets || next >= fi->end) return 0;
-        nlen = insn_len((const uint8_t *)(uintptr_t)next);
+        nlen = insn_len(q);
         if (!nlen || next + (uint64_t)nlen > fi->end || in->len + nlen < 5) return 0;
         if (fi->targets[(next - fi->start) >> 3] >> ((next - fi->start) & 7) & 1) return 0;
-        if (!movable((const uint8_t *)(uintptr_t)next, nlen)) return 0;
-        if (decode((const uint8_t *)(uintptr_t)next, next, &other)) return 0;
+        if (decode(q, next, &other)) {
+            if (other.len != nlen || !(group_of(other.kind) & g_missing)) return 0;
+            chain = make_stub(next, &other, NULL, 0, 0, 0, xfree, gfree, align, fi);
+            if (!chain) return 0;
+        } else if (!movable(q, nlen, &ripfix)) {
+            return 0;
+        }
     }
-    entry = make_stub(site, in, nlen ? (const uint8_t *)(uintptr_t)next : NULL, nlen, next + (uint64_t)nlen,
-                      ~fi->xused & 0xFF00u, ~fi->gused & (1u << 10 | 1u << 11), align);
+    entry = make_stub(site, in, nlen && !chain ? (const uint8_t *)(uintptr_t)next : NULL, chain ? 0 : nlen, ripfix,
+                      chain ? chain : next + (uint64_t)nlen, xfree, gfree, align, fi);
     s = entry ? slot_add(site) : NULL;
     if (!s) return 0;
+    if (chain) {
+        slot *c = slot_add(next);
+        if (c) c->state = S_CHAINED;
+    }
     if (hop) {
         uint8_t *q = (uint8_t *)(uintptr_t)hop;
         rel = (int32_t)(entry - (hop + 5));
@@ -2996,15 +3505,15 @@ static void scan_function(uint64_t start, uint64_t end, uint64_t next) {
         if (is_padding(p, len) && (run || terminal)) {
             if (!run) run = at;
         } else {
-            if (run && at - run >= 5 && fi.nruns < 32) fi.runs[fi.nruns++] = (deadrun){run, at};
+            if (run && at - run >= 5 && fi.nruns < 32) fi.runs[fi.nruns++] = (deadrun){run, at, run};
             run = 0;
         }
         terminal = is_terminal(p, len);
         at += (uint64_t)len;
     }
-    if (run && end - run >= 5 && fi.nruns < 32) fi.runs[fi.nruns++] = (deadrun){run, end};
+    if (run && end - run >= 5 && fi.nruns < 32) fi.runs[fi.nruns++] = (deadrun){run, end, run};
     if (next > end && next - end >= 5 && next - end <= 64 && fi.nruns < 32 && all_padding(end, next))
-        fi.runs[fi.nruns++] = (deadrun){end, next};
+        fi.runs[fi.nruns++] = (deadrun){end, next, end};
     if (shorts) {
         fi.targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (size_t)((end - start) / 8 + 1));
         for (at = start; fi.targets && at < end;) {
@@ -3020,18 +3529,31 @@ static void scan_function(uint64_t start, uint64_t end, uint64_t next) {
     }
     {
         stktrack k;
+        int ri = 0;
         trk_init(&k, start, end);
         for (at = start; at < end;) {
             const uint8_t *p = (const uint8_t *)(uintptr_t)at;
-            int len = insn_len(p), moved = 0, site, nlen = 0, unused, align = trk_enter(&k, at);
+            int len, moved = 0, site, nlen = 0, unused, align;
             stk after;
             insn in;
+            while (ri < fi.nruns && fi.runs[ri].from < at) ri++;
+            if (ri < fi.nruns && fi.runs[ri].from == at) {
+                at = fi.runs[ri].hi;
+                k.dead = 1;
+                continue;
+            }
+            len = insn_len(p);
+            align = trk_enter(&k, at);
             site = has_escape(p, (size_t)(len < 7 ? len : 7)) && decode(p, at, &in) && in.len == len &&
                    (group_of(in.kind) & g_missing);
             trk_leave(&k, p, len, at);
             after = k.st;
             if (site && len < 5 && at + (uint64_t)len < end && (nlen = insn_len(p + len)) > 0)
                 stk_step(p + len, nlen, &after, &unused);
+            if (site && !fi.orig) {
+                fi.orig = HeapAlloc(GetProcessHeap(), 0, (size_t)(end - start));
+                if (fi.orig) memcpy(fi.orig, (const void *)(uintptr_t)start, (size_t)(end - start));
+            }
             if (site) moved = patch_now(at, &in, &fi, align);
             if (moved) {
                 k.st = after;
@@ -3042,6 +3564,7 @@ static void scan_function(uint64_t start, uint64_t end, uint64_t next) {
         trk_free(&k);
     }
     if (fi.targets) HeapFree(GetProcessHeap(), 0, fi.targets);
+    if (fi.orig) HeapFree(GetProcessHeap(), 0, fi.orig);
 }
 
 static void scan_module(uintptr_t base, uintptr_t lo, uintptr_t hi) {
@@ -3110,7 +3633,7 @@ static LONG on_ud(EXCEPTION_RECORD *rec, CONTEXT *c) {
     insn in;
     const stubrec *st;
     slot *s;
-    int known = 0;
+    uint32_t state = 0;
     AcquireSRWLockShared(&g_lock);
     st = stub_at(site);
     if (st) {
@@ -3129,15 +3652,13 @@ static LONG on_ud(EXCEPTION_RECORD *rec, CONTEXT *c) {
     }
 #endif
     s = slot_find(site);
-    if (s && s->state != S_TRAP) {
-        ReleaseSRWLockShared(&g_lock);
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-    known = s != NULL;
+    if (s) state = s->state;
     fetch(site, code);
     ReleaseSRWLockShared(&g_lock);
+    if (state == S_PATCHED && (code[0] == 0xE9 || code[0] == 0xEB || code[0] == 0xCC))
+        return EXCEPTION_CONTINUE_EXECUTION;
     if (!decode(code, site, &in)) return EXCEPTION_CONTINUE_SEARCH;
-    if (!known && g_patching && TryAcquireSRWLockExclusive(&g_lock)) {
+    if (!state && g_patching && TryAcquireSRWLockExclusive(&g_lock)) {
         int done;
         g_owner = GetCurrentThreadId();
         s = slot_find(site);
@@ -3371,6 +3892,7 @@ void isa_start(struct w32boot *boot, uintptr_t libc_base, uintptr_t code_lo, uin
 #endif
     fam = a >> 8 & 15;
     model = (a >> 4 & 15) | (fam == 6 || fam == 15 ? a >> 12 & 0xF0 : 0);
+    if (fam == 15) fam += a >> 20 & 0xFF;
     g_pshufb = !(g_missing & G_SSSE3) && !(fam == 6 && (model == 0x0F || model == 0x16));
     g_lahf = __get_cpuid(0x80000001u, &a, &b, &c, &d) && (c & 1);
     __get_cpuid(0, &a, &b, &c, &d);

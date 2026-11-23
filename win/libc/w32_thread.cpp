@@ -57,6 +57,7 @@ constexpr size_t kFsBlock = 256;
 constexpr size_t kFsChunk = 64 * 1024;
 
 DWORD g_fs_block_slot, g_fs_rip_slot, g_fs_save_slot;
+bool g_fs_region;
 const uint8_t* g_fs_rearm;
 W32_SRWLOCK g_fs_lock;
 uintptr_t* g_fs_free;
@@ -82,11 +83,11 @@ uint8_t* put_gs(uint8_t* p, const uint8_t* op, size_t size, DWORD slot) {
 
 // windows wipes %fs on every nap, so the first canary read after faults in here and we just put it back lol
 bool init_fs_modern() {
-  struct {
-    uint32_t size, major, minor, build, platform;
-    uint16_t service_pack[128];
-  } version{sizeof version, 0, 0, 0, 0, {}};
-  if (w32.RtlGetVersion(&version) != 0 || version.major < 6 || (version.major == 6 && version.minor < 2)) return false;
+  const volatile uint32_t* nt = reinterpret_cast<const volatile uint32_t*>(uintptr_t{W32BOOT_NT_VERSION});
+  if (W32BOOT_BEFORE_WINDOWS_8(nt)) {
+    g_fs_region = true;
+    return false;
+  }
   if (!w32.IsProcessorFeaturePresent(22)) return false;
   g_fs_block_slot = w32.TlsAlloc();
   g_fs_rip_slot = w32.TlsAlloc();
@@ -187,6 +188,7 @@ __attribute__((no_stack_protector)) void w32_thread_attach_fs() {
     write_fs_base(reinterpret_cast<uintptr_t>(block));
     return;
   }
+  if (!g_fs_region) return;
   uintptr_t base = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(teb()) + 0x2000);
   if (base >= W32BOOT_FS_REGION_START && base + 4096 <= W32BOOT_FS_REGION_END &&
       w32.VirtualAlloc(reinterpret_cast<void*>(base), 4096, MEM_COMMIT, PAGE_READWRITE)) {

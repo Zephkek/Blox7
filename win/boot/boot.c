@@ -245,14 +245,16 @@ static DWORD WINAPI main_thread(LPVOID unused) {
 
 
 void boot_prepare(void) {
+    const volatile uint32_t *nt = (const volatile uint32_t *)(uintptr_t)W32BOOT_NT_VERSION;
     wchar_t log_path[MAX_PATH];
     if (GetEnvironmentVariableW(L"BLOX7_BOOT_LOG", log_path, MAX_PATH)) {
         g_boot_log = CreateFileW(log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, 0, NULL);
         AddVectoredExceptionHandler(0, last_chance);
         boot_log("boot: started");
     }
-    if (!VirtualAlloc((void *)(uintptr_t)W32BOOT_FS_REGION_START,
-                      W32BOOT_FS_REGION_END - W32BOOT_FS_REGION_START, MEM_RESERVE, PAGE_READWRITE))
+    if (W32BOOT_BEFORE_WINDOWS_8(nt) &&
+        !VirtualAlloc((void *)(uintptr_t)W32BOOT_FS_REGION_START, W32BOOT_FS_REGION_END - W32BOOT_FS_REGION_START,
+                      MEM_RESERVE, PAGE_READWRITE))
         boot_fail(L"could not reserve the stack-guard region", GetLastError());
     claim_tls_slot();
 }
