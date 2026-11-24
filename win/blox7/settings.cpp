@@ -295,14 +295,28 @@ std::string set_xml_value(std::string xml, const char* name, const std::string& 
   return xml.replace(start, end - start, value);
 }
 
-std::wstring basic_settings_path(const Paths& paths) {
-  const std::wstring dir = paths.data + L"\\root\\.local\\share\\blox7\\android\\data\\files\\appData";
+std::wstring newest_basic_settings(const std::wstring& dir) {
+  constexpr wchar_t kPrefix[] = L"GlobalBasicSettings_";
+  const size_t prefix = wcslen(kPrefix);
   WIN32_FIND_DATAW found;
-  HANDLE search = FindFirstFileW((dir + L"\\GlobalBasicSettings_*.xml").c_str(), &found);
+  HANDLE search = FindFirstFileW((dir + L"\\" + kPrefix + L"*.xml").c_str(), &found);
   if (search == INVALID_HANDLE_VALUE) return {};
-  std::wstring name = found.cFileName;
+  std::wstring newest;
+  long newest_version = -1;
+  do {
+    wchar_t* end = nullptr;
+    const long version = wcstol(found.cFileName + prefix, &end, 10);
+    if (end != found.cFileName + prefix && _wcsicmp(end, L".xml") == 0 && version > newest_version) {
+      newest_version = version;
+      newest = found.cFileName;
+    }
+  } while (FindNextFileW(search, &found));
   FindClose(search);
-  return dir + L"\\" + name;
+  return newest.empty() ? newest : dir + L"\\" + newest;
+}
+
+std::wstring basic_settings_path(const Paths& paths) {
+  return newest_basic_settings(paths.data + L"\\root\\.local\\share\\blox7\\android\\data\\files\\appData");
 }
 
 struct Preset {
