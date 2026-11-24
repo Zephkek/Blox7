@@ -39,7 +39,7 @@ namespace {
 constexpr std::string_view kWirePrefix = "BLOX7-EXTERNAL-LAUNCH/1\n";
 constexpr std::array<unsigned char, 4> kReplyPrefix = {'M', 'T', 'L', '1'};
 constexpr std::size_t kReplySize = kReplyPrefix.size() + 1;
-constexpr std::size_t kWorkerStackSize = 64ULL * 1024 * 1024;
+constexpr std::size_t kWorkerStackSize = 1024 * 1024;
 constexpr int kWorkerJoinTimeoutMs = 5000;
 constexpr int kPeerIoTimeoutSeconds = 2;
 constexpr std::size_t kMaximumConfiguredPendingLaunches = 64;
