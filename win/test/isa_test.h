@@ -59,6 +59,20 @@ static void poison_add(uint64_t at, uint64_t hi) {
     g_poison_n++;
 }
 
+static int g_trap_prefetchw;
+
+static void test_unswap(uint8_t *p, int len) {
+    uint8_t copy[16];
+    int i;
+    if (len < 3 || len > 15) return;
+    memcpy(copy, p, (size_t)len);
+    for (i = 0; i + 2 < len && (copy[i] != 0x0F || copy[i + 1] != 0x18); i++) {
+    }
+    if (i + 2 >= len) return;
+    copy[i + 1] = 0x0D;
+    if (prefetchw_at(copy, len) == copy + i + 1) p[i + 1] = 0x0D;
+}
+
 static void poison(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path) {
     const char *slash = strrchr(path, '/');
     wchar_t file[MAX_PATH + 64];
@@ -93,7 +107,12 @@ static void poison(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path)
             uint8_t *p = (uint8_t *)(base + vaddr);
             insn in;
             int cpuid = len == 2 && p[0] == 0x0F && p[1] == 0xA2;
-            if (!cpuid && (!decode(p, base + vaddr, &in) || in.len != len || !(group_of(in.kind) & g_missing))) continue;
+            int prefetchw;
+            if (g_trap_prefetchw && insn_len(p) == (int)len) test_unswap(p, (int)len);
+            prefetchw = g_prefetchw && insn_len(p) == (int)len && prefetchw_at(p, (int)len);
+            if (!cpuid && !prefetchw &&
+                (!decode(p, base + vaddr, &in) || in.len != len || !(group_of(in.kind) & g_missing)))
+                continue;
             poison_add(base + vaddr, hi);
             p[0] = 0x0F;
             p[1] = 0x0B;
@@ -121,6 +140,7 @@ static int test_cpuid(CONTEXT *c) {
         r[0] = r[1] = r[2] = r[3] = 0;
     } else if (leaf == 0x80000001u) {
         r[2] &= ~(1u << 8);
+        if (!g_lahf) r[2] &= ~1u;
         if (g_missing & G_POPCNT) r[2] &= ~(1u << 5);
     }
     c->Rax = r[0];
@@ -148,6 +168,13 @@ static void test_count(uint64_t site, const insn *in) {
         g_traps[i].hits++;
     }
     ReleaseSRWLockExclusive(&g_trap_lock);
+}
+
+static void test_skip(uint64_t site, int len) {
+    insn in;
+    memset(&in, 0, sizeof in);
+    in.len = (uint8_t)len;
+    test_count(site, &in);
 }
 
 typedef struct {
@@ -254,13 +281,28 @@ static DWORD WINAPI test_stats(LPVOID unused) {
     return 0;
 }
 
+static void test_tune(void) {
+    if (!g_prefetchw) return;
+    g_lahf = 0;
+    g_slow_unaligned = 1;
+}
+
 static int test_start(void) {
     wchar_t v[16];
     g_test_t0 = GetTickCount64();
     if (!GetEnvironmentVariableW(L"BLOX7_ISA_POISON", g_poison_dir, MAX_PATH)) g_poison_dir[0] = 0;
-    if (GetEnvironmentVariableW(L"BLOX7_ISA_TRAP", v, 16)) g_patching = 0;
-    g_missing = GetEnvironmentVariableW(L"BLOX7_ISA_PROFILE", v, 16) && v[0] == L'k' ? G_SSSE3 | G_SSE41 | G_SSE42
-                                                                                   : G_SSE41 | G_SSE42 | G_POPCNT;
+    if (GetEnvironmentVariableW(L"BLOX7_ISA_TRAP", v, 16)) {
+        if (v[0] == L'p') g_trap_prefetchw = 1;
+        else g_patching = 0;
+    }
+    g_missing = G_SSE41 | G_SSE42 | G_POPCNT;
+    if (GetEnvironmentVariableW(L"BLOX7_ISA_PROFILE", v, 16)) {
+        if (v[0] == L'k') g_missing = G_SSSE3 | G_SSE41 | G_SSE42;
+        if (v[0] == L'n') {
+            g_missing = G_SSSE3 | G_SSE41 | G_SSE42 | G_POPCNT;
+            g_prefetchw = 1;
+        }
+    }
     if (GetEnvironmentVariableW(L"BLOX7_ISA_LOG", v, 2)) {
         wchar_t base[MAX_PATH];
         GetEnvironmentVariableW(L"BLOX7_ISA_LOG", base, MAX_PATH);

@@ -2488,7 +2488,7 @@ typedef struct {
 static SRWLOCK g_lock = SRWLOCK_INIT;
 static volatile DWORD g_owner;
 static void *g_veh;
-static int g_patching = 1, g_bulk, g_missing;
+static int g_patching = 1, g_bulk, g_missing, g_prefetchw;
 static arena g_arenas[64];
 static int g_narenas;
 static coderange g_code[256];
@@ -3486,10 +3486,45 @@ static int has_escape(const uint8_t *p, size_t n) {
     return 0;
 }
 
+static uint8_t *prefetchw_at(uint8_t *p, int len) {
+    int i = 0;
+    while (i < len && (p[i] == 0x66 || p[i] == 0x67 || p[i] == 0xF2 || p[i] == 0xF3 || p[i] == 0x2E || p[i] == 0x3E ||
+                       p[i] == 0x26 || p[i] == 0x36 || p[i] == 0x64 || p[i] == 0x65))
+        i++;
+    if (i < len && (p[i] & 0xF0) == 0x40) i++;
+    if (i + 2 >= len || p[i] != 0x0F || p[i + 1] != 0x0D) return NULL;
+    return p[i + 2] >> 6 != 3 && (p[i + 2] >> 3 & 7) < 3 ? p + i + 1 : NULL;
+}
+
+static void prefetchw_out(uint64_t start, uint64_t end) {
+    const uint8_t *b = (const uint8_t *)(uintptr_t)start;
+    size_t n = (size_t)(end - start), i;
+    uint64_t at;
+    for (i = 0; i + 1 < n && (b[i] != 0x0F || b[i + 1] != 0x0D); i++) {
+    }
+    if (i + 1 >= n) return;
+    for (at = start; at < end;) {
+        int len = insn_len((const uint8_t *)(uintptr_t)at);
+        if (!len || at + (uint64_t)len > end) return;
+        at += (uint64_t)len;
+    }
+    for (at = start; at < end;) {
+        uint8_t *p = (uint8_t *)(uintptr_t)at, *q;
+        int len = insn_len(p);
+        q = prefetchw_at(p, len);
+        if (q) {
+            q[1] = (uint8_t)((q[1] & 0xC7) | 0x08);
+            q[0] = 0x18;
+        }
+        at += (uint64_t)len;
+    }
+}
+
 static void scan_function(uint64_t start, uint64_t end, uint64_t next) {
     fninfo fi;
     int terminal = 0, shorts = 0;
     uint64_t at, run = 0, target;
+    if (g_prefetchw) prefetchw_out(start, end);
     if (!has_escape((const uint8_t *)(uintptr_t)start, (size_t)(end - start))) return;
     memset(&fi, 0, sizeof fi);
     fi.start = start;
@@ -3624,6 +3659,10 @@ static LONG emulate(EXCEPTION_RECORD *rec, CONTEXT *c, const insn *in) {
     }
 }
 
+#ifdef BLOX7_ISA_TEST
+static void test_skip(uint64_t site, int len);
+#endif
+
 static LONG on_ud(EXCEPTION_RECORD *rec, CONTEXT *c) {
     uint64_t site = c->Rip;
     uint8_t code[16];
@@ -3654,6 +3693,13 @@ static LONG on_ud(EXCEPTION_RECORD *rec, CONTEXT *c) {
     ReleaseSRWLockShared(&g_lock);
     if (state == S_PATCHED && (code[0] == 0xE9 || code[0] == 0xEB || code[0] == 0xCC))
         return EXCEPTION_CONTINUE_EXECUTION;
+    if (g_prefetchw && prefetchw_at(code, insn_len(code))) {
+#ifdef BLOX7_ISA_TEST
+        test_skip(site, insn_len(code));
+#endif
+        c->Rip = site + (uint64_t)insn_len(code);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     if (!decode(code, site, &in)) return EXCEPTION_CONTINUE_SEARCH;
     if (!state && g_patching && TryAcquireSRWLockExclusive(&g_lock)) {
         int done;
@@ -3858,7 +3904,8 @@ static int traps(uint8_t *page, const uint8_t *code, size_t n) {
 
 static int really_missing(int groups) {
     static const uint8_t k_pshufb[] = {0x66, 0x0F, 0x38, 0x00, 0xC0}, k_pminsd[] = {0x66, 0x0F, 0x38, 0x39, 0xC0},
-                         k_pcmpgtq[] = {0x66, 0x0F, 0x38, 0x37, 0xC0}, k_popcnt[] = {0xF3, 0x0F, 0xB8, 0xC0};
+                         k_pcmpgtq[] = {0x66, 0x0F, 0x38, 0x37, 0xC0}, k_popcnt[] = {0xF3, 0x0F, 0xB8, 0xC0},
+                         k_prefetchw[] = {0x0F, 0x0D, 0x08};
     uint8_t *page = VirtualAlloc(NULL, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     void *h = page ? AddVectoredExceptionHandler(1, probe_veh) : NULL;
     int out = groups;
@@ -3870,6 +3917,7 @@ static int really_missing(int groups) {
     if ((groups & G_SSE41) && !traps(page, k_pminsd, sizeof k_pminsd)) out &= ~G_SSE41;
     if ((groups & G_SSE42) && !traps(page, k_pcmpgtq, sizeof k_pcmpgtq)) out &= ~G_SSE42;
     if ((groups & G_POPCNT) && !traps(page, k_popcnt, sizeof k_popcnt)) out &= ~G_POPCNT;
+    g_prefetchw = traps(page, k_prefetchw, sizeof k_prefetchw);
     RemoveVectoredExceptionHandler(h);
     VirtualFree(page, 0, MEM_RELEASE);
     return out;
@@ -3896,6 +3944,9 @@ void isa_start(struct w32boot *boot, uintptr_t libc_base, uintptr_t code_lo, uin
     g_slow_unaligned = fam == 15 || (b == 0x756E6547u && fam == 6 &&
                                      (model == 0x0F || model == 0x16 || model == 0x17 || model == 0x1D || model == 0x1C ||
                                       model == 0x26 || model == 0x27 || model == 0x35 || model == 0x36));
+#ifdef BLOX7_ISA_TEST
+    test_tune();
+#endif
     g_veh = AddVectoredExceptionHandler(1, veh);
     if (!g_veh) return;
     boot->isa_front = front;
