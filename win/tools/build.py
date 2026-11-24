@@ -35,6 +35,7 @@ LIBC_REPLACED = {
     'arch-x86_64/bionic/__restore_rt.S',
     'arch-x86_64/bionic/syscall.S',
     'arch-x86_64/bionic/vfork.S',
+    'arch-x86_64/string/sse2-memmove-slm.S',
     'bionic/vdso.cpp',
     'bionic/dl_iterate_phdr_static.cpp',
     'bionic/libc_init_static.cpp',

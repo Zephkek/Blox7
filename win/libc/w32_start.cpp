@@ -17,6 +17,7 @@
 #include "w32_kernel.h"
 
 extern "C" int __cxa_atexit(void (*)(void*), void*, void*);
+extern "C" uint8_t g_w32_memmove_avx2;
 
 void w32_init_time();
 void w32_init_files();
@@ -139,6 +140,8 @@ const char* program_path(struct w32boot* boot, int* skip_args) {
 extern "C" __attribute__((visibility("default"), no_stack_protector)) int __w32_libc_start(struct w32boot* boot) {
   w32_boot = boot;
   w32_init_api();
+  __builtin_cpu_init();
+  g_w32_memmove_avx2 = __builtin_cpu_supports("avx2") != 0;
   w32_init_time();
 
   bionic_tcb temp_tcb __attribute__((uninitialized));
