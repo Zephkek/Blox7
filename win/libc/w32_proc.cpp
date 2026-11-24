@@ -693,6 +693,7 @@ void sys_cpu_range(Text& t) {
 void comm(Text& t) { t.add("%s\n", w32_process_comm()); }
 void cgroup(Text& t) { t.add("0::/\n"); }
 void zero(Text& t) { t.add("0\n"); }
+void strict_commit(Text& t) { t.add("2\n"); }
 void net_unix(Text& t) { t.add("Num       RefCount Protocol Flags    Type St Inode Path\n"); }
 
 const Entry kEntries[] = {
@@ -722,7 +723,7 @@ const Entry kEntries[] = {
     {"/proc/self/status", W32ProcNode::kFile, status},
     {"/proc/sys", W32ProcNode::kDirectory, nullptr},
     {"/proc/sys/vm", W32ProcNode::kDirectory, nullptr},
-    {"/proc/sys/vm/overcommit_memory", W32ProcNode::kFile, zero},
+    {"/proc/sys/vm/overcommit_memory", W32ProcNode::kFile, strict_commit},
     {"/sys", W32ProcNode::kDirectory, nullptr},
     {"/sys/devices", W32ProcNode::kDirectory, nullptr},
     {"/sys/devices/system", W32ProcNode::kDirectory, nullptr},
