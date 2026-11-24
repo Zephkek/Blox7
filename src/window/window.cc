@@ -1927,8 +1927,9 @@ bool ShouldIgnoreCloseRequest() {
 }
 
 void MaybeQueueInputReadinessSequence() {
-  if (g_state.input_test_sequence_queued ||
-      !StringEquals(GetEnvNonEmpty("BLOX7_INPUT_TEST_CLICK"), "1") ||
+  static const bool wanted =
+      StringEquals(GetEnvNonEmpty("BLOX7_INPUT_TEST_CLICK"), "1");
+  if (g_state.input_test_sequence_queued || !wanted ||
       !HasPresentedFrame() || !g_platform_event_observer.HasObserver() ||
       g_state.sdl_window == nullptr) {
     return;
@@ -2109,7 +2110,7 @@ bool HandleFullscreenShortcut(const SDL_Event& event) {
 }
 
 void MaybeRequestFullscreenReadiness() {
-  const char* mode = GetEnvNonEmpty("BLOX7_FULLSCREEN_READINESS");
+  static const char* const mode = GetEnvNonEmpty("BLOX7_FULLSCREEN_READINESS");
   const bool single_transition = StringEquals(mode, "1");
   const bool round_trip = StringEquals(mode, "roundtrip");
   if ((!single_transition && !round_trip) || !HasPresentedFrame()) {
