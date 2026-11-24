@@ -154,8 +154,8 @@ BRIDGE_EXPORT SDL_GLContext SDL_GL_CreateContext(SDL_Window* window) {
     if (!implementation || get_string != implementation) {
       implementation = get_string;
       gles_bridge_resolve(lookup_gl);
-      gles_window_reset();
     }
+    gles_window_reset();
   }
   return context;
 }

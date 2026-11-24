@@ -129,8 +129,9 @@ BRIDGE_EXPORT void glDeleteBuffers(GLsizei a0, const GLuint * a1) {
   p_glDeleteBuffers(a0, a1);
 }
 static void (BRIDGE_MS *p_glDeleteFramebuffers)(GLsizei, const GLuint *);
+void gles_delete_framebuffers(void (BRIDGE_MS *)(GLsizei, const GLuint *), GLsizei a0, const GLuint * a1);
 BRIDGE_EXPORT void glDeleteFramebuffers(GLsizei a0, const GLuint * a1) {
-  p_glDeleteFramebuffers(a0, a1);
+  gles_delete_framebuffers(p_glDeleteFramebuffers, a0, a1);
 }
 static void (BRIDGE_MS *p_glDeleteProgram)(GLuint);
 BRIDGE_EXPORT void glDeleteProgram(GLuint a0) {

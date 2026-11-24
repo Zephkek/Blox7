@@ -464,6 +464,8 @@ void gles_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, G
            start);
 }
 
+#define GL_BACK_LEFT 0x0402
+
 static int g_window_srgb, g_window_checked;
 
 void gles_window_reset(void) {
@@ -471,25 +473,52 @@ void gles_window_reset(void) {
   g_window_srgb = 0;
 }
 
+static int gles_refused(void) {
+  int refused = 0;
+  for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; i++) refused = 1;
+  return refused;
+}
+
+enum { kTestGray = 18, kTestGrayAsSrgb = 75 };
+
+static int gles_window_reads(int gray) {
+  GLubyte pixel[4] = {0, 0, 0, 0};
+  glClearColor((float)gray / 255.0f, (float)gray / 255.0f, (float)gray / 255.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+  return pixel[0] == pixel[1] && pixel[1] == pixel[2] ? pixel[0] : -1;
+}
+
+static int gles_encoded(int read) {
+  return read > kTestGrayAsSrgb - 4 && read < kTestGrayAsSrgb + 4;
+}
+
 void gles_window_current(void) {
   if (g_window_checked) return;
   g_window_checked = 1;
-  GLint encoding = GL_LINEAR, count = 0;
-  int control = 0;
+  GLint encoding = GL_LINEAR;
+  gles_refused();
   glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK, GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, &encoding);
-  glGetIntegerv(GL_NUM_EXTENSIONS, &count);
-  for (GLint i = 0; i < count && !control; i++) {
-    const GLubyte* name = glGetStringi(GL_EXTENSIONS, (GLuint)i);
-    control = name && !strcmp((const char*)name, "GL_EXT_sRGB_write_control");
+  if (gles_refused())
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, &encoding);
+  const int readable = gles_window_reads(255) == 255;
+  const int before = readable ? gles_window_reads(kTestGray) : -1;
+  if (encoding == GL_SRGB || gles_encoded(before)) {
+    gles_refused();
+    glDisable(GL_FRAMEBUFFER_SRGB_EXT);
+    const int refused = gles_refused();
+    const int after = readable ? gles_window_reads(kTestGray) : -1;
+    g_window_srgb = !refused;
+    fprintf(stderr,
+            g_window_srgb && !gles_encoded(after)
+                ? "[gles] the driver made the window sRGB, frames go to it as they are (%d read back as %d, %d now)\n"
+                : "[gles] the driver made the window sRGB and can't turn that off, colors will look washed out (%d read back "
+                  "as %d, %d now)\n",
+            kTestGray, before, after);
   }
-  for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; i++) {
-  }
-  if (encoding != GL_SRGB) return;
-  fprintf(stderr, control ? "[gles] the driver made the window sRGB, frames go to it as they are\n"
-                          : "[gles] the driver made the window sRGB and can't turn that off, colors will look washed out\n");
-  if (!control) return;
-  g_window_srgb = 1;
-  glDisable(GL_FRAMEBUFFER_SRGB_EXT);
+  glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  gles_refused();
 }
 
 void gles_bind_framebuffer(void (BRIDGE_MS* real)(GLenum, GLuint), GLenum target, GLuint framebuffer) {
@@ -497,4 +526,12 @@ void gles_bind_framebuffer(void (BRIDGE_MS* real)(GLenum, GLuint), GLenum target
   if (!g_window_srgb || target == GL_READ_FRAMEBUFFER) return;
   if (framebuffer) glEnable(GL_FRAMEBUFFER_SRGB_EXT);
   else glDisable(GL_FRAMEBUFFER_SRGB_EXT);
+}
+
+void gles_delete_framebuffers(void (BRIDGE_MS* real)(GLsizei, const GLuint*), GLsizei n, const GLuint* framebuffers) {
+  real(n, framebuffers);
+  if (!g_window_srgb) return;
+  GLint bound = 0;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+  if (!bound) glDisable(GL_FRAMEBUFFER_SRGB_EXT);
 }
