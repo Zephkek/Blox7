@@ -1,0 +1,10 @@
+Blox7 and Studio7
+Copyright 2026 Zeph
+https://github.com/Zephkek/Blox7
+Licensed under the Apache License, Version 2.0.
+
+Blox7's Android runtime is based on Mocktail (https://github.com/komaruworld/mocktail),
+Copyright 2026 komaruworld, also under the Apache License, Version 2.0. Most of
+Mocktail's files were changed for Blox7.
+
+Third-party code in Blox7 and Studio7 keeps its own copyright and license.

@@ -152,7 +152,8 @@ That writes `win/out/release/Studio7.exe`.
 
 ## License
 
-Apache 2.0, see [LICENSE](LICENSE). Bundled third-party code keeps its own license. Blox7's Android runtime is based
-on [Mocktail](https://github.com/komaruworld/mocktail).
+Copyright 2026 Zeph, Apache 2.0, see [LICENSE](LICENSE). If you ship something with Blox7 or Studio7 code in it, the
+[NOTICE](NOTICE) text and the copyright lines have to go with it, that's section 4 of the license. Bundled third-party
+code keeps its own license. Blox7's Android runtime is based on [Mocktail](https://github.com/komaruworld/mocktail).
 
 Blox7 and Studio7 are not affiliated with Roblox Corporation or Microsoft.

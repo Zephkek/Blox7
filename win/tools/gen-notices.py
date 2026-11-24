@@ -15,8 +15,8 @@ LLVM = f'{AOSP}/scudo/LICENSE.TXT'
 
 PARTS = [
     ('Mocktail', 'https://github.com/komaruworld/mocktail',
-     'The Android runtime Blox7 is built on (blox7.so, its helper programs and Android-side libraries), and '
-     'the Windows port around it.', [f'{ROOT}/LICENSE']),
+     'The Android runtime Blox7 is built on (blox7.so, its helper programs and Android-side libraries). Blox7 '
+     'itself is under the same license.', [f'{ROOT}/LICENSE']),
     ('Android bionic', 'https://android.googlesource.com/platform/bionic',
      'The C library, math library and dynamic-linker interface in libc.so.', [f'{AOSP}/bionic/libc/NOTICE']),
     ('Scudo', 'https://llvm.org/docs/ScudoHardenedAllocator.html', 'The memory allocator in libc.so.', [LLVM]),
@@ -127,7 +127,9 @@ def wrap(text, width=110):
 
 def main():
     rule = '=' * 110
-    parts = [HEADER, '']
+    with open(f'{ROOT}/NOTICE', encoding='utf-8') as f:
+        notice = f.read().replace('\r\n', '\n').strip('\n')
+    parts = [notice, '', rule, HEADER, '']
     for i, (name, url, what, _) in enumerate(PARTS, 1):
         parts.append(f'{i:2}. {name} - {url}')
         parts.append(wrap(what, 104).replace('\n', '\n    ').join(['    ', '']))

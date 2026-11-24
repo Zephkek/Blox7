@@ -499,10 +499,15 @@ def build_studio7():
     cc, cxx = f'{MINGW}/bin/clang.exe', f'{MINGW}/bin/clang++.exe'
     build_studio7_layer(layer)
     rule = '=' * 110
-    notices = S7_NOTICES
+    root = os.path.dirname(WIN)
+    with open(os.path.join(root, 'NOTICE'), encoding='utf-8') as f:
+        notices = f.read().replace('\r\n', '\n').strip('\n') + f'\n\n{rule}\n' + S7_NOTICES
     for number, (name, path) in enumerate((('zlib', f'{deps}/zlib/LICENSE'), ('BearSSL', f'{deps}/bearssl/LICENSE.txt')), 1):
         with open(path, encoding='utf-8', errors='replace') as f:
             notices += f'\n{rule}\n{number}. {name}\n{rule}\n' + f.read().replace('\r\n', '\n').strip('\n') + '\n'
+    with open(os.path.join(root, 'LICENSE'), encoding='utf-8') as f:
+        terms = f.read().replace('\r\n', '\n').split('END OF TERMS AND CONDITIONS')[0].rstrip().strip('\n')
+    notices += f'\n{rule}\nStudio7\'s license\n{rule}\n{terms}\n\n   END OF TERMS AND CONDITIONS\n'
     with open(os.path.join(gen, 'licenses.txt'), 'w', encoding='utf-8-sig', newline='\r\n') as f:
         f.write(notices)
     res = os.path.join(gen, 'studio7.res.o')
