@@ -68,9 +68,10 @@ int LogicalCpuFallback(const cpu_set_t* allowed) {
   return static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
 }
 
-constexpr std::array<ClientSetting, 2> kClientFixSettings = {{
+constexpr std::array<ClientSetting, 3> kClientFixSettings = {{
     {"DFFlagDebugEnableToggleForNonWindows", "True"},
     {"FFlagSlowDownRenderingHonorEarlyRelease", "True"},
+    {"FStringGraphicsGLShlangExcludeListSuperHQShaders", ""},
 }};
 
 bool MergeClientFixSettingsOverrides(std::string_view base_json,
