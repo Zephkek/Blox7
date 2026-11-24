@@ -381,6 +381,8 @@ struct EngineStartupContext {
 
 constexpr size_t kDefaultEngineStackSize = 64ULL * 1024 * 1024;
 constexpr size_t kMinEngineStackSize = 16ULL * 1024 * 1024;
+constexpr long long kSlowStartFactor = 30;
+constexpr long long kLongestStartupMs = 10 * 60 * 1000;
 
 
 bool IsEnabled(const char* name);
@@ -1311,6 +1313,19 @@ size_t GetEngineStackSize() {
 
   size_t stack_size = static_cast<size_t>(stack_mb) * 1024 * 1024;
   return stack_size < kMinEngineStackSize ? kMinEngineStackSize : stack_size;
+}
+
+int StartupThreadTimeoutMs(std::chrono::steady_clock::time_point run_started) {
+  const int configured = GetEnvInt("BLOX7_STARTUP_THREAD_TIMEOUT_MS", 0);
+  if (configured <= 0) {
+    return configured;
+  }
+  const long long spent_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - run_started)
+          .count();
+  return static_cast<int>(std::max<long long>(
+      configured, std::min(spent_ms * kSlowStartFactor, kLongestStartupMs)));
 }
 
 void PrintStage(int stage, const char* description) {
@@ -4399,6 +4414,7 @@ std::cerr << "  [engine] nativeAppBridgeV2InitWithParams recovered\n"
 
 int blox7::legacy::Run(const runtime::CommandLineOptions& options,
                           RuntimeDependencies dependencies) {
+  const auto run_started = std::chrono::steady_clock::now();
   const bool user_overrode_start_lua_app_dm =
       HasEnvValue("BLOX7_START_LUA_APP_DM");
   const bool user_overrode_start_lua_step =
@@ -6730,8 +6746,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
         return EXIT_FAILURE;
       }
 
-      const int startup_timeout_ms =
-          GetEnvInt("BLOX7_STARTUP_THREAD_TIMEOUT_MS", 0);
+      const int startup_timeout_ms = StartupThreadTimeoutMs(run_started);
       if (startup_timeout_ms <= 0) {
         std::cout << "  [engine] joining startup thread\n" << std::flush;
       } else {

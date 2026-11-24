@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -44,6 +45,11 @@ std::optional<std::string> EnvironmentValue(std::string_view name) {
   }
   return std::nullopt;
 }
+
+constexpr std::string_view kEngineStartLine =
+    "[engine] creating startup thread";
+constexpr int kSlowStartFactor = 30;
+constexpr int kLongestCanarySeconds = 600;
 
 void AddInherited(std::string_view name, std::vector<std::string>* output) {
   const auto value = EnvironmentValue(name);
@@ -280,7 +286,8 @@ bool ValidateTeardownCrashLog(CanaryGraphicsBackend backend,
 
 CanaryResult RunReadinessCanary(const CanaryOptions& options) {
   CanaryResult result;
-  if (options.timeout_seconds < 1 || options.timeout_seconds > 600) {
+  if (options.timeout_seconds < 1 ||
+      options.timeout_seconds > kLongestCanarySeconds) {
     result.error = "canary timeout must be between 1 and 600 seconds";
     return result;
   }
@@ -470,8 +477,10 @@ CanaryResult RunReadinessCanary(const CanaryOptions& options) {
     return result;
   }
 
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::seconds(options.timeout_seconds);
+  const auto started = std::chrono::steady_clock::now();
+  auto deadline = started + std::chrono::seconds(options.timeout_seconds);
+  auto next_look = started;
+  bool engine_reached = false;
   int status = 0;
   while (true) {
     const pid_t waited = waitpid(child, &status, WNOHANG);
@@ -480,7 +489,27 @@ CanaryResult RunReadinessCanary(const CanaryOptions& options) {
       result.error = "cannot wait for graphics canary";
       break;
     }
-    if (std::chrono::steady_clock::now() >= deadline) {
+    const auto now = std::chrono::steady_clock::now();
+    if (!engine_reached && now >= next_look) {
+      next_look = now + std::chrono::seconds(1);
+      std::string unread;
+      if (ReadLog(result.log_path, &unread).find(kEngineStartLine) !=
+          std::string::npos) {
+        engine_reached = true;
+        const auto allowed = std::min<std::chrono::steady_clock::duration>(
+            kSlowStartFactor * (now - started),
+            std::chrono::seconds(kLongestCanarySeconds));
+        if (started + allowed > deadline) {
+          deadline = started + allowed;
+          std::fprintf(
+              stderr, "  [update] slow start, the graphics canary gets %lld s\n",
+              static_cast<long long>(
+                  std::chrono::duration_cast<std::chrono::seconds>(allowed)
+                      .count()));
+        }
+      }
+    }
+    if (now >= deadline) {
       kill(child, SIGTERM);
       const auto kill_deadline =
           std::chrono::steady_clock::now() + std::chrono::seconds(5);
