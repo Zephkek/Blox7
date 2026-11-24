@@ -12,7 +12,10 @@
 #include "w32_kernel.h"
 
 extern "C" __attribute__((visibility("default"))) void* __w32_attach_thread() {
-  if (__get_tls() != nullptr) return __get_thread();
+  if (__get_tls() != nullptr) {
+    w32_fs_rearm();
+    return __get_thread();
+  }
 
   ThreadMapping mapping = __allocate_thread_mapping(0, PTHREAD_GUARD_SIZE);
   auto* thread = static_cast<pthread_internal_t*>(

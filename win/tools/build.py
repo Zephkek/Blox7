@@ -305,7 +305,8 @@ def build_bridge_sources():
                                   '--manual', 'SDL_GL_CreateContext,SDL_GL_MakeCurrent,SDL_GL_SwapWindow,SDL_IOFromFile,'
                                   'SDL_LoadFile,'
                                   'SDL_Vulkan_LoadLibrary,SDL_Vulkan_GetVkGetInstanceProcAddr,'
-                                  'SDL_Vulkan_CreateSurface,SDL_Vulkan_DestroySurface'])
+                                  'SDL_Vulkan_CreateSurface,SDL_Vulkan_DestroySurface',
+                                  '--attach', 'SDL_WaitEventTimeout,SDL_WaitEvent,SDL_Delay,SDL_DelayNS,SDL_DelayPrecise'])
     subprocess.check_call([sys.executable, '-I', os.path.join(HERE, 'gen-vulkan-bridge.py'),
                            f'{VULKAN_HEADERS}/include/vulkan', f'{VULKAN_HEADERS}/registry/vk.xml',
                            os.path.join(gen, 'vulkan_bridge.c')])

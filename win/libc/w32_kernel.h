@@ -97,7 +97,7 @@ void w32_init_api();
 void w32_init_threads();
 void w32_thread_attach_fs();
 extern bool g_w32_fs_modern;
-void w32_fs_rearm_now();
+extern "C" void w32_fs_rearm_now();
 inline void w32_fs_rearm() {
   if (__builtin_expect(g_w32_fs_modern, 0)) w32_fs_rearm_now();
 }

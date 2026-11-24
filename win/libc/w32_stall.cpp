@@ -175,6 +175,7 @@ DWORD g_present_thread;
 DWORD w32_present_thread() { return __atomic_load_n(&g_present_thread, __ATOMIC_RELAXED); }
 
 extern "C" __attribute__((visibility("default"))) void __w32_frame_beat() {
+  w32_fs_rearm();
   __atomic_store_n(&g_present_thread, w32.GetCurrentThreadId(), __ATOMIC_RELAXED);
   if (g_frames_gap_ns) note_frame();
   if (!g_stall_on) return;

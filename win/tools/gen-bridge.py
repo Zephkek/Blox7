@@ -1,5 +1,5 @@
 """generates an android elf lib that forwards a C api to a windows dll (sysv -> ms_abi)
-usage: gen-bridge.py <ast.json> <header dir>[,...] <dll> <out.c> [--manual a,b] [--hook name=fn,...]"""
+usage: gen-bridge.py <ast.json> <header dir>[,...] <dll> <out.c> [--manual a,b] [--hook name=fn,...] [--attach a,b]"""
 import json, re, sys
 
 ast_path, dirs, dll, out_path = sys.argv[1:5]
@@ -12,6 +12,9 @@ if '--manual' in sys.argv:
 hooks = {}
 if '--hook' in sys.argv:
     hooks = dict(h.split('=') for h in sys.argv[sys.argv.index('--hook') + 1].split(','))
+attach = set()
+if '--attach' in sys.argv:
+    attach = set(sys.argv[sys.argv.index('--attach') + 1].split(','))
 dirs = [d.replace('\\', '/') for d in dirs.split(',')]
 
 tu = json.load(open(ast_path, encoding='utf-8'))
@@ -159,6 +162,9 @@ for fn in functions:
         out.append(f'{ret} {hooks[name]}({ret} (BRIDGE_MS *)({ms_params}){hook_params});\n')
         call = f'{hooks[name]}({", ".join([ptr] + args)})'
     body = ''.join(pre) + (f'  {call};\n' if ret == 'void' else f'  return {call};\n')
+    if name in attach:
+        body = ''.join(pre) + (f'  {call};\n  bridge_attach();\n' if ret == 'void'
+                               else f'  const {ret} result = {call};\n  bridge_attach();\n  return result;\n')
     out.append(f'BRIDGE_EXPORT {ret} {name}({proto_params}) {{\n{body}}}\n')
     entries.append(name)
 

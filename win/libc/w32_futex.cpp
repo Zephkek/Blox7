@@ -195,9 +195,7 @@ long futex_wait_counted(const volatile int* addr, int value, int64_t deadline_ns
 
 long futex_wait(const volatile int* addr, int value, int64_t deadline_ns, bool realtime, uint32_t bitset) {
   if (__builtin_expect(!g_w32_stats, 1)) {
-    const long result = futex_wait_counted(addr, value, deadline_ns, realtime, bitset);
-    w32_fs_rearm();
-    return result;
+    return futex_wait_counted(addr, value, deadline_ns, realtime, bitset);
   }
   const int64_t begin = w32_monotonic_ns();
   const long result = futex_wait_counted(addr, value, deadline_ns, realtime, bitset);
@@ -205,7 +203,6 @@ long futex_wait(const volatile int* addr, int value, int64_t deadline_ns, bool r
   int64_t late = 0;
   if (result == -ETIMEDOUT && deadline_ns >= 0) late = (realtime ? w32_realtime_ns() : end) - deadline_ns;
   w32_stats_futex_wait(end - begin, late, result, w32_stats_caller());
-  w32_fs_rearm();
   return result;
 }
 

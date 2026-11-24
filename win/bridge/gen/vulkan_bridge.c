@@ -75,27 +75,39 @@ static void vkb_d_vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, u
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkQueueSubmit)(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence);
 static VkResult vkb_w_vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence) {
-  return vkb_ms_vkQueueSubmit(queue, submitCount, pSubmits, fence);
+  const VkResult result = vkb_ms_vkQueueSubmit(queue, submitCount, pSubmits, fence);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkQueueSubmit)(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence);
 static VkResult vkb_d_vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence) {
-  return vkb_msd_vkQueueSubmit(queue, submitCount, pSubmits, fence);
+  const VkResult result = vkb_msd_vkQueueSubmit(queue, submitCount, pSubmits, fence);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkQueueWaitIdle)(VkQueue queue);
 static VkResult vkb_w_vkQueueWaitIdle(VkQueue queue) {
-  return vkb_ms_vkQueueWaitIdle(queue);
+  const VkResult result = vkb_ms_vkQueueWaitIdle(queue);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkQueueWaitIdle)(VkQueue queue);
 static VkResult vkb_d_vkQueueWaitIdle(VkQueue queue) {
-  return vkb_msd_vkQueueWaitIdle(queue);
+  const VkResult result = vkb_msd_vkQueueWaitIdle(queue);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkDeviceWaitIdle)(VkDevice device);
 static VkResult vkb_w_vkDeviceWaitIdle(VkDevice device) {
-  return vkb_ms_vkDeviceWaitIdle(device);
+  const VkResult result = vkb_ms_vkDeviceWaitIdle(device);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkDeviceWaitIdle)(VkDevice device);
 static VkResult vkb_d_vkDeviceWaitIdle(VkDevice device) {
-  return vkb_msd_vkDeviceWaitIdle(device);
+  const VkResult result = vkb_msd_vkDeviceWaitIdle(device);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkAllocateMemory)(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo, const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory);
 static VkResult vkb_w_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo, const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory) {
@@ -239,11 +251,15 @@ static VkResult vkb_d_vkGetFenceStatus(VkDevice device, VkFence fence) {
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkWaitForFences)(VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout);
 static VkResult vkb_w_vkWaitForFences(VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout) {
-  return vkb_ms_vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+  const VkResult result = vkb_ms_vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkWaitForFences)(VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout);
 static VkResult vkb_d_vkWaitForFences(VkDevice device, uint32_t fenceCount, const VkFence* pFences, VkBool32 waitAll, uint64_t timeout) {
-  return vkb_msd_vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+  const VkResult result = vkb_msd_vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkCreateSemaphore)(VkDevice device, const VkSemaphoreCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSemaphore* pSemaphore);
 static VkResult vkb_w_vkCreateSemaphore(VkDevice device, const VkSemaphoreCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSemaphore* pSemaphore) {
@@ -1215,11 +1231,15 @@ static VkResult vkb_d_vkGetSemaphoreCounterValue(VkDevice device, VkSemaphore se
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkWaitSemaphores)(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout);
 static VkResult vkb_w_vkWaitSemaphores(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout) {
-  return vkb_ms_vkWaitSemaphores(device, pWaitInfo, timeout);
+  const VkResult result = vkb_ms_vkWaitSemaphores(device, pWaitInfo, timeout);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkWaitSemaphores)(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout);
 static VkResult vkb_d_vkWaitSemaphores(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout) {
-  return vkb_msd_vkWaitSemaphores(device, pWaitInfo, timeout);
+  const VkResult result = vkb_msd_vkWaitSemaphores(device, pWaitInfo, timeout);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkSignalSemaphore)(VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo);
 static VkResult vkb_w_vkSignalSemaphore(VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo) {
@@ -1355,11 +1375,15 @@ static void vkb_d_vkCmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipeline
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkQueueSubmit2)(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence);
 static VkResult vkb_w_vkQueueSubmit2(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence) {
-  return vkb_ms_vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+  const VkResult result = vkb_ms_vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkQueueSubmit2)(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence);
 static VkResult vkb_d_vkQueueSubmit2(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence) {
-  return vkb_msd_vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+  const VkResult result = vkb_msd_vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) void (BRIDGE_MS *vkb_ms_vkCmdCopyBuffer2)(VkCommandBuffer commandBuffer, const VkCopyBufferInfo2* pCopyBufferInfo);
 static void vkb_w_vkCmdCopyBuffer2(VkCommandBuffer commandBuffer, const VkCopyBufferInfo2* pCopyBufferInfo) {
@@ -1791,11 +1815,15 @@ static VkResult vkb_d_vkGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR sw
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkAcquireNextImageKHR)(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex);
 static VkResult vkb_w_vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
-  return vkb_ms_vkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
+  const VkResult result = vkb_ms_vkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkAcquireNextImageKHR)(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex);
 static VkResult vkb_d_vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* pImageIndex) {
-  return vkb_msd_vkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
+  const VkResult result = vkb_msd_vkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkQueuePresentKHR)(VkQueue queue, const VkPresentInfoKHR* pPresentInfo);
 static VkResult vkb_w_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
@@ -1831,11 +1859,15 @@ static VkResult vkb_w_vkGetPhysicalDevicePresentRectanglesKHR(VkPhysicalDevice p
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkAcquireNextImage2KHR)(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex);
 static VkResult vkb_w_vkAcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex) {
-  return vkb_ms_vkAcquireNextImage2KHR(device, pAcquireInfo, pImageIndex);
+  const VkResult result = vkb_ms_vkAcquireNextImage2KHR(device, pAcquireInfo, pImageIndex);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkAcquireNextImage2KHR)(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex);
 static VkResult vkb_d_vkAcquireNextImage2KHR(VkDevice device, const VkAcquireNextImageInfoKHR* pAcquireInfo, uint32_t* pImageIndex) {
-  return vkb_msd_vkAcquireNextImage2KHR(device, pAcquireInfo, pImageIndex);
+  const VkResult result = vkb_msd_vkAcquireNextImage2KHR(device, pAcquireInfo, pImageIndex);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkGetPhysicalDeviceDisplayPropertiesKHR)(VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkDisplayPropertiesKHR* pProperties);
 static VkResult vkb_w_vkGetPhysicalDeviceDisplayPropertiesKHR(VkPhysicalDevice physicalDevice, uint32_t* pPropertyCount, VkDisplayPropertiesKHR* pProperties) {
@@ -2327,11 +2359,15 @@ static VkResult vkb_d_vkGetSemaphoreCounterValueKHR(VkDevice device, VkSemaphore
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkWaitSemaphoresKHR)(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout);
 static VkResult vkb_w_vkWaitSemaphoresKHR(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout) {
-  return vkb_ms_vkWaitSemaphoresKHR(device, pWaitInfo, timeout);
+  const VkResult result = vkb_ms_vkWaitSemaphoresKHR(device, pWaitInfo, timeout);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkWaitSemaphoresKHR)(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout);
 static VkResult vkb_d_vkWaitSemaphoresKHR(VkDevice device, const VkSemaphoreWaitInfo* pWaitInfo, uint64_t timeout) {
-  return vkb_msd_vkWaitSemaphoresKHR(device, pWaitInfo, timeout);
+  const VkResult result = vkb_msd_vkWaitSemaphoresKHR(device, pWaitInfo, timeout);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkSignalSemaphoreKHR)(VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo);
 static VkResult vkb_w_vkSignalSemaphoreKHR(VkDevice device, const VkSemaphoreSignalInfo* pSignalInfo) {
@@ -2543,11 +2579,15 @@ static void vkb_d_vkCmdWriteTimestamp2KHR(VkCommandBuffer commandBuffer, VkPipel
 }
 __attribute__((visibility("hidden"))) VkResult (BRIDGE_MS *vkb_ms_vkQueueSubmit2KHR)(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence);
 static VkResult vkb_w_vkQueueSubmit2KHR(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence) {
-  return vkb_ms_vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+  const VkResult result = vkb_ms_vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+  bridge_attach();
+  return result;
 }
 static VkResult (BRIDGE_MS *vkb_msd_vkQueueSubmit2KHR)(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence);
 static VkResult vkb_d_vkQueueSubmit2KHR(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits, VkFence fence) {
-  return vkb_msd_vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+  const VkResult result = vkb_msd_vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+  bridge_attach();
+  return result;
 }
 __attribute__((visibility("hidden"))) void (BRIDGE_MS *vkb_ms_vkCmdBindIndexBuffer3KHR)(VkCommandBuffer commandBuffer, const VkBindIndexBuffer3InfoKHR* pInfo);
 static void vkb_w_vkCmdBindIndexBuffer3KHR(VkCommandBuffer commandBuffer, const VkBindIndexBuffer3InfoKHR* pInfo) {

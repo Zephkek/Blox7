@@ -192,7 +192,6 @@ void sleep_until(int64_t deadline, bool realtime) {
     now = realtime ? w32_realtime_ns() : w32_monotonic_ns();
   }
   if (stats) w32_stats_sleep(deadline - begin, now - begin, spin_begin ? now - spin_begin : 0, yields, w32_stats_caller());
-  w32_fs_rearm();
 }
 
 using PreciseTimeFn = void(WINAPI*)(W32_FILETIME*);

@@ -4,7 +4,10 @@
 
 long __set_errno_internal(int);
 long __w32_enosys(const char* name);
-#define W32_RESULT(r) ((unsigned long)(r) > -4096UL ? __set_errno_internal((int)-(r)) : (r))
+extern _Bool g_w32_fs_modern;
+void w32_fs_rearm_now(void);
+static inline void w32_back(void) { if (g_w32_fs_modern) w32_fs_rearm_now(); }
+#define W32_RESULT(r) (w32_back(), (unsigned long)(r) > -4096UL ? __set_errno_internal((int)-(r)) : (r))
 
 __attribute__((weak)) long sys__sysctl(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("_sysctl"); }
 __attribute__((weak)) long sys_accept(long a0, long a1, long a2, long a3, long a4, long a5) { return __w32_enosys("accept"); }

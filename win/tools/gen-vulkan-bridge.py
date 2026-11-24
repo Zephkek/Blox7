@@ -7,6 +7,9 @@ inc, xml_path, out_path = sys.argv[1:4]
 core = open(f'{inc}/vulkan_core.h', encoding='utf-8').read()
 
 AFTER = {'vkQueuePresentKHR': '__w32_frame_beat();'}
+for waits in ('vkAcquireNextImageKHR', 'vkAcquireNextImage2KHR', 'vkWaitForFences', 'vkWaitSemaphores', 'vkWaitSemaphoresKHR',
+              'vkQueueSubmit', 'vkQueueSubmit2', 'vkQueueSubmit2KHR', 'vkQueueWaitIdle', 'vkDeviceWaitIdle'):
+    AFTER[waits] = 'bridge_attach();'
 MANUAL = {'vkGetInstanceProcAddr', 'vkGetDeviceProcAddr', 'vkCreateInstance', 'vkCreateDevice',
           'vkCreateDebugUtilsMessengerEXT', 'vkCreateDebugReportCallbackEXT'}
 DEVICE_HANDLES = {'VkDevice', 'VkQueue', 'VkCommandBuffer'}

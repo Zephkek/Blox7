@@ -3315,11 +3315,15 @@ BRIDGE_EXPORT bool SDL_PollEvent(SDL_Event * a0) {
 }
 static bool (BRIDGE_MS *p_SDL_WaitEvent)(SDL_Event *);
 BRIDGE_EXPORT bool SDL_WaitEvent(SDL_Event * a0) {
-  return p_SDL_WaitEvent(a0);
+  const bool result = p_SDL_WaitEvent(a0);
+  bridge_attach();
+  return result;
 }
 static bool (BRIDGE_MS *p_SDL_WaitEventTimeout)(SDL_Event *, Sint32);
 BRIDGE_EXPORT bool SDL_WaitEventTimeout(SDL_Event * a0, Sint32 a1) {
-  return p_SDL_WaitEventTimeout(a0, a1);
+  const bool result = p_SDL_WaitEventTimeout(a0, a1);
+  bridge_attach();
+  return result;
 }
 static bool (BRIDGE_MS *p_SDL_PushEvent)(SDL_Event *);
 BRIDGE_EXPORT bool SDL_PushEvent(SDL_Event * a0) {
@@ -4824,14 +4828,17 @@ BRIDGE_EXPORT Uint64 SDL_GetPerformanceFrequency(void) {
 static void (BRIDGE_MS *p_SDL_Delay)(Uint32);
 BRIDGE_EXPORT void SDL_Delay(Uint32 a0) {
   p_SDL_Delay(a0);
+  bridge_attach();
 }
 static void (BRIDGE_MS *p_SDL_DelayNS)(Uint64);
 BRIDGE_EXPORT void SDL_DelayNS(Uint64 a0) {
   p_SDL_DelayNS(a0);
+  bridge_attach();
 }
 static void (BRIDGE_MS *p_SDL_DelayPrecise)(Uint64);
 BRIDGE_EXPORT void SDL_DelayPrecise(Uint64 a0) {
   p_SDL_DelayPrecise(a0);
+  bridge_attach();
 }
 static SDL_TimerID (BRIDGE_MS *p_SDL_AddTimer)(Uint32, SDL_TimerCallback, void *);
 BRIDGE_EXPORT SDL_TimerID SDL_AddTimer(Uint32 a0, SDL_TimerCallback a1, void * a2) {

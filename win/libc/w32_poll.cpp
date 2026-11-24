@@ -308,7 +308,6 @@ long wait_items(Item* items, size_t n, int64_t deadline, SOCKET extra_wake = INV
     } else if (wait != 0) {
       w32.Sleep(wait < 0 ? 0xfffffffe : static_cast<DWORD>((wait + 999999) / 1000000));
     }
-    w32_fs_rearm();
     if (got > 0) {
       for (size_t i = 0; i < n; i++) {
         Item& it = items[i];
