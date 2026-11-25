@@ -1241,6 +1241,19 @@ VkResult VulkanEtc2Emulation::CreateImageView(
   }
   VkImageViewCreateInfo host_info = *create_info;
   host_info.format = format.host_format;
+  if (format.etc_format == EtcFormat::kEtc2Rgb8) {
+    VkComponentSwizzle* const swizzles[] = {
+        &host_info.components.r, &host_info.components.g,
+        &host_info.components.b, &host_info.components.a};
+    for (VkComponentSwizzle* swizzle : swizzles) {
+      if (*swizzle == VK_COMPONENT_SWIZZLE_A) {
+        *swizzle = VK_COMPONENT_SWIZZLE_ONE;
+      }
+    }
+    if (host_info.components.a == VK_COMPONENT_SWIZZLE_IDENTITY) {
+      host_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
+    }
+  }
   return dev->create_image_view(device, &host_info, allocator, view);
 }
 
