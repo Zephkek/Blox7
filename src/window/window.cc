@@ -475,6 +475,8 @@ bool WindowsAngleOff() { return StringEquals(WindowsAngleMode(), "off"); }
 
 bool WindowsAngleWarp() { return StringEquals(WindowsAngleMode(), "warp"); }
 
+bool WindowsAngleFastPresent() { return !StringEquals(GetEnvNonEmpty("BLOX7_ANGLE_PRESENT"), "copy"); }
+
 bool WindowsAngleForced() {
   return g_auto_angle_retry_attempted ||
          StringEquals(WindowsAngleMode(), "on") || WindowsAngleWarp();
@@ -580,7 +582,7 @@ SDL_EGLAttrib* SDLCALL AngleD3D11PlatformAttributes(void*) {
     return nullptr;
   }
   int i = 0;
-  if (!StringEquals(GetEnvNonEmpty("BLOX7_ANGLE_PRESENT"), "copy")) {
+  if (WindowsAngleFastPresent()) {
     attrs[i++] = EGL_EXPERIMENTAL_PRESENT_PATH_ANGLE_VAL;
     attrs[i++] = EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE_VAL;
   }
@@ -647,7 +649,7 @@ void EnableAngleShaderCache() {
   const blox7::runtime::ProcessEnvironment environment;
   const std::string dir =
       (blox7::runtime::RuntimePaths::FromEnvironment(environment).cache_root() /
-       "angle")
+       (WindowsAngleFastPresent() ? "angle" : "angle-copy"))
           .string();
   if (blox7_angle_blob_cache(dir.c_str())) {
     fprintf(stderr, "  [window] ANGLE keeps compiled shaders in %s\n",
