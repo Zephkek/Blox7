@@ -262,7 +262,6 @@ class RobloxExperienceComposition final {
   bool game_active_ = false;
   bool playing_presence_published_ = false;
   bool lua_app_return_pending_ = false;
-  bool controlled_switch_waiting_for_return_ = false;
   bool lua_app_surface_recreation_pending_ = false;
   bool late_surface_tracking_ = false;
   GameSurface late_surface_snapshot_;

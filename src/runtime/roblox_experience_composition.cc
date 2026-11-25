@@ -520,7 +520,6 @@ Status RobloxExperienceComposition::OnLuaAppReady(
   {
     std::lock_guard<std::mutex> lock(mutex_);
     readiness_ = std::move(readiness);
-    controlled_switch_waiting_for_return_ = false;
     lua_app_surface_recreation_pending_ = false;
     controller_ = controller;
     bridge_objects.message_bus = objects_->message_bus;
@@ -1329,7 +1328,6 @@ Status RobloxExperienceComposition::DrainLaunchRequests() {
       active_game_canonical_json_.clear();
       presence_request_.reset();
       playing_presence_published_ = false;
-      controlled_switch_waiting_for_return_ = false;
     }
     NotifyPresence(RobloxExperiencePresencePhase::kBrowsing, nullptr);
   }
@@ -1345,23 +1343,15 @@ Status RobloxExperienceComposition::DrainLaunchRequests() {
     if (!subscribed_ || controller_ == nullptr || objects_ == nullptr) {
       return FailedPrecondition("experience composition is not subscribed");
     }
-    if (controlled_switch_waiting_for_return_)
-      return Status::Ok();
     if (!launch_in_progress_ && active_launch_ == nullptr && game_active_ &&
         !pending_launch_requests_.empty()) {
-      controlled_switch_waiting_for_return_ = true;
       switch_active_game = true;
     }
   }
   if (switch_active_game) {
     std::fprintf(stderr,
                  "[experience] leaving active game for queued launch\n");
-    const Status leave_status = LeaveGame();
-    if (!leave_status.ok()) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      controlled_switch_waiting_for_return_ = false;
-    }
-    return leave_status;
+    return LeaveGame();
   }
 
   {
@@ -1610,7 +1600,6 @@ Status RobloxExperienceComposition::Shutdown() {
     presence_request_.reset();
     playing_presence_published_ = false;
     lua_app_return_pending_ = false;
-    controlled_switch_waiting_for_return_ = false;
     lua_app_surface_recreation_pending_ = false;
     pending_launch_requests_.clear();
     bridge = std::move(bridge_);
@@ -2133,7 +2122,6 @@ Status RobloxExperienceComposition::ReleaseGlobalObjects() {
     active_game_canonical_json_.clear();
     presence_request_.reset();
     playing_presence_published_ = false;
-    controlled_switch_waiting_for_return_ = false;
     lua_app_surface_recreation_pending_ = false;
     pending_launch_requests_.clear();
     next_request_id_ = 1;
@@ -2169,7 +2157,6 @@ Status RobloxExperienceComposition::ReleaseLuaAppGlobalObjects() {
     active_game_canonical_json_.clear();
     presence_request_.reset();
     playing_presence_published_ = false;
-    controlled_switch_waiting_for_return_ = false;
     pending_launch_requests_.clear();
     next_request_id_ = 1;
   }
