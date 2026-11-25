@@ -123,6 +123,7 @@ W32_MODULE(u"ntdll.dll")
 W32_FN(long, NtQueryInformationProcess, HANDLE, unsigned, void*, unsigned, unsigned*)
 W32_FN(long, RtlGetVersion, void*)
 W32_FN(long, NtDelayExecution, unsigned char, const int64_t*)
+W32_FN(long, NtQueryVolumeInformationFile, HANDLE, void*, void*, unsigned, unsigned)
 
 W32_MODULE(u"advapi32.dll")
 W32_FN(BOOL, SystemFunction036, void*, DWORD)  // RtlGenRandom wearing a fake mustache

@@ -17,8 +17,10 @@ namespace {
 constexpr DWORD MEM_COMMIT = 0x1000, MEM_RESERVE = 0x2000, MEM_DECOMMIT = 0x4000, MEM_RELEASE = 0x8000;
 constexpr DWORD MEM_FREE = 0x10000, MEM_RESET = 0x80000, MEM_PRIVATE = 0x20000, MEM_MAPPED = 0x40000;
 constexpr DWORD PAGE_NOACCESS = 0x01, PAGE_READONLY = 0x02, PAGE_READWRITE = 0x04, PAGE_GUARD = 0x100;
-constexpr DWORD FILE_MAP_WRITE = 0x2, FILE_MAP_READ = 0x4;
-constexpr DWORD GENERIC_READ = 0x80000000, GENERIC_WRITE = 0x40000000, FILE_SHARE_ALL = 7, OPEN_EXISTING = 3;
+constexpr DWORD PAGE_WRITECOPY = 0x08, PAGE_EXECUTE_READ = 0x20, PAGE_EXECUTE_WRITECOPY = 0x80;
+constexpr DWORD FILE_MAP_COPY = 0x1, FILE_MAP_WRITE = 0x2, FILE_MAP_READ = 0x4, FILE_MAP_EXECUTE = 0x20;
+constexpr DWORD GENERIC_READ = 0x80000000, GENERIC_WRITE = 0x40000000, GENERIC_EXECUTE = 0x20000000;
+constexpr DWORD FILE_SHARE_READ = 1, FILE_SHARE_DELETE = 4, FILE_SHARE_ALL = 7, OPEN_EXISTING = 3;
 constexpr DWORD FILE_FLAG_BACKUP_SEMANTICS = 0x02000000, VOLUME_NAME_NT = 0x2;
 constexpr uintptr_t kPage = 4096, kGranularity = 65536;
 
@@ -193,6 +195,13 @@ struct FilePut {
   }
 };
 
+bool copy_on_write(uintptr_t start, uintptr_t end, int prot) {
+  DWORD old;
+  void* p = reinterpret_cast<void*>(start);
+  return ((prot & PROT_EXEC) && w32.VirtualProtect(p, end - start, PAGE_EXECUTE_WRITECOPY, &old)) ||
+         w32.VirtualProtect(p, end - start, PAGE_WRITECOPY, &old);
+}
+
 bool replace_pages(uintptr_t start, uintptr_t end, int prot) {
   size_t len = end - start;
   w32.VirtualFree(reinterpret_cast<void*>(start), len, MEM_DECOMMIT);
@@ -206,6 +215,7 @@ struct Sections {
   BOOL(WINAPI* unmap)(const void*);
   BOOL(WINAPI* flush)(const void*, size_t);
   HANDLE(WINAPI* reopen)(HANDLE, DWORD, DWORD, DWORD);
+  BOOL(WINAPI* prefetch)(HANDLE, uintptr_t, void*, DWORD);
 };
 Sections g_sections;
 int g_sections_state;
@@ -221,6 +231,7 @@ bool sections() {
     s.unmap = reinterpret_cast<decltype(s.unmap)>(w32_boot->GetProcAddress(k, "UnmapViewOfFile"));
     s.flush = reinterpret_cast<decltype(s.flush)>(w32_boot->GetProcAddress(k, "FlushViewOfFile"));
     s.reopen = reinterpret_cast<decltype(s.reopen)>(w32_boot->GetProcAddress(k, "ReOpenFile"));
+    s.prefetch = reinterpret_cast<decltype(s.prefetch)>(w32_boot->GetProcAddress(k, "PrefetchVirtualMemory"));
   }
   const bool ok = s.create && s.map && s.unmap && s.flush && s.reopen;
   if (ok) g_sections = s;
@@ -422,6 +433,279 @@ long fill_from_handle(HANDLE h, uintptr_t addr, size_t len, uint64_t offset) {
     done += got;
   }
   return 0;
+}
+
+bool cached(const volatile uint8_t* start, size_t bytes) {
+  constexpr int kProbes = 64, kSlow = 3;
+  int64_t rate = 0, before = 0, after = 0;
+  w32.QueryPerformanceFrequency(&rate);
+  const int64_t limit = rate * 30 / 1000000;
+  int slow = 0;
+  for (int i = 0; i < kProbes && slow < kSlow; i++) {
+    w32.QueryPerformanceCounter(&before);
+    (void)start[(bytes / kProbes * i) & ~(kPage - 1)];
+    w32.QueryPerformanceCounter(&after);
+    slow += after - before > limit;
+  }
+  return slow < kSlow;
+}
+
+void read_ahead(HANDLE file, void* start, size_t bytes) {
+  if (cached(static_cast<const uint8_t*>(start), bytes)) return;
+  struct {
+    void* start;
+    size_t bytes;
+  } range{start, bytes};
+  if (g_sections.prefetch && g_sections.prefetch(w32.GetCurrentProcess(), 1, &range, 0)) return;
+  constexpr size_t kChunk = 1 << 20;
+  void* scratch = w32.VirtualAlloc(nullptr, kChunk, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  for (size_t at = 0; scratch && at < bytes; at += kChunk)
+    if (fill_from_handle(file, reinterpret_cast<uintptr_t>(scratch), bytes - at < kChunk ? bytes - at : kChunk, at) < 0) break;
+  if (scratch) w32.VirtualFree(scratch, 0, MEM_RELEASE);
+}
+
+struct Image {
+  uintptr_t start, end;
+  HANDLE file;
+  uint8_t* both;
+  bool rigid;
+};
+Image g_images[4];
+unsigned g_tables_version;
+W32_SRWLOCK g_both_lock;
+int g_both_images;
+
+struct Rewrite {
+  Rewrite() { __atomic_add_fetch(&g_tables_version, 1, __ATOMIC_SEQ_CST); }
+  ~Rewrite() { __atomic_add_fetch(&g_tables_version, 1, __ATOMIC_SEQ_CST); }
+};
+
+template <typename Fn>
+auto settled(Fn read) {
+  for (;;) {
+    const unsigned version = __atomic_load_n(&g_tables_version, __ATOMIC_SEQ_CST);
+    const auto result = read();
+    if (!(version & 1) && version == __atomic_load_n(&g_tables_version, __ATOMIC_SEQ_CST)) return result;
+    __builtin_ia32_pause();
+  }
+}
+
+bool on_local_disk(HANDLE file) {
+  struct {
+    uintptr_t status, information;
+  } io{};
+  struct {
+    DWORD type, characteristics;
+  } device{};
+  constexpr unsigned kFileFsDeviceInformation = 4;
+  constexpr DWORD kRemovableMedia = 0x1, kRemoteDevice = 0x10;
+  return w32.NtQueryVolumeInformationFile(file, &io, &device, sizeof device, kFileFsDeviceInformation) >= 0 &&
+         !(device.characteristics & (kRemovableMedia | kRemoteDevice));
+}
+
+bool can_patch(uint8_t* view) {
+  DWORD old;
+  return w32.VirtualProtect(view, kPage, PAGE_EXECUTE_WRITECOPY, &old) && w32.VirtualProtect(view, kPage, old, &old);
+}
+
+uint8_t* place(HANDLE section, DWORD access, size_t view, size_t span) {
+  for (int tries = 0; tries < 64; tries++) {
+    auto* room = static_cast<uint8_t*>(w32.VirtualAlloc(nullptr, span, MEM_RESERVE, PAGE_NOACCESS));
+    if (!room) break;
+    w32.VirtualFree(room, 0, MEM_RELEASE);
+    if (!g_sections.map(section, access, 0, 0, view, room)) continue;
+    if (w32.VirtualAlloc(room + view, span - view, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)) return room;
+    g_sections.unmap(room);
+  }
+  return nullptr;
+}
+
+void displace(uint8_t* base, size_t view) {
+  g_sections.unmap(base);
+  w32.VirtualFree(base + view, 0, MEM_RELEASE);
+}
+
+void touch(const volatile uint8_t* p, size_t bytes) {
+  for (size_t at = 0; at < bytes; at += kPage) (void)p[at];
+}
+
+void claim(Image* slot, HANDLE file, uint8_t* base, size_t view, bool rigid) {
+  Rewrite rewrite;
+  slot->file = file;
+  slot->both = nullptr;
+  __atomic_store_n(&slot->rigid, rigid, __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->start, reinterpret_cast<uintptr_t>(base), __ATOMIC_RELAXED);
+  __atomic_store_n(&slot->end, reinterpret_cast<uintptr_t>(base) + view, __ATOMIC_RELAXED);
+}
+
+void disclaim(Image* slot) {
+  Rewrite rewrite;
+  __atomic_store_n(&slot->end, 0, __ATOMIC_RELAXED);
+}
+
+Image* rigid_at(uintptr_t a) {
+  return settled([a]() -> Image* {
+    for (Image& i : g_images)
+      if (a >= __atomic_load_n(&i.start, __ATOMIC_RELAXED) && a < __atomic_load_n(&i.end, __ATOMIC_RELAXED))
+        return __atomic_load_n(&i.rigid, __ATOMIC_RELAXED) ? &i : nullptr;
+    return nullptr;
+  });
+}
+
+bool both_at(const Image* i, uintptr_t a) {
+  const size_t page = (a - i->start) / kPage;
+  return i->both && (i->both[page / 8] >> (page % 8) & 1);
+}
+
+bool writable_turn(uintptr_t start, size_t len) {
+  bool any = false;
+  DWORD old;
+  w32.AcquireSRWLockShared(&g_both_lock);
+  for (Image& i : g_images) {
+    if (!i.end || !i.both) continue;
+    const uintptr_t lo = start > i.start ? start & ~(kPage - 1) : i.start, hi = start + len < i.end ? start + len : i.end;
+    for (uintptr_t page = lo; page < hi; page += kPage)
+      if (both_at(&i, page) && w32.VirtualProtect(reinterpret_cast<void*>(page), kPage, PAGE_WRITECOPY, &old)) any = true;
+  }
+  w32.ReleaseSRWLockShared(&g_both_lock);
+  return any;
+}
+
+bool writable_turn(const W32_WSABUF* list, DWORD count) {
+  bool any = false;
+  for (DWORD k = 0; k < count; k++) any |= writable_turn(reinterpret_cast<uintptr_t>(list[k].buf), list[k].len);
+  return any;
+}
+
+constexpr DWORD kNoAccess = 998, kWsaFault = 10014;
+constexpr int kTurns = 8;
+decltype(w32.ReadFile) g_read_file;
+decltype(w32.recv) g_recv;
+decltype(w32.WSARecv) g_wsa_recv;
+decltype(w32.WSARecvFrom) g_wsa_recv_from;
+
+BOOL WINAPI read_file(HANDLE h, void* buf, DWORD len, DWORD* got, W32_OVERLAPPED* ov) {
+  for (int tries = 0;; tries++) {
+    if (g_read_file(h, buf, len, got, ov)) return 1;
+    if (w32.GetLastError() != kNoAccess) return 0;
+    if (tries == kTurns || !writable_turn(reinterpret_cast<uintptr_t>(buf), len)) break;
+  }
+  w32.SetLastError(kNoAccess);
+  return 0;
+}
+
+int WINAPI recv_into(SOCKET s, char* buf, int len, int flags) {
+  for (int tries = 0;; tries++) {
+    const int r = g_recv(s, buf, len, flags);
+    if (r >= 0 || static_cast<DWORD>(w32.WSAGetLastError()) != kWsaFault) return r;
+    if (tries == kTurns || len <= 0 || !writable_turn(reinterpret_cast<uintptr_t>(buf), static_cast<size_t>(len))) break;
+  }
+  w32.SetLastError(kWsaFault);
+  return -1;
+}
+
+int WINAPI wsa_recv(SOCKET s, W32_WSABUF* list, DWORD count, DWORD* got, DWORD* flags, void* ov, void* done) {
+  for (int tries = 0;; tries++) {
+    const int r = g_wsa_recv(s, list, count, got, flags, ov, done);
+    if (r == 0 || static_cast<DWORD>(w32.WSAGetLastError()) != kWsaFault) return r;
+    if (tries == kTurns || !writable_turn(list, count)) break;
+  }
+  w32.SetLastError(kWsaFault);
+  return -1;
+}
+
+int WINAPI wsa_recv_from(SOCKET s, W32_WSABUF* list, DWORD count, DWORD* got, DWORD* flags, void* from, int* from_len, void* ov,
+                         void* done) {
+  for (int tries = 0;; tries++) {
+    const int r = g_wsa_recv_from(s, list, count, got, flags, from, from_len, ov, done);
+    if (r == 0 || static_cast<DWORD>(w32.WSAGetLastError()) != kWsaFault) return r;
+    if (tries == kTurns || !writable_turn(list, count)) break;
+  }
+  w32.SetLastError(kWsaFault);
+  return -1;
+}
+
+void fill_through_turns() {
+  g_read_file = w32.ReadFile;
+  g_recv = w32.recv;
+  g_wsa_recv = w32.WSARecv;
+  g_wsa_recv_from = w32.WSARecvFrom;
+  __atomic_store_n(&w32.ReadFile, &read_file, __ATOMIC_RELEASE);
+  __atomic_store_n(&w32.recv, &recv_into, __ATOMIC_RELEASE);
+  __atomic_store_n(&w32.WSARecv, &wsa_recv, __ATOMIC_RELEASE);
+  __atomic_store_n(&w32.WSARecvFrom, &wsa_recv_from, __ATOMIC_RELEASE);
+}
+
+long protect_rigid(Image* i, uintptr_t s, uintptr_t e, int prot) {
+  const bool both = (prot & PROT_WRITE) && (prot & PROT_EXEC);
+  DWORD old;
+  w32.AcquireSRWLockExclusive(&g_both_lock);
+  if (both && !i->both) {
+    i->both = static_cast<uint8_t*>(
+        w32.VirtualAlloc(nullptr, ((i->end - i->start) / kPage + 7) / 8, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    if (i->both && __atomic_add_fetch(&g_both_images, 1, __ATOMIC_RELAXED) == 1) fill_through_turns();
+  }
+  long result = both && !i->both ? -ENOMEM : 0;
+  if (!result &&
+      !w32.VirtualProtect(reinterpret_cast<void*>(s), e - s, (prot & PROT_WRITE) ? PAGE_WRITECOPY : protection(prot), &old))
+    result = -EACCES;
+  for (size_t page = (s - i->start) / kPage; !result && i->both && page < (e - i->start) / kPage; page++) {
+    if (both) i->both[page / 8] |= static_cast<uint8_t>(1 << (page % 8));
+    else i->both[page / 8] &= static_cast<uint8_t>(~(1 << (page % 8)));
+  }
+  w32.ReleaseSRWLockExclusive(&g_both_lock);
+  return result;
+}
+
+struct Turn {
+  DWORD thread;
+  int rounds;
+  uintptr_t rip, page;
+  bool wrote;
+};
+Turn g_turns[64];
+
+bool stuck(bool write, uintptr_t rip, uintptr_t page) {
+  const DWORD thread = w32.GetCurrentThreadId();
+  Turn& t = g_turns[thread % 64];
+  const bool same = t.thread == thread && t.rip == rip && t.page == page;
+  if (write) {
+    if (!same) t = Turn{thread, 0, rip, page, false};
+    t.wrote = true;
+    return false;
+  }
+  if (!same) return false;
+  if (!t.wrote) {
+    t.rounds = 0;
+    return false;
+  }
+  t.wrote = false;
+  return ++t.rounds >= 16;
+}
+
+struct Span {
+  uintptr_t start, end;
+};
+constexpr int kKept = 2048;
+Span g_kept[kKept];
+int g_kept_count;
+uintptr_t g_kept_lo = UINTPTR_MAX, g_kept_hi;
+
+void next_kept(uintptr_t addr, uintptr_t end, uintptr_t* s, uintptr_t* e) {
+  if (addr >= __atomic_load_n(&g_kept_hi, __ATOMIC_RELAXED) || end <= __atomic_load_n(&g_kept_lo, __ATOMIC_RELAXED)) return;
+  const Span lowest = settled([addr, end, first = Span{*s, *e}] {
+    Span found = first;
+    const int n = __atomic_load_n(&g_kept_count, __ATOMIC_RELAXED);
+    for (int i = 0; i < n; i++) {
+      const uintptr_t ks = __atomic_load_n(&g_kept[i].start, __ATOMIC_RELAXED);
+      const uintptr_t ke = __atomic_load_n(&g_kept[i].end, __ATOMIC_RELAXED);
+      const uintptr_t from = ks > addr ? ks : addr;
+      if (ke > addr && ks < end && from < found.start) found = Span{from, ke < end ? ke : end};
+    }
+    return found;
+  });
+  *s = lowest.start;
+  *e = lowest.end;
 }
 
 // GLOBALROOT + the mapped name finds the file even after a rename
@@ -1003,6 +1287,112 @@ bool w32_mem_run_at(uintptr_t a, uintptr_t* end, DWORD* protect, DWORD* state) {
   return r != nullptr;
 }
 
+void* w32_mem_map_image(int fd, size_t view, size_t span, bool patched) {
+  if (!sections()) return nullptr;
+  Image* slot = nullptr;
+  for (Image& i : g_images)
+    if (!i.end && !slot) slot = &i;
+  W32File* f = w32_fd_get(fd);
+  FilePut put{f};
+  if (!slot || !f || f->kind != W32Kind::kFile) return nullptr;
+  HANDLE file = g_sections.reopen(f->handle, GENERIC_READ | GENERIC_EXECUTE, FILE_SHARE_READ | FILE_SHARE_DELETE, 0);
+  if (file == INVALID_HANDLE_VALUE) return nullptr;
+  HANDLE section = on_local_disk(file) ? g_sections.create(file, nullptr, PAGE_EXECUTE_WRITECOPY, 0, 0, nullptr) : nullptr;
+  uint8_t* base = section ? place(section, FILE_MAP_READ | FILE_MAP_EXECUTE, view, span) : nullptr;
+  bool rigid = base && !can_patch(base);
+  if (rigid && patched) {
+    displace(base, view);
+    base = place(section, FILE_MAP_COPY | FILE_MAP_EXECUTE, view, span);
+    if (base) {
+      DWORD old;
+      claim(slot, file, base, view, false);
+      read_ahead(file, base, view);
+      touch(base, view);
+      if (!w32.VirtualProtect(base, view, PAGE_EXECUTE_READ, &old) || !can_patch(base)) {
+        disclaim(slot);
+        displace(base, view);
+        base = nullptr;
+      }
+    }
+    rigid = false;
+  }
+  if (section) w32.CloseHandle(section);
+  if (!base) {
+    w32.CloseHandle(file);
+    return nullptr;
+  }
+  if (!slot->end) {
+    claim(slot, file, base, view, rigid);
+    read_ahead(file, base, view);
+  }
+  return base;
+}
+
+void w32_mem_unmap_image(void* base, size_t view) {
+  for (Image& i : g_images) {
+    if (!i.end || i.start != reinterpret_cast<uintptr_t>(base)) continue;
+    disclaim(&i);
+    w32.CloseHandle(i.file);
+  }
+  displace(static_cast<uint8_t*>(base), view);
+}
+
+bool w32_mem_in_image(uintptr_t a) {
+  return settled([a] {
+    for (const Image& i : g_images)
+      if (a >= __atomic_load_n(&i.start, __ATOMIC_RELAXED) && a < __atomic_load_n(&i.end, __ATOMIC_RELAXED)) return true;
+    return false;
+  });
+}
+
+bool w32_mem_image_fault(uintptr_t a, bool write, uintptr_t rip) {
+  if (!__atomic_load_n(&g_both_images, __ATOMIC_RELAXED)) return false;
+  Image* i = rigid_at(a);
+  if (!i) return false;
+  const uintptr_t page = a & ~(kPage - 1);
+  DWORD old;
+  w32.AcquireSRWLockShared(&g_both_lock);
+  const bool ours = both_at(i, a) &&
+                    w32.VirtualProtect(reinterpret_cast<void*>(page), kPage, write ? PAGE_WRITECOPY : PAGE_EXECUTE_READ, &old);
+  w32.ReleaseSRWLockShared(&g_both_lock);
+  if (ours && stuck(write, rip, page))
+    w32_fatal("Roblox rewrote the page of code it was running from (BLOX7_W32_IMAGE=copy allows it)");
+  return ours;
+}
+
+bool w32_mem_both(uintptr_t a, uintptr_t end, uintptr_t* until) {
+  *until = end;
+  if (!__atomic_load_n(&g_both_images, __ATOMIC_RELAXED)) return false;
+  Image* i = rigid_at(a);
+  if (!i) return false;
+  w32.AcquireSRWLockShared(&g_both_lock);
+  const bool both = both_at(i, a);
+  uintptr_t at = a + kPage;
+  while (at < end && at < i->end && both_at(i, at) == both) at += kPage;
+  w32.ReleaseSRWLockShared(&g_both_lock);
+  if (at < end) *until = at;
+  return both;
+}
+
+void w32_mem_keep(uintptr_t start, uintptr_t end) {
+  const int n = g_kept_count;
+  int at = 0;
+  while (at < n && g_kept[at].end) at++;
+  if (start >= end || at == kKept) return;
+  Rewrite rewrite;
+  __atomic_store_n(&g_kept[at].start, start, __ATOMIC_RELAXED);
+  __atomic_store_n(&g_kept[at].end, end, __ATOMIC_RELAXED);
+  if (start < g_kept_lo) __atomic_store_n(&g_kept_lo, start, __ATOMIC_RELAXED);
+  if (end > g_kept_hi) __atomic_store_n(&g_kept_hi, end, __ATOMIC_RELAXED);
+  if (at == n) __atomic_store_n(&g_kept_count, n + 1, __ATOMIC_RELAXED);
+}
+
+void w32_mem_unkeep(uintptr_t start, uintptr_t end) {
+  Rewrite rewrite;
+  for (int i = 0; i < g_kept_count; i++)
+    if (g_kept[i].end && g_kept[i].start >= start && g_kept[i].end <= end) __atomic_store_n(&g_kept[i].end, 0, __ATOMIC_RELAXED);
+}
+
 long sys_mmap(long addr_l, long length, long prot_l, long flags_l, long fd_l, long offset) {
   uintptr_t addr = static_cast<uintptr_t>(addr_l);
   int prot = static_cast<int>(prot_l), flags = static_cast<int>(flags_l), fd = static_cast<int>(fd_l);
@@ -1160,7 +1550,11 @@ long sys_mprotect(long addr_l, long length, long prot_l, long, long, long) {
         result = -ENOMEM;
         return false;
       }
-    } else if (!w32.VirtualProtect(reinterpret_cast<void*>(s), e - s, protection(prot), &old)) {
+    } else if (Image* image = rigid_at(s)) {
+      result = protect_rigid(image, s, e, prot);
+      if (result) return false;
+    } else if (!w32.VirtualProtect(reinterpret_cast<void*>(s), e - s, protection(prot), &old) &&
+               !(w32_mem_in_image(s) && (prot & PROT_WRITE) && copy_on_write(s, e, prot))) {
       result = m.type == MEM_MAPPED ? -EACCES : w32_fail();
       return false;
     }
@@ -1191,22 +1585,24 @@ long sys_madvise(long addr_l, long length, long advice, long, long, long) {
   uintptr_t end = addr + page_up(static_cast<size_t>(length));
   if (__builtin_expect(g_w32_stats, 0)) w32_stats_madvise(static_cast<int>(advice), end - addr);
   if (advice != MADV_DONTNEED && advice != MADV_REMOVE && advice != MADV_FREE) return 0;
-  while (addr < end && __atomic_load_n(&g_shared_copies, __ATOMIC_RELAXED)) {
+  while (addr < end) {
     uintptr_t s = end, e = end;
-    w32.AcquireSRWLockShared(&g_views_lock);
-    for (size_t i = 0; i < g_view_count; i++) {
-      const FileView& v = g_views[i];
-      const uintptr_t vs = v.start > addr ? v.start : addr;
-      if (v.kind == kSharedCopy && v.end > addr && v.start < end && vs < s) {
-        s = vs;
-        e = v.end < end ? v.end : end;
+    if (__atomic_load_n(&g_shared_copies, __ATOMIC_RELAXED)) {
+      w32.AcquireSRWLockShared(&g_views_lock);
+      for (size_t i = 0; i < g_view_count; i++) {
+        const FileView& v = g_views[i];
+        const uintptr_t vs = v.start > addr ? v.start : addr;
+        if (v.kind == kSharedCopy && v.end > addr && v.start < end && vs < s) {
+          s = vs;
+          e = v.end < end ? v.end : end;
+        }
       }
+      w32.ReleaseSRWLockShared(&g_views_lock);
     }
-    w32.ReleaseSRWLockShared(&g_views_lock);
+    next_kept(addr, end, &s, &e);
     if (s > addr) advise(addr, s, advice);
     addr = e;
   }
-  if (addr < end) advise(addr, end, advice);
   return 0;
 }
 

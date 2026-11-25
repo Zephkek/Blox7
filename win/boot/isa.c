@@ -2444,6 +2444,7 @@ static void busy(tpl *t) {
 }
 
 #define ARENA_SIZE (2u << 20)
+#define WINDOW (2u << 20)
 #define STUB_MAX 768u
 #define REACH (1ull << 30)
 
@@ -2781,14 +2782,33 @@ static int frame_run(uint64_t *g, v128 *x, const insn *in, const uint32_t *mxcsr
     return run(in, &r, &f) != 0;
 }
 
+static int unlock(void *page, DWORD *old) {
+    return VirtualProtect(page, 1, PAGE_EXECUTE_READWRITE, old) || VirtualProtect(page, 1, PAGE_EXECUTE_WRITECOPY, old);
+}
+
+static int code_protect(uintptr_t lo, uintptr_t hi, DWORD shut) {
+    MEMORY_BASIC_INFORMATION m;
+    DWORD to, old;
+    uintptr_t end;
+    while (lo < hi) {
+        if (!VirtualQuery((void *)lo, &m, sizeof m)) return 0;
+        to = shut ? shut : m.Type == MEM_MAPPED ? PAGE_EXECUTE_WRITECOPY : PAGE_EXECUTE_READWRITE;
+        end = (uintptr_t)m.BaseAddress + m.RegionSize;
+        if (VirtualProtect((void *)lo, hi - lo, to, &old)) return 1;
+        if (end >= hi || !VirtualProtect((void *)lo, end - lo, to, &old)) return 0;
+        lo = end;
+    }
+    return 1;
+}
+
 static int write_jump(uint64_t site, uint64_t entry) {
     volatile uint8_t *p = (volatile uint8_t *)(uintptr_t)site;
     void *page1 = (void *)(uintptr_t)(site & ~0xFFFull), *page2 = (void *)(uintptr_t)((site + 4) & ~0xFFFull);
     int32_t rel = (int32_t)(entry - (site + 5));
     DWORD old1, old2 = 0, tmp;
     int i;
-    if (!VirtualProtect(page1, 1, PAGE_EXECUTE_READWRITE, &old1)) return 0;
-    if (page2 != page1 && !VirtualProtect(page2, 1, PAGE_EXECUTE_READWRITE, &old2)) {
+    if (!unlock(page1, &old1)) return 0;
+    if (page2 != page1 && !unlock(page2, &old2)) {
         VirtualProtect(page1, 1, old1, &tmp);
         return 0;
     }
@@ -3604,15 +3624,29 @@ static void scan_module(uintptr_t base, uintptr_t lo, uintptr_t hi) {
     const uint8_t *h = eh_table(base, &n);
     int a;
     DWORD old;
-    uint64_t s, e, ns = 0, ne;
-    if (!h) return;
+    MEMORY_BASIC_INFORMATION m;
+    uint64_t s, e, ns = 0, ne, need, from = 0, to = 0;
+    if (!h || !VirtualQuery((void *)lo, &m, sizeof m)) return;
     g_bulk = 1;
     for (a = 0; a < g_narenas; a++) VirtualProtect(g_arenas[a].base, ARENA_SIZE, PAGE_EXECUTE_READWRITE, &old);
     for (i = 0; i < n; i++) {
         if (!fde_range(h, i, &s, &e) || s < lo || e > hi || e <= s) continue;
         if (i + 1 >= n || !fde_range(h, i + 1, &ns, &ne)) ns = 0;
+        need = ns > e && ns - e <= 64 && ns <= hi ? ns : e;
+        if (s < from || need > to) {
+            if (to > from) code_protect(from, to, m.Protect);
+            from = s & ~0xFFFull;
+            to = from + WINDOW > need ? from + WINDOW : need;
+            to = to > hi ? hi : (to + 0xFFF) & ~0xFFFull;
+            if (!code_protect(from, to, 0)) {
+                code_protect(from, to, m.Protect);
+                from = to = 0;
+                continue;
+            }
+        }
         scan_function(s, e, ns);
     }
+    if (to > from) code_protect(from, to, m.Protect);
     for (a = 0; a < g_narenas; a++) {
         VirtualProtect(g_arenas[a].base, ARENA_SIZE, ARENA_PROTECT, &old);
         FlushInstructionCache(GetCurrentProcess(), g_arenas[a].base, ARENA_SIZE);
@@ -3845,7 +3879,6 @@ static void HOSTCALL front(void) {
 }
 
 static void HOSTCALL code_range(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path) {
-    DWORD old, tmp;
     AcquireSRWLockExclusive(&g_lock);
     g_owner = GetCurrentThreadId();
     if (g_ncode < (int)(sizeof g_code / sizeof g_code[0])) {
@@ -3860,9 +3893,8 @@ static void HOSTCALL code_range(uintptr_t base, uintptr_t lo, uintptr_t hi, cons
 #endif
         g_ncode++;
     }
-    if (g_patching && VirtualProtect((void *)lo, hi - lo, PAGE_EXECUTE_READWRITE, &old)) {
+    if (g_patching) {
         scan_module(base, lo, hi);
-        VirtualProtect((void *)lo, hi - lo, old, &tmp);
         FlushInstructionCache(GetCurrentProcess(), (void *)lo, hi - lo);
     }
     g_owner = 0;

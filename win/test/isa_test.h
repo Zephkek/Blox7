@@ -78,7 +78,8 @@ static void poison(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path)
     wchar_t file[MAX_PATH + 64];
     char *text;
     HANDLE h;
-    DWORD size, got, old, tmp;
+    DWORD size, got;
+    MEMORY_BASIC_INFORMATION m;
     size_t i;
     if (!g_poison_dir[0]) return;
     _snwprintf(file, MAX_PATH + 63, L"%ls\\%hs.txt", g_poison_dir, slash ? slash + 1 : path);
@@ -93,7 +94,11 @@ static void poison(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path)
     }
     CloseHandle(h);
     text[got] = 0;
-    if (!VirtualProtect((void *)lo, hi - lo, PAGE_EXECUTE_READWRITE, &old)) return;
+    if (!VirtualQuery((void *)lo, &m, sizeof m)) return;
+    if (!code_protect(lo, hi, 0)) {
+        code_protect(lo, hi, m.Protect);
+        return;
+    }
     AcquireSRWLockExclusive(&g_lock);
     g_owner = GetCurrentThreadId();
     for (i = 0; i < got;) {
@@ -120,7 +125,7 @@ static void poison(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path)
     }
     g_owner = 0;
     ReleaseSRWLockExclusive(&g_lock);
-    VirtualProtect((void *)lo, hi - lo, old, &tmp);
+    code_protect(lo, hi, m.Protect);
     FlushInstructionCache(GetCurrentProcess(), (void *)lo, hi - lo);
     HeapFree(GetProcessHeap(), 0, text);
 }

@@ -626,13 +626,18 @@ void maps(Text& t) {
         slowest = m;
       }
     }
-    const uintptr_t start = reinterpret_cast<uintptr_t>(m.base), end = start + m.region_size;
+    const uintptr_t start = reinterpret_cast<uintptr_t>(m.base);
+    uintptr_t end = start + m.region_size;
     if (end <= a) break;
     a = end;
     if (m.state == MEM_FREE) continue;
+    const bool both = w32_mem_both(start, end, &end);
+    a = end;
     char perms[5];
-    permissions(m.protect, m.state, m.type == MEM_MAPPED, perms);
-    if (m.type == MEM_IMAGE || m.type == MEM_MAPPED) {
+    const bool shared = m.type == MEM_MAPPED && !w32_mem_in_image(start);
+    permissions(m.protect, m.state, shared, perms);
+    if (both) memcpy(perms, "rwx", 3);
+    if (m.type == MEM_IMAGE || shared) {
       if (m.allocation_base != image_base) {
         image_base = m.allocation_base;
         image_named = mapped_file(start, image, sizeof image);

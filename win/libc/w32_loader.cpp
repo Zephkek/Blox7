@@ -15,7 +15,7 @@
 
 namespace {
 
-constexpr uintptr_t kPage = 4096;
+constexpr uintptr_t kPage = 4096, kGranule = 65536;
 constexpr int kHost = 0, kGuest = 1;
 
 struct SymMap {
@@ -84,7 +84,7 @@ struct Object {
   char* name;
   char* path;
   uintptr_t base;
-  uintptr_t map_start, map_size;
+  uintptr_t map_start, map_size, view;
   const ElfW(Phdr)* phdr;
   ElfW(Half) phnum;
   const ElfW(Dyn)* dynamic;
@@ -276,6 +276,35 @@ DWORD protection(uint32_t flags) {
   return w ? 0x04 : 0x02;
 }
 
+bool is_roblox(const char* path) {
+  const size_t len = strlen(path);
+  return len >= 13 && strcmp(path + len - 13, "/libroblox.so") == 0;
+}
+
+bool patched() { return w32_boot->size >= sizeof(struct w32boot) && w32_boot->isa_code; }
+
+size_t view_size(const char* path, const ElfW(Phdr)* ph, size_t phnum, uintptr_t lo, size_t span) {
+  if (!is_roblox(path) || w32.IsDebuggerPresent()) return 0;
+  const char* choice = getenv("BLOX7_W32_IMAGE");
+  if (choice && strcmp(choice, "copy") == 0) return 0;
+  size_t view = 0;
+  for (size_t i = 0; i < phnum; i++)
+    if (ph[i].p_type == PT_LOAD && ph[i].p_vaddr == lo && !ph[i].p_offset && !(ph[i].p_flags & PF_W))
+      view = ph[i].p_filesz & ~(kGranule - 1);
+  for (size_t i = 0; i < phnum; i++)
+    if (ph[i].p_type == PT_LOAD && ph[i].p_vaddr != lo && ph[i].p_vaddr - lo < view) return 0;
+  return view < span ? view : 0;
+}
+
+void keep_file_pages(const Object* o, const ElfW(Phdr)& p) {
+  if (p.p_filesz) w32_mem_keep((o->base + p.p_vaddr) & ~(kPage - 1), (o->base + p.p_vaddr + p.p_filesz + kPage - 1) & ~(kPage - 1));
+}
+
+void unmap(uintptr_t start, size_t view) {
+  if (view) w32_mem_unmap_image(reinterpret_cast<void*>(start), view);
+  else w32.VirtualFree(reinterpret_cast<void*>(start), 0, 0x8000);
+}
+
 Object* map_object(const char* path, const char* name, int ns) {
   int fd = open(path, O_RDONLY | O_CLOEXEC);
   if (fd < 0) {
@@ -311,7 +340,13 @@ Object* map_object(const char* path, const char* name, int ns) {
     }
   }
   size_t span = ((hi - lo) + kPage - 1) & ~(kPage - 1);
-  auto* map = static_cast<uint8_t*>(w32.VirtualAlloc(nullptr, span, 0x3000, 0x04));
+  const int64_t started = w32_log_wanted() ? w32_monotonic_ns() : 0;
+  size_t view = view_size(path, ph, eh.e_phnum, lo, span);
+  auto* map = view ? static_cast<uint8_t*>(w32_mem_map_image(fd, view, span, patched())) : nullptr;
+  if (!map) {
+    view = 0;
+    map = static_cast<uint8_t*>(w32.VirtualAlloc(nullptr, span, 0x3000, 0x04));
+  }
   if (!map) {
     set_error("\"%s\": out of address space", path);
     free(ph);
@@ -324,13 +359,16 @@ Object* map_object(const char* path, const char* name, int ns) {
   o->base = base;
   o->map_start = reinterpret_cast<uintptr_t>(map);
   o->map_size = span;
+  o->view = view;
   o->phnum = eh.e_phnum;
   for (size_t i = 0; i < eh.e_phnum; i++) {
-    if (ph[i].p_type == PT_LOAD && ph[i].p_filesz &&
-        read_full(fd, reinterpret_cast<void*>(base + ph[i].p_vaddr), ph[i].p_filesz, static_cast<off_t>(ph[i].p_offset)) < 0) {
+    const size_t mapped = ph[i].p_type == PT_LOAD && ph[i].p_vaddr == lo ? view : 0;
+    if (ph[i].p_type == PT_LOAD && ph[i].p_filesz > mapped &&
+        read_full(fd, reinterpret_cast<void*>(base + ph[i].p_vaddr + mapped), ph[i].p_filesz - mapped,
+                  static_cast<off_t>(ph[i].p_offset + mapped)) < 0) {
       set_error("\"%s\": cannot read a segment", path);
       close(fd);
-      w32.VirtualFree(map, 0, 0x8000);
+      unmap(o->map_start, view);
       free(ph);
       free(o);
       return nullptr;
@@ -338,6 +376,9 @@ Object* map_object(const char* path, const char* name, int ns) {
     if (ph[i].p_type == PT_DYNAMIC) o->dynamic = reinterpret_cast<const ElfW(Dyn)*>(base + ph[i].p_vaddr);
   }
   close(fd);
+  if (w32_log_wanted() && is_roblox(path))
+    w32_debug("loader: %s, file view of %zu bytes, segments ready in %lld us", path, view,
+              static_cast<long long>((w32_monotonic_ns() - started) / 1000));
   o->phdr = ph;
   for (size_t i = 0; i < eh.e_phnum; i++)
     if (ph[i].p_type == PT_PHDR) {
@@ -347,14 +388,13 @@ Object* map_object(const char* path, const char* name, int ns) {
     }
   if (!o->dynamic || !parse_dynamic(o)) {
     set_error("\"%s\" has no usable dynamic section", path);
-    w32.VirtualFree(map, 0, 0x8000);
+    unmap(o->map_start, view);
     free(o);
     return nullptr;
   }
   o->name = strdup(name);
   o->path = strdup(path);
-  const size_t len = strlen(path);
-  if (len >= 13 && strcmp(path + len - 13, "/libroblox.so") == 0) {
+  if (is_roblox(path)) {
     for (size_t i = 0; i < o->phnum; i++) {
       const ElfW(Phdr)& seg = o->phdr[i];
       if (seg.p_type != PT_LOAD || !(seg.p_flags & PF_X)) continue;
@@ -513,20 +553,26 @@ bool relocate(Object* o) {
 }
 
 void protect(Object* o) {
+  const uintptr_t copy = o->map_start + o->view;
   w32_mem_forget_runs(o->map_start, o->map_start + o->map_size);
   for (size_t i = 0; i < o->phnum; i++) {
     const ElfW(Phdr)& p = o->phdr[i];
     if (p.p_type != PT_LOAD) continue;
-    uintptr_t start = (o->base + p.p_vaddr) & ~(kPage - 1);
-    uintptr_t end = (o->base + p.p_vaddr + p.p_memsz + kPage - 1) & ~(kPage - 1);
+    const uintptr_t start = (o->base + p.p_vaddr) & ~(kPage - 1);
+    const uintptr_t end = (o->base + p.p_vaddr + p.p_memsz + kPage - 1) & ~(kPage - 1);
+    const uintptr_t own = start < copy ? copy : start;
     DWORD old;
-    if (w32.VirtualProtect(reinterpret_cast<void*>(start), end - start, protection(p.p_flags), &old)) {
-      w32_mem_note_run(start, end, o->map_start, protection(p.p_flags));
-      if ((p.p_flags & PF_X) && w32_boot->size >= sizeof(struct w32boot) && w32_boot->isa_code)
-        w32_boot->isa_code(o->base, start, end, o->path);
-    } else {
-      w32_mem_forget_runs(start, end);
+    if (start == end) continue;
+    keep_file_pages(o, p);
+    if (own > start) w32.VirtualProtect(reinterpret_cast<void*>(start), own - start, protection(p.p_flags), &old);
+    if (own < end) {
+      if (!w32.VirtualProtect(reinterpret_cast<void*>(own), end - own, protection(p.p_flags), &old)) {
+        w32_mem_forget_runs(own, end);
+        continue;
+      }
+      w32_mem_note_run(own, end, copy, protection(p.p_flags));
     }
+    if ((p.p_flags & PF_X) && patched()) w32_boot->isa_code(o->base, start, end, o->path);
   }
   for (size_t i = 0; i < o->phnum; i++) {
     const ElfW(Phdr)& p = o->phdr[i];
@@ -536,7 +582,7 @@ void protect(Object* o) {
     DWORD old;
     if (end > start) {
       if (w32.VirtualProtect(reinterpret_cast<void*>(start), end - start, 0x02, &old)) {
-        w32_mem_note_run(start, end, o->map_start, 0x02);
+        w32_mem_note_run(start, end, copy, 0x02);
       } else {
         w32_mem_forget_runs(start, end);
       }
@@ -655,7 +701,8 @@ void* open_library(const char* name, int ns) {
         if (mine || (!(*p)->initialized && *p != g_libc && !(*p)->extra && (*p)->path)) {
           Object* dead = *p;
           *p = dead->next;
-          w32.VirtualFree(reinterpret_cast<void*>(dead->map_start), 0, 0x8000);
+          w32_mem_unkeep(dead->map_start, dead->map_start + dead->map_size);
+          unmap(dead->map_start, dead->view);
           w32_mem_forget_runs(dead->map_start, dead->map_start + dead->map_size);
           g_subs++;
         } else {
@@ -742,6 +789,7 @@ void w32_init_loader() {
   for (size_t i = 0; i < o->phnum; i++) {
     if (o->phdr[i].p_type == PT_DYNAMIC) o->dynamic = reinterpret_cast<const ElfW(Dyn)*>(o->base + o->phdr[i].p_vaddr);
     if (o->phdr[i].p_type == PT_LOAD && o->phdr[i].p_vaddr + o->phdr[i].p_memsz > hi) hi = o->phdr[i].p_vaddr + o->phdr[i].p_memsz;
+    if (o->phdr[i].p_type == PT_LOAD) keep_file_pages(o, o->phdr[i]);
   }
   o->map_start = o->base;
   o->map_size = hi;

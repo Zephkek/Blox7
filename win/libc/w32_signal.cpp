@@ -489,6 +489,12 @@ void crash_report(const WinExceptionRecord* r, const WinContext* c, int sig) {
   scan_stack(sp, count, 24);
 }
 
+[[noreturn]] void code_unreadable() {
+  static int reported;
+  if (__atomic_exchange_n(&reported, 1, __ATOMIC_RELAXED)) w32.Sleep(0xffffffff);
+  w32_fatal("Roblox's code could not be read from the disk");
+}
+
 bool in_windows_image(void* address) {
   W32_MEMORY_BASIC_INFORMATION mbi;
   return w32.VirtualQuery(address, &mbi, sizeof mbi) && mbi.type == 0x1000000 /* MEM_IMAGE */;
@@ -539,8 +545,16 @@ long WINAPI on_exception(WinExceptionPointers* ep) {
       sig = SIGSEGV;
       code = SEGV_ACCERR;
       addr = reinterpret_cast<void*>(r->information[1]);
+      if ((r->information[0] == 1 || r->information[0] == 8) &&
+          w32_mem_image_fault(r->information[1], r->information[0] == 1, c->rip))
+        return kContinueExecution;
       break;
-    case kInPageError: sig = SIGBUS; code = BUS_ADRERR; addr = reinterpret_cast<void*>(r->information[1]); break;
+    case kInPageError:
+      if (w32_mem_in_image(r->information[1])) code_unreadable();
+      sig = SIGBUS;
+      code = BUS_ADRERR;
+      addr = reinterpret_cast<void*>(r->information[1]);
+      break;
     case kIllegalInstruction: case kPrivileged: sig = SIGILL; code = ILL_ILLOPC; break;
     case kIntDivide: sig = SIGFPE; code = FPE_INTDIV; break;
     case kIntOverflow: sig = SIGFPE; code = FPE_INTOVF; break;
