@@ -5571,7 +5571,7 @@ int blox7::legacy::Run(const runtime::CommandLineOptions& options,
       struct stat st;
       if (::fstat(fd, &st) == 0) {
         void* map = ::mmap(nullptr, static_cast<size_t>(st.st_size),
-                           PROT_READ, MAP_PRIVATE, fd, 0);
+                           PROT_READ, MAP_SHARED, fd, 0);
         if (map != MAP_FAILED) {
           auto* ehdr = reinterpret_cast<Elf64_Ehdr*>(map);
           auto* shdr = reinterpret_cast<Elf64_Shdr*>(
