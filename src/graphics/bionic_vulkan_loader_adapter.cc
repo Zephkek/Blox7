@@ -2003,6 +2003,11 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device,
   const PFN_vkVoidFunction host = host_get_device_proc_addr != nullptr
                                       ? host_get_device_proc_addr(device, name)
                                       : nullptr;
+  if (std::strcmp(name, "vkGetDeviceProcAddr") == 0) {
+    return host != nullptr
+               ? reinterpret_cast<PFN_vkVoidFunction>(vkGetDeviceProcAddr)
+               : nullptr;
+  }
   if (!IsDeviceAdapterProc(name)) {
     return host;
   }
