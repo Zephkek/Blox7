@@ -4204,6 +4204,21 @@ VM::~VM() {
       g_thread_env_storage.functions = nullptr;
     }
   }
+  ClearHostBindings();
+}
+
+void VM::KeepUntilExit(std::shared_ptr<VM> vm) {
+  if (vm == nullptr) {
+    return;
+  }
+  vm->ClearHostBindings();
+  static std::vector<std::shared_ptr<VM>>* const kept =
+      new std::vector<std::shared_ptr<VM>>;
+  std::lock_guard<std::recursive_mutex> lock(g_jni_state_mutex);
+  kept->push_back(std::move(vm));
+}
+
+void VM::ClearHostBindings() {
   {
     std::lock_guard<std::mutex> lock(message_bus_async_request_handler_mutex_);
     message_bus_async_request_handler_bindings_.clear();

@@ -33,6 +33,7 @@ class RuntimeDependencies final {
     if (jni_vm_ != nullptr && shutdown_before_platform_ != nullptr) {
       (void)shutdown_before_platform_(jni_vm_.get());
     }
+    jnivm::VM::KeepUntilExit(std::move(jni_vm_));
   }
 
   RuntimeDependencies(const RuntimeDependencies&) = delete;
@@ -53,6 +54,7 @@ class RuntimeDependencies final {
     if (jni_vm_ != nullptr && shutdown_before_platform_ != nullptr) {
       (void)shutdown_before_platform_(jni_vm_.get());
     }
+    jnivm::VM::KeepUntilExit(std::move(jni_vm_));
     jni_vm_ = std::move(other.jni_vm_);
     account_identity_ = std::move(other.account_identity_);
     roblox_credential_ = std::move(other.roblox_credential_);

@@ -249,6 +249,8 @@ public:
 
   static VM *FromJavaVM(JavaVM *java_vm);
 
+  static void KeepUntilExit(std::shared_ptr<VM> vm);
+
   JNIEnv *GetJNIEnv();
 
   std::size_t GetClassCount() const { return class_registry_.size(); }
@@ -526,6 +528,7 @@ private:
       roblox_experience_lifecycle_binding_;
 
   void InitJNIFunctionTables();
+  void ClearHostBindings();
 };
 
 } // namespace jnivm
