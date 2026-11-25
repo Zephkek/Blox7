@@ -981,6 +981,9 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
   BLOX7_VK_PROC(vkCreateImage)
   BLOX7_VK_PROC(vkDestroyImage)
   BLOX7_VK_PROC(vkCreateImageView)
+  BLOX7_VK_PROC(vkGetDeviceImageMemoryRequirements)
+  BLOX7_VK_PROC(vkGetDeviceImageSparseMemoryRequirements)
+  BLOX7_VK_PROC(vkGetDeviceImageSubresourceLayout)
   BLOX7_VK_PROC(vkBindBufferMemory)
   BLOX7_VK_PROC(vkBindBufferMemory2)
   BLOX7_VK_PROC(vkMapMemory)
@@ -1011,6 +1014,12 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
   BLOX7_VK_ALIAS(vkGetPhysicalDeviceImageFormatProperties2KHR,
                     vkGetPhysicalDeviceImageFormatProperties2)
   BLOX7_VK_ALIAS(vkBindBufferMemory2KHR, vkBindBufferMemory2)
+  BLOX7_VK_ALIAS(vkGetDeviceImageMemoryRequirementsKHR,
+                    vkGetDeviceImageMemoryRequirements)
+  BLOX7_VK_ALIAS(vkGetDeviceImageSparseMemoryRequirementsKHR,
+                    vkGetDeviceImageSparseMemoryRequirements)
+  BLOX7_VK_ALIAS(vkGetDeviceImageSubresourceLayoutKHR,
+                    vkGetDeviceImageSubresourceLayout)
   BLOX7_VK_ALIAS(vkCmdCopyImage2KHR, vkCmdCopyImage2)
   BLOX7_VK_ALIAS(vkCmdCopyImageToBuffer2KHR, vkCmdCopyImageToBuffer2)
   BLOX7_VK_ALIAS(vkMapMemory2KHR, vkMapMemory2)
@@ -1031,6 +1040,12 @@ bool NameInList(const char* name, const char* const* names,
 bool IsEtc2DeviceProc(const char* name) {
   static constexpr const char* kNames[] = {
       "vkCreateImage",          "vkDestroyImage",
+      "vkGetDeviceImageMemoryRequirements",
+      "vkGetDeviceImageMemoryRequirementsKHR",
+      "vkGetDeviceImageSparseMemoryRequirements",
+      "vkGetDeviceImageSparseMemoryRequirementsKHR",
+      "vkGetDeviceImageSubresourceLayout",
+      "vkGetDeviceImageSubresourceLayoutKHR",
       "vkCreateImageView",      "vkBindBufferMemory",
       "vkBindBufferMemory2",    "vkBindBufferMemory2KHR",
       "vkMapMemory",            "vkMapMemory2",
@@ -3637,6 +3652,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(
     VkDevice device, const VkImageViewCreateInfo* create_info,
     const VkAllocationCallbacks* allocator, VkImageView* view) {
   return State().etc2.CreateImageView(device, create_info, allocator, view);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageMemoryRequirements(
+    VkDevice device, const VkDeviceImageMemoryRequirements* info,
+    VkMemoryRequirements2* requirements) {
+  State().etc2.GetDeviceImageMemoryRequirements(device, info, requirements);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSparseMemoryRequirements(
+    VkDevice device, const VkDeviceImageMemoryRequirements* info,
+    std::uint32_t* count, VkSparseImageMemoryRequirements2* requirements) {
+  State().etc2.GetDeviceImageSparseMemoryRequirements(device, info, count,
+                                                      requirements);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceImageSubresourceLayout(
+    VkDevice device, const VkDeviceImageSubresourceInfo* info,
+    VkSubresourceLayout2* layout) {
+  State().etc2.GetDeviceImageSubresourceLayout(device, info, layout);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(VkDevice device,

@@ -62,6 +62,15 @@ class VulkanEtc2Emulation final {
                            const VkImageViewCreateInfo* create_info,
                            const VkAllocationCallbacks* allocator,
                            VkImageView* view);
+  void GetDeviceImageMemoryRequirements(
+      VkDevice device, const VkDeviceImageMemoryRequirements* info,
+      VkMemoryRequirements2* requirements);
+  void GetDeviceImageSparseMemoryRequirements(
+      VkDevice device, const VkDeviceImageMemoryRequirements* info,
+      std::uint32_t* count, VkSparseImageMemoryRequirements2* requirements);
+  void GetDeviceImageSubresourceLayout(VkDevice device,
+                                       const VkDeviceImageSubresourceInfo* info,
+                                       VkSubresourceLayout2* layout);
   VkResult BindBufferMemory(VkDevice device, VkBuffer buffer,
                             VkDeviceMemory memory, VkDeviceSize offset);
   VkResult BindBufferMemory2(VkDevice device, std::uint32_t count,

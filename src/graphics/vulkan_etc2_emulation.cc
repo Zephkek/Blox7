@@ -184,6 +184,10 @@ struct HostDevice {
   PFN_vkCreateImage create_image = nullptr;
   PFN_vkDestroyImage destroy_image = nullptr;
   PFN_vkCreateImageView create_image_view = nullptr;
+  PFN_vkGetDeviceImageMemoryRequirements image_requirements = nullptr;
+  PFN_vkGetDeviceImageSparseMemoryRequirements image_sparse_requirements =
+      nullptr;
+  PFN_vkGetDeviceImageSubresourceLayout image_subresource_layout = nullptr;
   PFN_vkBindBufferMemory bind_buffer_memory = nullptr;
   PFN_vkBindBufferMemory2 bind_buffer_memory2 = nullptr;
   PFN_vkMapMemory map_memory = nullptr;
@@ -241,6 +245,28 @@ struct ImageRecord {
 bool IsColorFormat(EtcFormat format) {
   return format == EtcFormat::kEtc2Rgb8 || format == EtcFormat::kEtc2Rgb8A1 ||
          format == EtcFormat::kEtc2Rgba8;
+}
+
+bool HostImageInfo(std::uint32_t upscale, const VkImageCreateInfo& info,
+                   VkImageCreateInfo* host, Etc2EmulatedFormat* format,
+                   std::uint32_t* scale) {
+  if (!LookupEmulatedEtc2Format(info.format, format)) {
+    return false;
+  }
+  *host = info;
+  host->format = format->host_format;
+  host->flags &= ~static_cast<VkImageCreateFlags>(
+      VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT);
+  *scale = 1;
+  if (upscale > 1 && IsColorFormat(format->etc_format) &&
+      info.imageType == VK_IMAGE_TYPE_2D && info.arrayLayers == 1 &&
+      info.extent.depth == 1 && info.extent.width <= kSmallTextureMaxExtent &&
+      info.extent.height <= kSmallTextureMaxExtent) {
+    *scale = upscale;
+    host->extent.width *= upscale;
+    host->extent.height *= upscale;
+  }
+  return true;
 }
 
 struct Staging {
@@ -1024,6 +1050,17 @@ void VulkanEtc2Emulation::RegisterDevice(
       DeviceProc<PFN_vkDestroyImage>(get, device, "vkDestroyImage");
   dev->create_image_view =
       DeviceProc<PFN_vkCreateImageView>(get, device, "vkCreateImageView");
+  dev->image_requirements = DeviceProc<PFN_vkGetDeviceImageMemoryRequirements>(
+      get, device, "vkGetDeviceImageMemoryRequirements",
+      "vkGetDeviceImageMemoryRequirementsKHR");
+  dev->image_sparse_requirements =
+      DeviceProc<PFN_vkGetDeviceImageSparseMemoryRequirements>(
+          get, device, "vkGetDeviceImageSparseMemoryRequirements",
+          "vkGetDeviceImageSparseMemoryRequirementsKHR");
+  dev->image_subresource_layout =
+      DeviceProc<PFN_vkGetDeviceImageSubresourceLayout>(
+          get, device, "vkGetDeviceImageSubresourceLayout",
+          "vkGetDeviceImageSubresourceLayoutKHR");
   dev->bind_buffer_memory =
       DeviceProc<PFN_vkBindBufferMemory>(get, device, "vkBindBufferMemory");
   dev->bind_buffer_memory2 = DeviceProc<PFN_vkBindBufferMemory2>(
@@ -1145,23 +1182,12 @@ VkResult VulkanEtc2Emulation::CreateImage(VkDevice device,
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   Etc2EmulatedFormat format;
-  if (!dev->emulated || create_info == nullptr ||
-      !LookupEmulatedEtc2Format(create_info->format, &format)) {
-    return dev->create_image(device, create_info, allocator, image);
-  }
-  VkImageCreateInfo host_info = *create_info;
-  host_info.format = format.host_format;
-  host_info.flags &= ~static_cast<VkImageCreateFlags>(
-      VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT);
+  VkImageCreateInfo host_info;
   std::uint32_t scale = 1;
-  if (state_->upscale > 1 && IsColorFormat(format.etc_format) &&
-      create_info->imageType == VK_IMAGE_TYPE_2D &&
-      create_info->arrayLayers == 1 && create_info->extent.depth == 1 &&
-      create_info->extent.width <= kSmallTextureMaxExtent &&
-      create_info->extent.height <= kSmallTextureMaxExtent) {
-    scale = state_->upscale;
-    host_info.extent.width *= scale;
-    host_info.extent.height *= scale;
+  if (!dev->emulated || create_info == nullptr ||
+      !HostImageInfo(state_->upscale, *create_info, &host_info, &format,
+                     &scale)) {
+    return dev->create_image(device, create_info, allocator, image);
   }
   const VkResult result = dev->create_image(device, &host_info, allocator, image);
   if (result == VK_SUCCESS && image != nullptr) {
@@ -1216,6 +1242,69 @@ VkResult VulkanEtc2Emulation::CreateImageView(
   VkImageViewCreateInfo host_info = *create_info;
   host_info.format = format.host_format;
   return dev->create_image_view(device, &host_info, allocator, view);
+}
+
+void VulkanEtc2Emulation::GetDeviceImageMemoryRequirements(
+    VkDevice device, const VkDeviceImageMemoryRequirements* info,
+    VkMemoryRequirements2* requirements) {
+  const HostDevice* dev = state_->Find(device);
+  if (dev == nullptr || dev->image_requirements == nullptr) {
+    return;
+  }
+  Etc2EmulatedFormat format;
+  VkImageCreateInfo host_image;
+  std::uint32_t scale = 1;
+  if (!dev->emulated || info == nullptr || info->pCreateInfo == nullptr ||
+      !HostImageInfo(state_->upscale, *info->pCreateInfo, &host_image, &format,
+                     &scale)) {
+    dev->image_requirements(device, info, requirements);
+    return;
+  }
+  VkDeviceImageMemoryRequirements host_info = *info;
+  host_info.pCreateInfo = &host_image;
+  dev->image_requirements(device, &host_info, requirements);
+}
+
+void VulkanEtc2Emulation::GetDeviceImageSparseMemoryRequirements(
+    VkDevice device, const VkDeviceImageMemoryRequirements* info,
+    std::uint32_t* count, VkSparseImageMemoryRequirements2* requirements) {
+  const HostDevice* dev = state_->Find(device);
+  if (dev == nullptr || dev->image_sparse_requirements == nullptr) {
+    return;
+  }
+  Etc2EmulatedFormat format;
+  VkImageCreateInfo host_image;
+  std::uint32_t scale = 1;
+  if (!dev->emulated || info == nullptr || info->pCreateInfo == nullptr ||
+      !HostImageInfo(state_->upscale, *info->pCreateInfo, &host_image, &format,
+                     &scale)) {
+    dev->image_sparse_requirements(device, info, count, requirements);
+    return;
+  }
+  VkDeviceImageMemoryRequirements host_info = *info;
+  host_info.pCreateInfo = &host_image;
+  dev->image_sparse_requirements(device, &host_info, count, requirements);
+}
+
+void VulkanEtc2Emulation::GetDeviceImageSubresourceLayout(
+    VkDevice device, const VkDeviceImageSubresourceInfo* info,
+    VkSubresourceLayout2* layout) {
+  const HostDevice* dev = state_->Find(device);
+  if (dev == nullptr || dev->image_subresource_layout == nullptr) {
+    return;
+  }
+  Etc2EmulatedFormat format;
+  VkImageCreateInfo host_image;
+  std::uint32_t scale = 1;
+  if (!dev->emulated || info == nullptr || info->pCreateInfo == nullptr ||
+      !HostImageInfo(state_->upscale, *info->pCreateInfo, &host_image, &format,
+                     &scale)) {
+    dev->image_subresource_layout(device, info, layout);
+    return;
+  }
+  VkDeviceImageSubresourceInfo host_info = *info;
+  host_info.pCreateInfo = &host_image;
+  dev->image_subresource_layout(device, &host_info, layout);
 }
 
 VkResult VulkanEtc2Emulation::BindBufferMemory(VkDevice device, VkBuffer buffer,
