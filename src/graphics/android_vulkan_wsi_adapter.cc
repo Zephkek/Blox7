@@ -128,8 +128,22 @@ AndroidVulkanResult AndroidVulkanWsiAdapter::CreateAndroidSurface(
     return kAndroidVulkanErrorInitializationFailed;
   }
   Status status = host_wsi_->CreateSurface(instance, allocator, surface);
-  return status.ok() ? kAndroidVulkanSuccess
-                     : kAndroidVulkanErrorInitializationFailed;
+  if (status.ok()) {
+    return kAndroidVulkanSuccess;
+  }
+  if (status.message().find("VK_ERROR_OUT_OF_HOST_MEMORY") !=
+      std::string::npos) {
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
+  }
+  if (status.message().find("VK_ERROR_OUT_OF_DEVICE_MEMORY") !=
+      std::string::npos) {
+    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+  }
+  if (status.message().find("VK_ERROR_NATIVE_WINDOW_IN_USE_KHR") !=
+      std::string::npos) {
+    return VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;
+  }
+  return kAndroidVulkanErrorInitializationFailed;
 }
 
 void AndroidVulkanWsiAdapter::DestroySurface(
