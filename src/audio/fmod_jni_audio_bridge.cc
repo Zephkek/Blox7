@@ -132,8 +132,13 @@ Status InstallFmodJniAudioBridge(jnivm::VM* vm) {
   for (const SdlPlaybackDevice& device : available_devices) {
     std::cout << "    - " << device.name << '\n';
   }
+  if (requested != "default" && resolved_name == "default") {
+    std::cout << "  [blox7][audio] output '" << requested
+              << "' is not connected\n";
+  }
   std::cout << "  [blox7][audio] selected output=" << resolved_name << '\n'
             << std::flush;
+  PrepareSdlPlaybackDevice();
   auto context = std::shared_ptr<FmodJniAudioBridgeContext>(
       new (std::nothrow) FmodJniAudioBridgeContext());
   if (context == nullptr) {

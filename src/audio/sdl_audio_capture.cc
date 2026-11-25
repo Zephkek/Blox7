@@ -251,9 +251,7 @@ Status ListSdlRecordingDevices(std::vector<SdlRecordingDevice>* devices) {
   for (int index = 0; index < count; ++index) {
     const char* name = SDL_GetAudioDeviceName(ids[index]);
     if (name == nullptr || name[0] == '\0') {
-      SDL_free(ids);
-      devices->clear();
-      return SdlError("SDL_GetAudioDeviceName(recording)");
+      continue;
     }
     devices->push_back(
         {static_cast<std::uint32_t>(ids[index]), std::string(name)});
@@ -349,7 +347,12 @@ Status ConfigureSdlRecordingDevice(
   std::uint32_t recording_device_id = 0;
   status = ResolveSdlRecordingDevice(requested, *available_devices,
                                      &recording_device_id, resolved_name);
-  if (!status.ok()) {
+  std::string wanted_name = *resolved_name;
+  if (status.code() == StatusCode::kUnavailable) {
+    wanted_name = requested.rfind("id:", 0) == 0 ? "default"
+                                                 : std::string(requested);
+    *resolved_name = "default";
+  } else if (!status.ok()) {
     return status;
   }
 
@@ -360,7 +363,7 @@ Status ConfigureSdlRecordingDevice(
         "SDL recording device must be configured before opening a capture");
   }
   state.configured_device_id = recording_device_id;
-  state.configured_device_name = *resolved_name;
+  state.configured_device_name = wanted_name;
   return Status::Ok();
 }
 

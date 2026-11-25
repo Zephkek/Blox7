@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cinttypes>
-#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -24,8 +22,6 @@
 #include "audio/native_input_capture.h"
 #include "compat/fmod_output_device_contract.h"
 #include "linker/linker.h"
-#include "blox7/audio/sdl_audio_capture.h"
-#include "blox7/audio/sdl_audio_sink.h"
 
 namespace blox7::audio {
 namespace {
@@ -35,8 +31,6 @@ constexpr std::size_t kOutputInfoVtableIndex = 6;
 constexpr std::size_t kGuestStringSize = 24;
 constexpr std::size_t kGuestDeviceInfoSize = kGuestStringSize * 2 + 1;
 constexpr std::size_t kStringConstructorContractSize = 24;
-constexpr std::size_t kMaximumMenuDevices = 128;
-constexpr std::size_t kMaximumDeviceNameBytes = 512;
 
 std::atomic<RobloxOutputDeviceBridge*> g_active_bridge{nullptr};
 
@@ -154,6 +148,29 @@ std::uintptr_t FunctionAddress(Function function) {
   return reinterpret_cast<std::uintptr_t>(function);
 }
 
+HostAudioDirection RouteDirection(bool input) {
+  return input ? HostAudioDirection::kInput : HostAudioDirection::kOutput;
+}
+
+void LogRoutes(HostAudioRoutes& routes, HostAudioDirection direction,
+               bool list) {
+  const std::size_t count = routes.Count(direction);
+  HostAudioRoute selected;
+  const bool known =
+      count != 0 && routes.Route(direction, routes.Current(direction),
+                                 &selected);
+  std::fprintf(stderr, "  [audio-menu] exposed %zu host %s routes; selected=%s\n",
+               count,
+               direction == HostAudioDirection::kOutput ? "output" : "input",
+               known ? selected.name.c_str() : "disabled");
+  for (std::size_t index = 0; list && index < count; ++index) {
+    HostAudioRoute route;
+    if (routes.Route(direction, index, &route)) {
+      std::fprintf(stderr, "    [audio-menu] %s\n", route.name.c_str());
+    }
+  }
+}
+
 }  // namespace
 
 RobloxOutputDeviceBridge::RobloxOutputDeviceBridge() = default;
@@ -195,26 +212,6 @@ bool HasExpectedFmodOutputDeviceVtable(
              image_base + profile.current_method_rva &&
          vtable[kSelectOutputVtableIndex] ==
              image_base + profile.select_method_rva;
-}
-
-std::string MakeOutputDeviceGuid(std::uint32_t playback_device_id,
-                                 std::string_view name) {
-  if (playback_device_id == 0) {
-    return "blox7:default";
-  }
-  std::uint64_t hash = 14695981039346656037ULL;
-  for (const unsigned char byte : name) {
-    hash ^= byte;
-    hash *= 1099511628211ULL;
-  }
-  for (std::size_t shift = 0; shift < sizeof(playback_device_id) * CHAR_BIT;
-       shift += CHAR_BIT) {
-    hash ^= (playback_device_id >> shift) & 0xffU;
-    hash *= 1099511628211ULL;
-  }
-  std::array<char, 20> encoded{};
-  std::snprintf(encoded.data(), encoded.size(), "mt:%016" PRIx64, hash);
-  return encoded.data();
 }
 
 }  // namespace internal
@@ -262,6 +259,7 @@ void RobloxOutputDeviceBridge::Shutdown() {
     return;
   }
   linker::ClearAndroidLibraryLoadObserver(this);
+  routes_.Stop();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (active_ && !RestoreVtableLocked()) {
@@ -275,13 +273,10 @@ void RobloxOutputDeviceBridge::Shutdown() {
     if (capture_) capture_->Shutdown();
     capture_.reset();
     active_ = false;
-    devices_.clear();
-    input_devices_.clear();
-    selected_input_index_ = 0;
+    input_enabled_ = false;
     string_constructor_ = nullptr;
     library_base_ = 0;
     vtable_ = nullptr;
-    selected_index_ = 0;
   }
   RobloxOutputDeviceBridge* expected = this;
   (void)g_active_bridge.compare_exchange_strong(
@@ -330,47 +325,6 @@ Status RobloxOutputDeviceBridge::Activate(std::uintptr_t image_base) {
     return InvalidArgument("FMOD output-device profile address overflows");
   }
 
-  std::vector<SdlPlaybackDevice> playback_devices;
-  Status status = ListSdlPlaybackDevices(&playback_devices);
-  if (!status.ok()) {
-    return status;
-  }
-  if (playback_devices.size() + 1 > kMaximumMenuDevices) {
-    return InvalidArgument("host exposes too many audio output devices");
-  }
-
-  std::uint32_t configured_device_id = 0;
-  std::string configured_name;
-  status =
-      GetConfiguredSdlPlaybackDevice(&configured_device_id, &configured_name);
-  if (!status.ok()) {
-    return status;
-  }
-
-  devices_.clear();
-  devices_.reserve(playback_devices.size() + 1);
-  devices_.push_back(
-      {0, "System Default", internal::MakeOutputDeviceGuid(0, "default")});
-  selected_index_ = 0;
-  for (const SdlPlaybackDevice& device : playback_devices) {
-    if (device.name.empty() || device.name.size() > kMaximumDeviceNameBytes) {
-      devices_.clear();
-      return InvalidArgument("SDL audio output name is empty or too long");
-    }
-    devices_.push_back(
-        {device.id, device.name,
-         internal::MakeOutputDeviceGuid(device.id, device.name)});
-    if (device.id == configured_device_id) {
-      selected_index_ = static_cast<int>(devices_.size() - 1);
-    }
-  }
-  if (configured_device_id != 0 && selected_index_ == 0) {
-    devices_.clear();
-    return FailedPrecondition("configured SDL audio output disappeared");
-  }
-
-  input_devices_.clear();
-  selected_input_index_ = 0;
   if (!profile_.has_input_devices() && profile_.vtable_layout_version == 2) {
     profile_.input_method_rvas = InputMethodsFromVtable(image_base, profile_);
     if (profile_.has_input_devices()) {
@@ -380,32 +334,13 @@ Status RobloxOutputDeviceBridge::Activate(std::uintptr_t image_base) {
     }
   }
   const char *input_target = std::getenv("BLOX7_AUDIO_INPUT_DEVICE");
-  if (profile_.has_input_devices() &&
-      (input_target == nullptr ||
-       std::string_view(input_target) != "disabled")) {
-    std::vector<SdlRecordingDevice> recording_devices;
-    status = ListSdlRecordingDevices(&recording_devices);
-    if (!status.ok())
-      return status;
-    if (recording_devices.size() + 1 > kMaximumMenuDevices)
-      return InvalidArgument("host exposes too many audio input devices");
-    std::uint32_t selected = 0;
-    std::string selected_name;
-    status = GetConfiguredSdlRecordingDevice(&selected, &selected_name);
-    if (!status.ok())
-      return status;
-    input_devices_.push_back({0, "System Default", "blox7:input:default"});
-    for (const auto &device : recording_devices) {
-      if (device.name.empty() || device.name.size() > kMaximumDeviceNameBytes)
-        return InvalidArgument("SDL audio input name is empty or too long");
-      input_devices_.push_back(
-          {device.id, device.name,
-           "input:" + internal::MakeOutputDeviceGuid(device.id, device.name)});
-      if (device.id == selected)
-        selected_input_index_ = static_cast<int>(input_devices_.size() - 1);
-    }
-    if (selected != 0 && selected_input_index_ == 0)
-      return FailedPrecondition("configured SDL audio input disappeared");
+  input_enabled_ = profile_.has_input_devices() &&
+                   (input_target == nullptr ||
+                    std::string_view(input_target) != "disabled");
+  Status status = routes_.Start(input_enabled_);
+  if (!status.ok()) {
+    input_enabled_ = false;
+    return status;
   }
 
   library_base_ = image_base;
@@ -414,29 +349,17 @@ Status RobloxOutputDeviceBridge::Activate(std::uintptr_t image_base) {
       reinterpret_cast<void*>(image_base + profile_.string_constructor_rva);
   status = PatchVtableLocked();
   if (!status.ok()) {
-    devices_.clear();
-    input_devices_.clear();
-    selected_input_index_ = 0;
+    routes_.Stop();
+    input_enabled_ = false;
     string_constructor_ = nullptr;
     library_base_ = 0;
     vtable_ = nullptr;
     return status;
   }
   active_ = true;
-
-  std::fprintf(stderr,
-               "  [audio-menu] exposed %zu host output routes; selected=%s\n",
-               devices_.size(), devices_[selected_index_].name.c_str());
-  for (const MenuDevice& device : devices_) {
-    std::fprintf(stderr, "    [audio-menu] %s\n", device.name.c_str());
-  }
+  LogRoutes(routes_, HostAudioDirection::kOutput, true);
   if (profile_.has_input_devices()) {
-    std::fprintf(stderr,
-                 "  [audio-menu] exposed %zu host input routes; selected=%s\n",
-                 input_devices_.size(),
-                 input_devices_.empty()
-                     ? "disabled"
-                     : input_devices_[selected_input_index_].name.c_str());
+    LogRoutes(routes_, HostAudioDirection::kInput, false);
   }
   return Status::Ok();
 }
@@ -506,7 +429,7 @@ Status RobloxOutputDeviceBridge::PatchVtableLocked() {
             library_base_, &IsRelroImageRange, &IsExecutableImageRange,
             reinterpret_cast<NativeInputCapture::OriginalLatency>(
                 original_capture_methods_[1])},
-        !input_devices_.empty());
+        input_enabled_);
   }
 
   original_methods_ = {
@@ -682,58 +605,44 @@ void RobloxOutputDeviceBridge::SetCurrentInputDevice(void *, int index) {
 }
 
 int RobloxOutputDeviceBridge::DeviceCount(bool input) {
-  const auto &devices = input ? input_devices_ : devices_;
   std::lock_guard<std::mutex> lock(mutex_);
-  return active_ ? static_cast<int>(devices.size()) : 0;
+  return active_ ? static_cast<int>(routes_.Count(RouteDirection(input))) : 0;
 }
 
 void *RobloxOutputDeviceBridge::DeviceInfo(void *result, int index,
                                            bool input) {
-  const auto &devices = input ? input_devices_ : devices_;
   if (result == nullptr) {
     return nullptr;
   }
   std::memset(result, 0, kGuestDeviceInfoSize);
   std::lock_guard<std::mutex> lock(mutex_);
+  HostAudioRoute route;
   if (!active_ || index < 0 ||
-      static_cast<std::size_t>(index) >= devices.size()) {
+      !routes_.Route(RouteDirection(input), static_cast<std::size_t>(index),
+                     &route)) {
     return result;
   }
-  const MenuDevice &device = devices[static_cast<std::size_t>(index)];
-  ConstructGuestString(result, device.name);
+  ConstructGuestString(result, route.name);
   ConstructGuestString(static_cast<std::uint8_t*>(result) + kGuestStringSize,
-                       device.guid);
+                       route.guid);
   static_cast<std::uint8_t*>(result)[kGuestStringSize * 2] = 1;
   return result;
 }
 
 int RobloxOutputDeviceBridge::CurrentDevice(bool input) {
   std::lock_guard<std::mutex> lock(mutex_);
-  return active_ ? (input ? selected_input_index_ : selected_index_) : 0;
+  return active_ ? static_cast<int>(routes_.Current(RouteDirection(input)))
+                 : 0;
 }
 
 void RobloxOutputDeviceBridge::SelectDevice(int index, bool input) {
-  const auto &devices = input ? input_devices_ : devices_;
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!active_ || index < 0 ||
-      static_cast<std::size_t>(index) >= devices.size()) {
-    return;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!active_ || index < 0) {
+      return;
+    }
   }
-  const MenuDevice &device = devices[static_cast<std::size_t>(index)];
-  std::string resolved_name;
-  const Status status =
-      input
-          ? SwitchSdlRecordingDevice(device.playback_device_id, &resolved_name)
-          : SwitchSdlPlaybackDevice(device.playback_device_id, &resolved_name);
-  if (!status.ok()) {
-    std::fprintf(stderr, "  [audio-menu] cannot select host %s '%s': %s\n",
-                 input ? "input" : "output", device.name.c_str(),
-                 status.message().c_str());
-    return;
-  }
-  (input ? selected_input_index_ : selected_index_) = index;
-  std::fprintf(stderr, "  [audio-menu] selected host %s=%s\n",
-               input ? "input" : "output", resolved_name.c_str());
+  routes_.Select(RouteDirection(input), static_cast<std::size_t>(index));
 }
 
 void RobloxOutputDeviceBridge::ConstructGuestString(

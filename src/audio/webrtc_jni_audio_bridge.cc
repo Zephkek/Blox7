@@ -618,6 +618,10 @@ Status InstallWebRtcJniAudioBridge(jnivm::VM* vm) {
     for (const SdlRecordingDevice& device : devices) {
       std::cout << "    - id:" << device.id << " " << device.name << '\n';
     }
+    if (requested != "default" && resolved_name == "default") {
+      std::cout << "  [blox7][audio] input '" << requested
+                << "' is not connected\n";
+    }
     std::cout << "  [blox7][audio] selected input=" << resolved_name
               << '\n'
               << std::flush;

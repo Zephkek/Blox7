@@ -17,9 +17,6 @@ bool HasExpectedFmodOutputDeviceVtable(
     const std::uintptr_t* vtable, std::uintptr_t image_base,
     const compat::FmodOutputDeviceBridgeProfile& profile);
 
-std::string MakeOutputDeviceGuid(std::uint32_t playback_device_id,
-                                 std::string_view name);
-
 }  // namespace blox7::audio::internal
 
 #endif  // BLOX7_AUDIO_ROBLOX_OUTPUT_DEVICE_BRIDGE_INTERNAL_H_

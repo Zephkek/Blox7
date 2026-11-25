@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "compat/build_profile.h"
+#include "blox7/audio/host_audio_routes.h"
 #include "blox7/status.h"
 
 namespace blox7::audio {
@@ -30,12 +31,6 @@ class RobloxOutputDeviceBridge final {
   bool active() const { return active_; }
 
  private:
-  struct MenuDevice {
-    std::uint32_t playback_device_id = 0;
-    std::string name;
-    std::string guid;
-  };
-
   static bool ObserveAndroidLibrary(void* context,
                                     std::string_view logical_name,
                                     std::uintptr_t image_base);
@@ -61,14 +56,12 @@ class RobloxOutputDeviceBridge final {
   std::array<std::uintptr_t, 6> original_capture_methods_{};
   mutable std::mutex mutex_;
   compat::FmodOutputDeviceBridgeProfile profile_;
-  std::vector<MenuDevice> devices_;
-  std::vector<MenuDevice> input_devices_;
-  int selected_input_index_ = 0;
+  HostAudioRoutes routes_;
+  bool input_enabled_ = false;
   std::array<std::uintptr_t, 8> original_methods_{};
   std::uintptr_t library_base_ = 0;
   std::uintptr_t* vtable_ = nullptr;
   void* string_constructor_ = nullptr;
-  int selected_index_ = 0;
   bool installed_ = false;
   bool active_ = false;
 };

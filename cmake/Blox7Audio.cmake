@@ -13,6 +13,7 @@ find_package(Threads REQUIRED)
 
 add_library(blox7_audio_core STATIC
   ${BLOX7_AUDIO_ROOT}/src/audio/audio_sink.cc
+  ${BLOX7_AUDIO_ROOT}/src/audio/pcm_rate_converter.cc
 )
 target_include_directories(blox7_audio_core PUBLIC
   ${BLOX7_AUDIO_ROOT}/include
@@ -24,8 +25,10 @@ set_target_properties(blox7_audio_core PROPERTIES
 add_library(Blox7::AudioCore ALIAS blox7_audio_core)
 
 add_library(blox7_audio_sdl SHARED
+  ${BLOX7_AUDIO_ROOT}/src/audio/host_audio_routes.cc
   ${BLOX7_AUDIO_ROOT}/src/audio/sdl_audio_capture.cc
   ${BLOX7_AUDIO_ROOT}/src/audio/sdl_audio_sink.cc
+  ${BLOX7_AUDIO_ROOT}/win/audio/default_endpoint_win.cc
 )
 target_include_directories(blox7_audio_sdl PUBLIC
   ${BLOX7_AUDIO_ROOT}/include

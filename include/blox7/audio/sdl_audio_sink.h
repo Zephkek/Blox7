@@ -37,6 +37,25 @@ Status GetConfiguredSdlPlaybackDevice(std::uint32_t* playback_device_id,
 Status SwitchSdlPlaybackDevice(std::uint32_t playback_device_id,
                                std::string* resolved_name);
 
+void PrepareSdlPlaybackDevice();
+
+using SdlAudioDeviceListener = bool (*)(void* context, bool last_try);
+
+void SetSdlAudioDeviceListener(SdlAudioDeviceListener listener,
+                               void* context);
+
+void RequestSdlAudioDeviceRefresh();
+
+std::string SdlDefaultAudioDeviceName(bool recording);
+
+bool SdlAudioDeviceGone(std::uint32_t device_id);
+
+bool SdlDefaultOpenIsSafe(bool recording);
+
+int SdlPlaybackOpenRate();
+
+Status ReopenSdlPlaybackDevice();
+
 struct SdlAudioSinkOptions {
   PcmSpec source_spec;
 
