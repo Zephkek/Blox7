@@ -250,8 +250,9 @@ BRIDGE_EXPORT GLint glGetAttribLocation(GLuint a0, const GLchar * a1) {
   return p_glGetAttribLocation(a0, a1);
 }
 static void (BRIDGE_MS *p_glGetBooleanv)(GLenum, GLboolean *);
+void gles_get_booleanv(void (BRIDGE_MS *)(GLenum, GLboolean *), GLenum a0, GLboolean * a1);
 BRIDGE_EXPORT void glGetBooleanv(GLenum a0, GLboolean * a1) {
-  p_glGetBooleanv(a0, a1);
+  gles_get_booleanv(p_glGetBooleanv, a0, a1);
 }
 static void (BRIDGE_MS *p_glGetBufferParameteriv)(GLenum, GLenum, GLint *);
 BRIDGE_EXPORT void glGetBufferParameteriv(GLenum a0, GLenum a1, GLint * a2) {
@@ -262,16 +263,18 @@ BRIDGE_EXPORT GLenum glGetError(void) {
   return p_glGetError();
 }
 static void (BRIDGE_MS *p_glGetFloatv)(GLenum, GLfloat *);
+void gles_get_floatv(void (BRIDGE_MS *)(GLenum, GLfloat *), GLenum a0, GLfloat * a1);
 BRIDGE_EXPORT void glGetFloatv(GLenum a0, GLfloat * a1) {
-  p_glGetFloatv(a0, a1);
+  gles_get_floatv(p_glGetFloatv, a0, a1);
 }
 static void (BRIDGE_MS *p_glGetFramebufferAttachmentParameteriv)(GLenum, GLenum, GLenum, GLint *);
 BRIDGE_EXPORT void glGetFramebufferAttachmentParameteriv(GLenum a0, GLenum a1, GLenum a2, GLint * a3) {
   p_glGetFramebufferAttachmentParameteriv(a0, a1, a2, a3);
 }
 static void (BRIDGE_MS *p_glGetIntegerv)(GLenum, GLint *);
+void gles_get_integerv(void (BRIDGE_MS *)(GLenum, GLint *), GLenum a0, GLint * a1);
 BRIDGE_EXPORT void glGetIntegerv(GLenum a0, GLint * a1) {
-  p_glGetIntegerv(a0, a1);
+  gles_get_integerv(p_glGetIntegerv, a0, a1);
 }
 static void (BRIDGE_MS *p_glGetProgramiv)(GLuint, GLenum, GLint *);
 BRIDGE_EXPORT void glGetProgramiv(GLuint a0, GLenum a1, GLint * a2) {
@@ -302,8 +305,9 @@ BRIDGE_EXPORT void glGetShaderSource(GLuint a0, GLsizei a1, GLsizei * a2, GLchar
   p_glGetShaderSource(a0, a1, a2, a3);
 }
 static const GLubyte * (BRIDGE_MS *p_glGetString)(GLenum);
+const GLubyte * gles_get_string(const GLubyte * (BRIDGE_MS *)(GLenum), GLenum a0);
 BRIDGE_EXPORT const GLubyte * glGetString(GLenum a0) {
-  return p_glGetString(a0);
+  return gles_get_string(p_glGetString, a0);
 }
 static void (BRIDGE_MS *p_glGetTexParameterfv)(GLenum, GLenum, GLfloat *);
 BRIDGE_EXPORT void glGetTexParameterfv(GLenum a0, GLenum a1, GLfloat * a2) {
@@ -836,8 +840,9 @@ BRIDGE_EXPORT void glClearBufferfi(GLenum a0, GLint a1, GLfloat a2, GLint a3) {
   p_glClearBufferfi(a0, a1, a2, a3);
 }
 static const GLubyte * (BRIDGE_MS *p_glGetStringi)(GLenum, GLuint);
+const GLubyte * gles_get_stringi(const GLubyte * (BRIDGE_MS *)(GLenum, GLuint), GLenum a0, GLuint a1);
 BRIDGE_EXPORT const GLubyte * glGetStringi(GLenum a0, GLuint a1) {
-  return p_glGetStringi(a0, a1);
+  return gles_get_stringi(p_glGetStringi, a0, a1);
 }
 static void (BRIDGE_MS *p_glCopyBufferSubData)(GLenum, GLenum, GLintptr, GLintptr, GLsizeiptr);
 BRIDGE_EXPORT void glCopyBufferSubData(GLenum a0, GLenum a1, GLintptr a2, GLintptr a3, GLsizeiptr a4) {
@@ -897,8 +902,9 @@ BRIDGE_EXPORT void glWaitSync(GLsync a0, GLbitfield a1, GLuint64 a2) {
   p_glWaitSync(a0, a1, a2);
 }
 static void (BRIDGE_MS *p_glGetInteger64v)(GLenum, GLint64 *);
+void gles_get_integer64v(void (BRIDGE_MS *)(GLenum, GLint64 *), GLenum a0, GLint64 * a1);
 BRIDGE_EXPORT void glGetInteger64v(GLenum a0, GLint64 * a1) {
-  p_glGetInteger64v(a0, a1);
+  gles_get_integer64v(p_glGetInteger64v, a0, a1);
 }
 static void (BRIDGE_MS *p_glGetSynciv)(GLsync, GLenum, GLsizei, GLsizei *, GLint *);
 BRIDGE_EXPORT void glGetSynciv(GLsync a0, GLenum a1, GLsizei a2, GLsizei * a3, GLint * a4) {
@@ -1924,18 +1930,6 @@ BRIDGE_EXPORT void glLabelObjectEXT(GLenum a0, GLuint a1, GLsizei a2, const GLch
 static void (BRIDGE_MS *p_glGetObjectLabelEXT)(GLenum, GLuint, GLsizei, GLsizei *, GLchar *);
 BRIDGE_EXPORT void glGetObjectLabelEXT(GLenum a0, GLuint a1, GLsizei a2, GLsizei * a3, GLchar * a4) {
   p_glGetObjectLabelEXT(a0, a1, a2, a3, a4);
-}
-static void (BRIDGE_MS *p_glInsertEventMarkerEXT)(GLsizei, const GLchar *);
-BRIDGE_EXPORT void glInsertEventMarkerEXT(GLsizei a0, const GLchar * a1) {
-  p_glInsertEventMarkerEXT(a0, a1);
-}
-static void (BRIDGE_MS *p_glPushGroupMarkerEXT)(GLsizei, const GLchar *);
-BRIDGE_EXPORT void glPushGroupMarkerEXT(GLsizei a0, const GLchar * a1) {
-  p_glPushGroupMarkerEXT(a0, a1);
-}
-static void (BRIDGE_MS *p_glPopGroupMarkerEXT)(void);
-BRIDGE_EXPORT void glPopGroupMarkerEXT(void) {
-  p_glPopGroupMarkerEXT();
 }
 static void (BRIDGE_MS *p_glDiscardFramebufferEXT)(GLenum, GLsizei, const GLenum *);
 BRIDGE_EXPORT void glDiscardFramebufferEXT(GLenum a0, GLsizei a1, const GLenum * a2) {
@@ -3907,9 +3901,6 @@ static const struct bridge_entry kEntries[] = {
     {"glCopyImageSubDataEXT", (void **)&p_glCopyImageSubDataEXT},
     {"glLabelObjectEXT", (void **)&p_glLabelObjectEXT},
     {"glGetObjectLabelEXT", (void **)&p_glGetObjectLabelEXT},
-    {"glInsertEventMarkerEXT", (void **)&p_glInsertEventMarkerEXT},
-    {"glPushGroupMarkerEXT", (void **)&p_glPushGroupMarkerEXT},
-    {"glPopGroupMarkerEXT", (void **)&p_glPopGroupMarkerEXT},
     {"glDiscardFramebufferEXT", (void **)&p_glDiscardFramebufferEXT},
     {"glGenQueriesEXT", (void **)&p_glGenQueriesEXT},
     {"glDeleteQueriesEXT", (void **)&p_glDeleteQueriesEXT},
@@ -4766,9 +4757,6 @@ static const struct { const char *name; void *fn; } kExports[] = {
     {"glCopyImageSubDataEXT", (void *)glCopyImageSubDataEXT},
     {"glLabelObjectEXT", (void *)glLabelObjectEXT},
     {"glGetObjectLabelEXT", (void *)glGetObjectLabelEXT},
-    {"glInsertEventMarkerEXT", (void *)glInsertEventMarkerEXT},
-    {"glPushGroupMarkerEXT", (void *)glPushGroupMarkerEXT},
-    {"glPopGroupMarkerEXT", (void *)glPopGroupMarkerEXT},
     {"glDiscardFramebufferEXT", (void *)glDiscardFramebufferEXT},
     {"glGenQueriesEXT", (void *)glGenQueriesEXT},
     {"glDeleteQueriesEXT", (void *)glDeleteQueriesEXT},
@@ -5145,6 +5133,9 @@ static const struct { const char *name; void *fn; } kExports[] = {
     {"glEndTilingQCOM", (void *)glEndTilingQCOM},
     {"glDebugMessageCallback", (void *)glDebugMessageCallback},
     {"glDebugMessageCallbackKHR", (void *)glDebugMessageCallbackKHR},
+    {"glInsertEventMarkerEXT", (void *)glInsertEventMarkerEXT},
+    {"glPushGroupMarkerEXT", (void *)glPushGroupMarkerEXT},
+    {"glPopGroupMarkerEXT", (void *)glPopGroupMarkerEXT},
 };
 
 BRIDGE_EXPORT void *gles_bridge_resolve_export(const char *name) {

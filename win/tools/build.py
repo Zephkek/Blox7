@@ -334,8 +334,12 @@ def build_bridge_sources():
                                   'glGetPointerv=gles_get_pointerv,glGetPointervKHR=gles_get_pointerv,'
                                   'glGenerateMipmap=gles_generate_mipmap,glDeleteTextures=gles_delete_textures,'
                                   'glGetTexLevelParameteriv=gles_get_tex_level_parameteriv,'
-                                  'glGetTexLevelParameterfv=gles_get_tex_level_parameterfv',
-                                  '--manual', 'glDebugMessageCallback,glDebugMessageCallbackKHR'])
+                                  'glGetTexLevelParameterfv=gles_get_tex_level_parameterfv,'
+                                  'glGetString=gles_get_string,glGetStringi=gles_get_stringi,'
+                                  'glGetIntegerv=gles_get_integerv,glGetInteger64v=gles_get_integer64v,'
+                                  'glGetFloatv=gles_get_floatv,glGetBooleanv=gles_get_booleanv',
+                                  '--manual', 'glDebugMessageCallback,glDebugMessageCallbackKHR,'
+                                  'glInsertEventMarkerEXT,glPushGroupMarkerEXT,glPopGroupMarkerEXT'])
     with open(gles, encoding='utf-8') as f:
         lines = f.read().split('\n')
     lines.insert(1, '#define GL_GLEXT_PROTOTYPES 1')

@@ -12,6 +12,7 @@ void gles_bridge_resolve(void* (*lookup)(const char*));
 void* gles_bridge_resolve_export(const char* name);
 void gles_window_current(void);
 void gles_window_reset(void);
+int gles_bridge_always_has(const char* name);
 
 static void* real(const char* name) { return __w32_pe_symbol(bridge_module_kEntries, name); }
 
@@ -177,7 +178,7 @@ BRIDGE_EXPORT bool SDL_GL_SwapWindow(SDL_Window* window) {
 }
 
 BRIDGE_EXPORT SDL_FunctionPointer SDL_GL_GetProcAddress(const char* name) {
-  if (!lookup_gl(name)) return NULL;
+  if (!lookup_gl(name) && !gles_bridge_always_has(name)) return NULL;
   return (SDL_FunctionPointer)gles_bridge_resolve_export(name);
 }
 

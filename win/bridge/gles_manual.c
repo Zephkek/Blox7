@@ -601,11 +601,13 @@ void gles_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, G
 
 static int g_window_srgb, g_window_checked;
 static int g_copy_route;
+static int g_marker_state;
 
 void gles_window_reset(void) {
   g_window_checked = 0;
   g_window_srgb = 0;
   g_copy_route = 0;
+  g_marker_state = 0;
 }
 
 static int has_extension(const char* list, const char* name) {
@@ -613,6 +615,111 @@ static int has_extension(const char* list, const char* name) {
   for (const char* p = list; (p = strstr(p, name)) != NULL; p += n)
     if ((p == list || p[-1] == ' ') && (p[n] == ' ' || p[n] == '\0')) return 1;
   return 0;
+}
+
+static const char kMarkerExtension[] = "GL_EXT_debug_marker";
+enum { kMarkerNative = 1, kMarkerAdded = 2 };
+
+static const GLubyte* (BRIDGE_MS* g_real_get_string)(GLenum);
+static void (BRIDGE_MS* g_real_insert_marker)(GLsizei, const GLchar*);
+static void (BRIDGE_MS* g_real_push_marker)(GLsizei, const GLchar*);
+static void (BRIDGE_MS* g_real_pop_marker)(void);
+
+static int marker_state(void) {
+  if (!g_marker_state && g_real_get_string) {
+    const char* list = (const char*)g_real_get_string(GL_EXTENSIONS);
+    if (list) g_marker_state = has_extension(list, kMarkerExtension) ? kMarkerNative : kMarkerAdded;
+  }
+  return g_marker_state;
+}
+
+static int marker_added(void) { return marker_state() == kMarkerAdded; }
+
+const GLubyte* gles_get_string(const GLubyte* (BRIDGE_MS* real)(GLenum), GLenum name) {
+  const GLubyte* value = real(name);
+  if (name != GL_EXTENSIONS || !value || !marker_added()) return value;
+  static char* listed[4];
+  static volatile int lock;
+  const size_t n = strlen((const char*)value);
+  char* found = NULL;
+  while (__atomic_exchange_n(&lock, 1, __ATOMIC_ACQUIRE)) {
+  }
+  for (int i = 0; i < 4 && !found; i++) {
+    if (listed[i] && strcmp(listed[i] + sizeof kMarkerExtension, (const char*)value) == 0) found = listed[i];
+    else if (!listed[i] && (listed[i] = malloc(sizeof kMarkerExtension + n + 1)) != NULL) {
+      found = listed[i];
+      memcpy(found, kMarkerExtension, sizeof kMarkerExtension - 1);
+      found[sizeof kMarkerExtension - 1] = ' ';
+      memcpy(found + sizeof kMarkerExtension, value, n + 1);
+    }
+  }
+  __atomic_store_n(&lock, 0, __ATOMIC_RELEASE);
+  return found ? (const GLubyte*)found : value;
+}
+
+const GLubyte* gles_get_stringi(const GLubyte* (BRIDGE_MS* real)(GLenum, GLuint), GLenum name, GLuint index) {
+  if (name != GL_EXTENSIONS || !marker_added()) return real(name, index);
+  return index ? real(name, index - 1) : (const GLubyte*)kMarkerExtension;
+}
+
+static int extension_count(void (BRIDGE_MS* real)(GLenum, GLint*)) {
+  GLint count = -1;
+  real(GL_NUM_EXTENSIONS, &count);
+  return count < 0 ? -1 : count + 1;
+}
+
+void gles_get_integerv(void (BRIDGE_MS* real)(GLenum, GLint*), GLenum pname, GLint* data) {
+  if (pname != GL_NUM_EXTENSIONS || !data || !marker_added()) {
+    real(pname, data);
+    return;
+  }
+  const int count = extension_count(real);
+  if (count >= 0) *data = count;
+}
+
+static void (BRIDGE_MS* g_real_get_integerv)(GLenum, GLint*);
+
+void gles_get_integer64v(void (BRIDGE_MS* real)(GLenum, GLint64*), GLenum pname, GLint64* data) {
+  if (pname != GL_NUM_EXTENSIONS || !data || !g_real_get_integerv || !marker_added()) {
+    real(pname, data);
+    return;
+  }
+  const int count = extension_count(g_real_get_integerv);
+  if (count >= 0) *data = count;
+}
+
+void gles_get_floatv(void (BRIDGE_MS* real)(GLenum, GLfloat*), GLenum pname, GLfloat* data) {
+  if (pname != GL_NUM_EXTENSIONS || !data || !g_real_get_integerv || !marker_added()) {
+    real(pname, data);
+    return;
+  }
+  const int count = extension_count(g_real_get_integerv);
+  if (count >= 0) *data = (GLfloat)count;
+}
+
+void gles_get_booleanv(void (BRIDGE_MS* real)(GLenum, GLboolean*), GLenum pname, GLboolean* data) {
+  if (pname != GL_NUM_EXTENSIONS || !data || !g_real_get_integerv || !marker_added()) {
+    real(pname, data);
+    return;
+  }
+  if (extension_count(g_real_get_integerv) >= 0) *data = GL_TRUE;
+}
+
+BRIDGE_EXPORT void GL_APIENTRY glInsertEventMarkerEXT(GLsizei length, const GLchar* marker) {
+  if (g_real_insert_marker && marker_state() == kMarkerNative) g_real_insert_marker(length, marker);
+}
+
+BRIDGE_EXPORT void GL_APIENTRY glPushGroupMarkerEXT(GLsizei length, const GLchar* marker) {
+  if (g_real_push_marker && marker_state() == kMarkerNative) g_real_push_marker(length, marker);
+}
+
+BRIDGE_EXPORT void GL_APIENTRY glPopGroupMarkerEXT(void) {
+  if (g_real_pop_marker && marker_state() == kMarkerNative) g_real_pop_marker();
+}
+
+int gles_bridge_always_has(const char* name) {
+  return strcmp(name, "glInsertEventMarkerEXT") == 0 || strcmp(name, "glPushGroupMarkerEXT") == 0 ||
+         strcmp(name, "glPopGroupMarkerEXT") == 0;
 }
 
 static void cube_face_target(GLenum* target, GLint* z) {
@@ -718,6 +825,11 @@ void gles_bridge_resolve_manual(void* (*lookup)(const char*)) {
   g_real_debug_callback = (void (BRIDGE_MS*)(void*, const void*))lookup("glDebugMessageCallback");
   g_real_debug_callback_khr = (void (BRIDGE_MS*)(void*, const void*))lookup("glDebugMessageCallbackKHR");
   g_get_level_iv = (void (BRIDGE_MS*)(GLenum, GLint, GLenum, GLint*))lookup("glGetTexLevelParameteriv");
+  g_real_get_string = (const GLubyte* (BRIDGE_MS*)(GLenum))lookup("glGetString");
+  g_real_get_integerv = (void (BRIDGE_MS*)(GLenum, GLint*))lookup("glGetIntegerv");
+  g_real_insert_marker = (void (BRIDGE_MS*)(GLsizei, const GLchar*))lookup("glInsertEventMarkerEXT");
+  g_real_push_marker = (void (BRIDGE_MS*)(GLsizei, const GLchar*))lookup("glPushGroupMarkerEXT");
+  g_real_pop_marker = (void (BRIDGE_MS*)(void))lookup("glPopGroupMarkerEXT");
 }
 
 static void set_debug_callback(void (BRIDGE_MS* real)(void*, const void*), GLDEBUGPROC callback, const void* user) {
