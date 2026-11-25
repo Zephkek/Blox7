@@ -435,6 +435,29 @@ static long follow_link_files(char* abs, WCHAR* win, DWORD* attrs) {
   return -ELOOP;
 }
 
+static void empty_trash(const WCHAR* dir) {
+  WCHAR path[W32_PATH_MAX];
+  size_t n = 0;
+  while (dir[n] && n < W32_PATH_MAX - 262) {
+    path[n] = dir[n];
+    n++;
+  }
+  path[n++] = '\\';
+  path[n] = '*';
+  path[n + 1] = 0;
+  W32_WIN32_FIND_DATAW fd;
+  HANDLE h = w32.FindFirstFileW(path, &fd);
+  if (h == INVALID_HANDLE_VALUE) return;
+  do {
+    if (fd.attributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    size_t k = 0;
+    for (; fd.name[k] && k < 259; k++) path[n + k] = fd.name[k];
+    path[n + k] = 0;
+    w32.DeleteFileW(path);
+  } while (w32.FindNextFileW(h, &fd));
+  w32.FindClose(h);
+}
+
 void w32_init_files() {
   const char* env_root = nullptr;
   for (char** e = environ; e && *e; e++)
@@ -462,6 +485,7 @@ void w32_init_files() {
   WCHAR deleted[W32_PATH_MAX];
   to_win32("/.deleted", deleted, W32_PATH_MAX);
   w32.CreateDirectoryW(deleted, nullptr);
+  empty_trash(deleted);
   static const char* const kDirs[] = {"/tmp", "/data", "/dev", "/proc"};
   for (const char* d : kDirs) {
     WCHAR w[W32_PATH_MAX];
