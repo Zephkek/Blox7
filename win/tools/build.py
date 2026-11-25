@@ -328,7 +328,9 @@ def build_bridge_sources():
                                   'glUnmapBuffer=gles_unmap_buffer,glClientWaitSync=gles_client_wait_sync,'
                                   'glFinish=gles_finish,glFlush=gles_flush,glReadPixels=gles_read_pixels,'
                                   'glBindFramebuffer=gles_bind_framebuffer,'
-                                  'glDeleteFramebuffers=gles_delete_framebuffers'])
+                                  'glDeleteFramebuffers=gles_delete_framebuffers,'
+                                  'glCopyImageSubData=gles_copy_image_sub_data_core,glCopyImageSubDataEXT=gles_copy_image_sub_data,'
+                                  'glCopyImageSubDataOES=gles_copy_image_sub_data'])
     with open(gles, encoding='utf-8') as f:
         lines = f.read().split('\n')
     lines.insert(1, '#define GL_GLEXT_PROTOTYPES 1')

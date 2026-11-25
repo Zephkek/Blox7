@@ -1289,8 +1289,9 @@ BRIDGE_EXPORT void glBlendBarrier(void) {
   p_glBlendBarrier();
 }
 static void (BRIDGE_MS *p_glCopyImageSubData)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei);
+void gles_copy_image_sub_data_core(void (BRIDGE_MS *)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei), GLuint a0, GLenum a1, GLint a2, GLint a3, GLint a4, GLint a5, GLuint a6, GLenum a7, GLint a8, GLint a9, GLint a10, GLint a11, GLsizei a12, GLsizei a13, GLsizei a14);
 BRIDGE_EXPORT void glCopyImageSubData(GLuint a0, GLenum a1, GLint a2, GLint a3, GLint a4, GLint a5, GLuint a6, GLenum a7, GLint a8, GLint a9, GLint a10, GLint a11, GLsizei a12, GLsizei a13, GLsizei a14) {
-  p_glCopyImageSubData(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+  gles_copy_image_sub_data_core(p_glCopyImageSubData, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 }
 static void (BRIDGE_MS *p_glDebugMessageControl)(GLenum, GLenum, GLenum, GLsizei, const GLuint *, GLboolean);
 BRIDGE_EXPORT void glDebugMessageControl(GLenum a0, GLenum a1, GLenum a2, GLsizei a3, const GLuint * a4, GLboolean a5) {
@@ -1533,8 +1534,9 @@ BRIDGE_EXPORT void glEGLImageTargetRenderbufferStorageOES(GLenum a0, GLeglImageO
   p_glEGLImageTargetRenderbufferStorageOES(a0, a1);
 }
 static void (BRIDGE_MS *p_glCopyImageSubDataOES)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei);
+void gles_copy_image_sub_data(void (BRIDGE_MS *)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei), GLuint a0, GLenum a1, GLint a2, GLint a3, GLint a4, GLint a5, GLuint a6, GLenum a7, GLint a8, GLint a9, GLint a10, GLint a11, GLsizei a12, GLsizei a13, GLsizei a14);
 BRIDGE_EXPORT void glCopyImageSubDataOES(GLuint a0, GLenum a1, GLint a2, GLint a3, GLint a4, GLint a5, GLuint a6, GLenum a7, GLint a8, GLint a9, GLint a10, GLint a11, GLsizei a12, GLsizei a13, GLsizei a14) {
-  p_glCopyImageSubDataOES(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+  gles_copy_image_sub_data(p_glCopyImageSubDataOES, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 }
 static void (BRIDGE_MS *p_glEnableiOES)(GLenum, GLuint);
 BRIDGE_EXPORT void glEnableiOES(GLenum a0, GLuint a1) {
@@ -1905,8 +1907,9 @@ BRIDGE_EXPORT void glClipControlEXT(GLenum a0, GLenum a1) {
   p_glClipControlEXT(a0, a1);
 }
 static void (BRIDGE_MS *p_glCopyImageSubDataEXT)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei);
+void gles_copy_image_sub_data(void (BRIDGE_MS *)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei), GLuint a0, GLenum a1, GLint a2, GLint a3, GLint a4, GLint a5, GLuint a6, GLenum a7, GLint a8, GLint a9, GLint a10, GLint a11, GLsizei a12, GLsizei a13, GLsizei a14);
 BRIDGE_EXPORT void glCopyImageSubDataEXT(GLuint a0, GLenum a1, GLint a2, GLint a3, GLint a4, GLint a5, GLuint a6, GLenum a7, GLint a8, GLint a9, GLint a10, GLint a11, GLsizei a12, GLsizei a13, GLsizei a14) {
-  p_glCopyImageSubDataEXT(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
+  gles_copy_image_sub_data(p_glCopyImageSubDataEXT, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14);
 }
 static void (BRIDGE_MS *p_glLabelObjectEXT)(GLenum, GLuint, GLsizei, const GLchar *);
 BRIDGE_EXPORT void glLabelObjectEXT(GLenum a0, GLuint a1, GLsizei a2, const GLchar * a3) {

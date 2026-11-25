@@ -467,10 +467,62 @@ void gles_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, G
 #define GL_BACK_LEFT 0x0402
 
 static int g_window_srgb, g_window_checked;
+static int g_copy_route;
 
 void gles_window_reset(void) {
   g_window_checked = 0;
   g_window_srgb = 0;
+  g_copy_route = 0;
+}
+
+static int has_extension(const char* list, const char* name) {
+  const size_t n = strlen(name);
+  for (const char* p = list; (p = strstr(p, name)) != NULL; p += n)
+    if ((p == list || p[-1] == ' ') && (p[n] == ' ' || p[n] == '\0')) return 1;
+  return 0;
+}
+
+static void cube_face_target(GLenum* target, GLint* z) {
+  if (*target < GL_TEXTURE_CUBE_MAP_POSITIVE_X || *target > GL_TEXTURE_CUBE_MAP_NEGATIVE_Z) return;
+  *z += (GLint)(*target - GL_TEXTURE_CUBE_MAP_POSITIVE_X);
+  *target = GL_TEXTURE_CUBE_MAP;
+}
+
+void gles_copy_image_sub_data(void (BRIDGE_MS* real)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint,
+                                                     GLint, GLint, GLint, GLsizei, GLsizei, GLsizei),
+                              GLuint src, GLenum src_target, GLint src_level, GLint src_x, GLint src_y, GLint src_z,
+                              GLuint dst, GLenum dst_target, GLint dst_level, GLint dst_x, GLint dst_y, GLint dst_z,
+                              GLsizei width, GLsizei height, GLsizei depth) {
+  cube_face_target(&src_target, &src_z);
+  cube_face_target(&dst_target, &dst_z);
+  real(src, src_target, src_level, src_x, src_y, src_z, dst, dst_target, dst_level, dst_x, dst_y, dst_z, width, height,
+       depth);
+}
+
+void gles_copy_image_sub_data_core(void (BRIDGE_MS* real)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum,
+                                                          GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei),
+                                   GLuint src, GLenum src_target, GLint src_level, GLint src_x, GLint src_y,
+                                   GLint src_z, GLuint dst, GLenum dst_target, GLint dst_level, GLint dst_x,
+                                   GLint dst_y, GLint dst_z, GLsizei width, GLsizei height, GLsizei depth) {
+  if (!g_copy_route) {
+    GLint major = 0, minor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+    const char* list = (const char*)glGetString(GL_EXTENSIONS);
+    if (major > 3 || (major == 3 && minor >= 2) || !list) g_copy_route = 1;
+    else if (has_extension(list, "GL_EXT_copy_image")) g_copy_route = 2;
+    else if (has_extension(list, "GL_OES_copy_image")) g_copy_route = 3;
+    else g_copy_route = 1;
+  }
+  if (g_copy_route == 2)
+    glCopyImageSubDataEXT(src, src_target, src_level, src_x, src_y, src_z, dst, dst_target, dst_level, dst_x, dst_y,
+                          dst_z, width, height, depth);
+  else if (g_copy_route == 3)
+    glCopyImageSubDataOES(src, src_target, src_level, src_x, src_y, src_z, dst, dst_target, dst_level, dst_x, dst_y,
+                          dst_z, width, height, depth);
+  else
+    gles_copy_image_sub_data(real, src, src_target, src_level, src_x, src_y, src_z, dst, dst_target, dst_level, dst_x,
+                             dst_y, dst_z, width, height, depth);
 }
 
 static int gles_refused(void) {
