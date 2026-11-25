@@ -2489,7 +2489,8 @@ typedef struct {
 static SRWLOCK g_lock = SRWLOCK_INIT;
 static volatile DWORD g_owner;
 static void *g_veh;
-static int g_patching = 1, g_bulk, g_missing, g_prefetchw;
+static int g_patching = 1, g_bulk, g_missing, g_prefetchw, g_fs_gs;
+static uint32_t g_fs_disp[3];
 static arena g_arenas[64];
 static int g_narenas;
 static coderange g_code[256];
@@ -3540,12 +3541,54 @@ static void prefetchw_out(uint64_t start, uint64_t end) {
     }
 }
 
+static int fs_slot_read(const uint8_t *p, size_t n) {
+    static const uint8_t k_reads[] = {0x03, 0x0B, 0x13, 0x1B, 0x23, 0x2B, 0x33, 0x39, 0x3B, 0x85, 0x8B};
+    uint32_t disp;
+    if (n < 9 || p[0] != 0x64 || (p[1] & 0xFA) != 0x48 || (p[3] & 0xC7) != 0x04 || p[4] != 0x25) return -1;
+    if (!memchr(k_reads, p[2], sizeof k_reads)) return -1;
+    memcpy(&disp, p + 5, 4);
+    return disp == W32BOOT_FS_SELF ? 0 : disp == W32BOOT_FS_THREAD_ID ? 1 : disp == W32BOOT_FS_STACK_GUARD ? 2 : -1;
+}
+
+static int has_fs_slot_read(const uint8_t *p, size_t n) {
+    const uint8_t *end = p + n;
+    while ((p = memchr(p, 0x64, (size_t)(end - p))) != NULL) {
+        if (fs_slot_read(p, (size_t)(end - p)) >= 0) return 1;
+        p++;
+    }
+    return 0;
+}
+
+static int fs_slots_filled(void) {
+    return *(void **)((char *)NtCurrentTeb() + g_fs_disp[1]) != NULL;
+}
+
+static void fs_out(uint64_t start, uint64_t end) {
+    uint64_t at;
+    if (!has_fs_slot_read((const uint8_t *)(uintptr_t)start, (size_t)(end - start)) || !fs_slots_filled()) return;
+    for (at = start; at < end;) {
+        int len = insn_len((const uint8_t *)(uintptr_t)at);
+        if (!len || at + (uint64_t)len > end) return;
+        at += (uint64_t)len;
+    }
+    for (at = start; at < end;) {
+        uint8_t *p = (uint8_t *)(uintptr_t)at;
+        int len = insn_len(p), k = fs_slot_read(p, (size_t)len);
+        if (k >= 0 && len == 9) {
+            p[0] = 0x65;
+            memcpy(p + 5, &g_fs_disp[k], 4);
+        }
+        at += (uint64_t)len;
+    }
+}
+
 static void scan_function(uint64_t start, uint64_t end, uint64_t next) {
     fninfo fi;
     int terminal = 0, shorts = 0;
     uint64_t at, run = 0, target;
     if (g_prefetchw) prefetchw_out(start, end);
-    if (!has_escape((const uint8_t *)(uintptr_t)start, (size_t)(end - start))) return;
+    if (g_fs_gs) fs_out(start, end);
+    if (!g_missing || !has_escape((const uint8_t *)(uintptr_t)start, (size_t)(end - start))) return;
     memset(&fi, 0, sizeof fi);
     fi.start = start;
     fi.end = end;
@@ -3956,16 +3999,16 @@ static int really_missing(int groups) {
 }
 #endif
 
-void isa_start(struct w32boot *boot, uintptr_t libc_base, uintptr_t code_lo, uintptr_t code_hi) {
+static int old_cpu_start(struct w32boot *boot) {
     unsigned a = 0, b, c = 0, d, fam, model;
     if (!__get_cpuid(1, &a, &b, &c, &d)) a = c = 0;
     g_missing = (c >> 9 & 1 ? 0 : G_SSSE3) | (c >> 19 & 1 ? 0 : G_SSE41) | (c >> 20 & 1 ? 0 : G_SSE42) |
                 (c >> 23 & 1 ? 0 : G_POPCNT);
 #ifdef BLOX7_ISA_TEST
-    if (!test_start()) return;
+    if (!test_start()) return 0;
 #else
     if (g_missing) g_missing = really_missing(g_missing);
-    if (!g_missing) return;
+    if (!g_missing) return 0;
 #endif
     fam = a >> 8 & 15;
     model = (a >> 4 & 15) | (fam == 6 || fam == 15 ? a >> 12 & 0xF0 : 0);
@@ -3980,8 +4023,21 @@ void isa_start(struct w32boot *boot, uintptr_t libc_base, uintptr_t code_lo, uin
     test_tune();
 #endif
     g_veh = AddVectoredExceptionHandler(1, veh);
-    if (!g_veh) return;
+    if (!g_veh) {
+        g_missing = 0;
+        return 0;
+    }
     boot->isa_front = front;
+    return 1;
+}
+
+void isa_start(struct w32boot *boot, uintptr_t libc_base, uintptr_t code_lo, uintptr_t code_hi) {
+    const int old_cpu = old_cpu_start(boot);
+    g_fs_gs = boot->fs_mode == W32BOOT_FS_GS;
+    g_fs_disp[0] = W32BOOT_TEB_TLS_SLOTS + 8 * W32BOOT_TLS_SLOT;
+    g_fs_disp[1] = W32BOOT_TEB_TLS_SLOTS + 8 * boot->fs_thread_slot;
+    g_fs_disp[2] = W32BOOT_TEB_TLS_SLOTS + 8 * boot->fs_guard_slot;
+    if (!old_cpu && !g_fs_gs) return;
     boot->isa_code = code_range;
     code_range(libc_base, code_lo, code_hi, "libc.so");
 }

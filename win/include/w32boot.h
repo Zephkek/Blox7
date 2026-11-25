@@ -23,6 +23,12 @@
 
 #define W32BOOT_TLS_SLOT 63
 
+#define W32BOOT_TEB_TLS_SLOTS 0x1480u
+#define W32BOOT_FS_SELF 0x00u
+#define W32BOOT_FS_THREAD_ID 0x08u
+#define W32BOOT_FS_STACK_GUARD 0x28u
+enum { W32BOOT_FS_AUTO, W32BOOT_FS_GS, W32BOOT_FS_TRAP };
+
 struct w32boot {
     uint32_t version;
     uint32_t size;
@@ -38,6 +44,8 @@ struct w32boot {
     uintptr_t stack_low, stack_high;
     void (HOSTCALL *isa_front)(void);
     void (HOSTCALL *isa_code)(uintptr_t base, uintptr_t lo, uintptr_t hi, const char *path);
+    uint32_t fs_mode;
+    uint32_t fs_thread_slot, fs_guard_slot;
 };
 
 typedef int (ELFCALL *w32_libc_start_fn)(struct w32boot *boot);

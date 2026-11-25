@@ -56,8 +56,13 @@ constexpr size_t kTlsSlots = 0x1480 / sizeof(void*);
 constexpr size_t kFsBlock = 256;
 constexpr size_t kFsChunk = 64 * 1024;
 
+static_assert(kTlsSlots * sizeof(void*) == W32BOOT_TEB_TLS_SLOTS && W32_TLS_SLOT == W32BOOT_TLS_SLOT);
+static_assert(TLS_SLOT_SELF * sizeof(void*) == W32BOOT_FS_SELF);
+static_assert(TLS_SLOT_THREAD_ID * sizeof(void*) == W32BOOT_FS_THREAD_ID);
+static_assert(TLS_SLOT_STACK_GUARD * sizeof(void*) == W32BOOT_FS_STACK_GUARD);
+
 DWORD g_fs_block_slot, g_fs_rip_slot, g_fs_save_slot;
-bool g_fs_region;
+bool g_fs_region, g_fs_gs;
 const uint8_t* g_fs_rearm;
 W32_SRWLOCK g_fs_lock;
 uintptr_t* g_fs_free;
@@ -83,6 +88,9 @@ uint8_t* put_gs(uint8_t* p, const uint8_t* op, size_t size, DWORD slot) {
 
 // windows wipes %fs on every nap, so the first canary read after faults in here and we just put it back lol
 bool init_fs_modern() {
+  const uint32_t mode = w32_boot->size >= sizeof(struct w32boot) ? w32_boot->fs_mode : uint32_t{W32BOOT_FS_AUTO};
+  g_fs_gs = mode == W32BOOT_FS_GS;
+  if (mode != W32BOOT_FS_AUTO) return false;
   const volatile uint32_t* nt = reinterpret_cast<const volatile uint32_t*>(uintptr_t{W32BOOT_NT_VERSION});
   if (W32BOOT_BEFORE_WINDOWS_8(nt)) {
     g_fs_region = true;
@@ -174,6 +182,13 @@ bool w32_fs_redirect(WinContext* c) {
 }
 
 __attribute__((no_stack_protector)) void w32_thread_attach_fs() {
+  if (g_fs_gs) {
+    void** slots = teb() + kTlsSlots;
+    void** tls = __get_tls();
+    slots[w32_boot->fs_thread_slot] = tls[TLS_SLOT_THREAD_ID];
+    slots[w32_boot->fs_guard_slot] = tls[TLS_SLOT_STACK_GUARD];
+    return;
+  }
   if (g_w32_fs_modern) {
     void** t = teb();
     auto* block = static_cast<uintptr_t*>(t[kTlsSlots + g_fs_block_slot]);

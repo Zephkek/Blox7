@@ -244,6 +244,38 @@ static DWORD WINAPI main_thread(LPVOID unused) {
 }
 
 
+static DWORD teb_slot(void) {
+    void **slots = (void **)((char *)NtCurrentTeb() + W32BOOT_TEB_TLS_SLOTS);
+    DWORD slot = TlsAlloc();
+    if (slot < W32BOOT_TLS_SLOT && TlsSetValue(slot, &g_boot) && slots[slot] == &g_boot && TlsSetValue(slot, NULL))
+        return slot;
+    if (slot != TLS_OUT_OF_INDEXES) TlsFree(slot);
+    return TLS_OUT_OF_INDEXES;
+}
+
+static void pick_fs_mode(void) {
+    const volatile uint32_t *nt = (const volatile uint32_t *)(uintptr_t)W32BOOT_NT_VERSION;
+    wchar_t want[8];
+    DWORD n = GetEnvironmentVariableW(L"BLOX7_W32_FS", want, 8), thread_slot, guard_slot;
+    if (!n || n >= 8) want[0] = 0;
+    if (!wcscmp(want, L"trap")) {
+        g_boot.fs_mode = W32BOOT_FS_TRAP;
+        return;
+    }
+    if (wcscmp(want, L"gs") && (W32BOOT_BEFORE_WINDOWS_8(nt) || IsProcessorFeaturePresent(PF_RDWRFSGSBASE_AVAILABLE)))
+        return;
+    thread_slot = teb_slot();
+    guard_slot = teb_slot();
+    if (thread_slot == TLS_OUT_OF_INDEXES || guard_slot == TLS_OUT_OF_INDEXES) {
+        if (thread_slot != TLS_OUT_OF_INDEXES) TlsFree(thread_slot);
+        if (guard_slot != TLS_OUT_OF_INDEXES) TlsFree(guard_slot);
+        return;
+    }
+    g_boot.fs_mode = W32BOOT_FS_GS;
+    g_boot.fs_thread_slot = thread_slot;
+    g_boot.fs_guard_slot = guard_slot;
+}
+
 void boot_prepare(void) {
     const volatile uint32_t *nt = (const volatile uint32_t *)(uintptr_t)W32BOOT_NT_VERSION;
     wchar_t log_path[MAX_PATH];
@@ -257,6 +289,10 @@ void boot_prepare(void) {
                       MEM_RESERVE, PAGE_READWRITE))
         boot_fail(L"could not reserve the stack-guard region", GetLastError());
     claim_tls_slot();
+    pick_fs_mode();
+    boot_log("boot: fs mode %s, slots %u %u",
+             g_boot.fs_mode == W32BOOT_FS_GS ? "gs" : g_boot.fs_mode == W32BOOT_FS_TRAP ? "trap" : "auto",
+             g_boot.fs_thread_slot, g_boot.fs_guard_slot);
 }
 
 int boot_run(const wchar_t *bin_dir, int argc, wchar_t **argv) {
