@@ -247,6 +247,9 @@ RuntimeConfig RuntimeConfig::FromEnvironment(const Environment& environment) {
       "BLOX7_GRAPHICS_BACKEND", config.graphics_backend_name_);
   config.graphics_backend_ =
       ParseGraphicsBackend(config.graphics_backend_name_);
+  if (config.graphics_backend_ == GraphicsBackend::kVulkan) {
+    config.graphics_backend_name_ = "direct-vulkan";
+  }
   config.window_.width =
       ReadPositiveInt(environment, "BLOX7_WIN_WIDTH", config.window_.width);
   config.window_.height = ReadPositiveInt(environment, "BLOX7_WIN_HEIGHT",
