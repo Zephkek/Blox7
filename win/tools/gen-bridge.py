@@ -106,9 +106,11 @@ includes = sys.argv[sys.argv.index('--include') + 1].split(',') if '--include' i
 out.append(''.join(f'#include <{h}>\n' for h in includes) + '#include "bridge_common.h"\n\n')
 skipped = []
 entries = []
+manual_present = []
 for fn in functions:
     name = fn['name']
     if name in manual:
+        manual_present.append(name)
         continue
     ptypes = [p[1] for p in fn['params']]
     if fn['variadic'] or any('va_list' in t or '__va_list' in t for t in ptypes):
@@ -183,10 +185,13 @@ table = ['\nstatic const struct bridge_entry kEntries[] = {\n']
 table += [f'    {{"{n}", (void **)&p_{n}}},\n' for n in entries]
 table.append('};\n\n')
 if resolver:
+    if manual_present:
+        table.append(f'void {resolver}_manual(void *(*lookup)(const char *));\n\n')
     table.append(f'BRIDGE_EXPORT void {resolver}(void *(*lookup)(const char *)) {{\n'
-                 f'  for (size_t i = 0; i < sizeof(kEntries) / sizeof(kEntries[0]); i++) *kEntries[i].slot = lookup(kEntries[i].name);\n}}\n')
+                 f'  for (size_t i = 0; i < sizeof(kEntries) / sizeof(kEntries[0]); i++) *kEntries[i].slot = lookup(kEntries[i].name);\n'
+                 + (f'  {resolver}_manual(lookup);\n' if manual_present else '') + '}\n')
     table.append('\nstatic const struct { const char *name; void *fn; } kExports[] = {\n')
-    table += [f'    {{"{n}", (void *){n}}},\n' for n in entries]
+    table += [f'    {{"{n}", (void *){n}}},\n' for n in entries + manual_present]
     table.append('};\n\n')
     table.append(f'BRIDGE_EXPORT void *{resolver}_export(const char *name) {{\n'
                  f'  for (size_t i = 0; i < sizeof(kExports) / sizeof(kExports[0]); i++)\n'

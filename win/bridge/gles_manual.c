@@ -525,6 +525,53 @@ void gles_copy_image_sub_data_core(void (BRIDGE_MS* real)(GLuint, GLenum, GLint,
                              dst_y, dst_z, width, height, depth);
 }
 
+static GLDEBUGPROC g_debug_proc;
+static const void* g_debug_user;
+static void (BRIDGE_MS* g_real_debug_callback)(void*, const void*);
+static void (BRIDGE_MS* g_real_debug_callback_khr)(void*, const void*);
+
+static BRIDGE_MS void debug_trampoline(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
+                                       const GLchar* message, const void* user) {
+  (void)user;
+  const GLDEBUGPROC proc = g_debug_proc;
+  if (!proc) return;
+  bridge_attach();
+  proc(source, type, id, severity, length, message, g_debug_user);
+}
+
+void gles_bridge_resolve_manual(void* (*lookup)(const char*)) {
+  g_real_debug_callback = (void (BRIDGE_MS*)(void*, const void*))lookup("glDebugMessageCallback");
+  g_real_debug_callback_khr = (void (BRIDGE_MS*)(void*, const void*))lookup("glDebugMessageCallbackKHR");
+}
+
+static void set_debug_callback(void (BRIDGE_MS* real)(void*, const void*), GLDEBUGPROC callback, const void* user) {
+  if (!real) real = g_real_debug_callback ? g_real_debug_callback : g_real_debug_callback_khr;
+  if (!real) return;
+  g_debug_proc = callback;
+  g_debug_user = user;
+  real(callback ? (void*)debug_trampoline : NULL, NULL);
+}
+
+BRIDGE_EXPORT void GL_APIENTRY glDebugMessageCallback(GLDEBUGPROC callback, const void* user) {
+  set_debug_callback(g_real_debug_callback, callback, user);
+}
+
+BRIDGE_EXPORT void GL_APIENTRY glDebugMessageCallbackKHR(GLDEBUGPROCKHR callback, const void* user) {
+  set_debug_callback(g_real_debug_callback_khr, (GLDEBUGPROC)callback, user);
+}
+
+void gles_get_pointerv(void (BRIDGE_MS* real)(GLenum, void**), GLenum pname, void** params) {
+  if (params && pname == GL_DEBUG_CALLBACK_FUNCTION) {
+    *params = (void*)g_debug_proc;
+    return;
+  }
+  if (params && pname == GL_DEBUG_CALLBACK_USER_PARAM) {
+    *params = (void*)g_debug_user;
+    return;
+  }
+  real(pname, params);
+}
+
 static int gles_refused(void) {
   int refused = 0;
   for (int i = 0; i < 8 && glGetError() != GL_NO_ERROR; i++) refused = 1;

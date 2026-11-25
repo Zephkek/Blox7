@@ -1330,8 +1330,9 @@ BRIDGE_EXPORT void glGetObjectPtrLabel(const void * a0, GLsizei a1, GLsizei * a2
   p_glGetObjectPtrLabel(a0, a1, a2, a3);
 }
 static void (BRIDGE_MS *p_glGetPointerv)(GLenum, void **);
+void gles_get_pointerv(void (BRIDGE_MS *)(GLenum, void **), GLenum a0, void ** a1);
 BRIDGE_EXPORT void glGetPointerv(GLenum a0, void ** a1) {
-  p_glGetPointerv(a0, a1);
+  gles_get_pointerv(p_glGetPointerv, a0, a1);
 }
 static void (BRIDGE_MS *p_glEnablei)(GLenum, GLuint);
 BRIDGE_EXPORT void glEnablei(GLenum a0, GLuint a1) {
@@ -1498,8 +1499,9 @@ BRIDGE_EXPORT void glGetObjectPtrLabelKHR(const void * a0, GLsizei a1, GLsizei *
   p_glGetObjectPtrLabelKHR(a0, a1, a2, a3);
 }
 static void (BRIDGE_MS *p_glGetPointervKHR)(GLenum, void **);
+void gles_get_pointerv(void (BRIDGE_MS *)(GLenum, void **), GLenum a0, void ** a1);
 BRIDGE_EXPORT void glGetPointervKHR(GLenum a0, void ** a1) {
-  p_glGetPointervKHR(a0, a1);
+  gles_get_pointerv(p_glGetPointervKHR, a0, a1);
 }
 static void (BRIDGE_MS *p_glMaxShaderCompilerThreadsKHR)(GLuint);
 BRIDGE_EXPORT void glMaxShaderCompilerThreadsKHR(GLuint a0) {
@@ -4280,8 +4282,11 @@ static const struct bridge_entry kEntries[] = {
     {"glEndTilingQCOM", (void **)&p_glEndTilingQCOM},
 };
 
+void gles_bridge_resolve_manual(void *(*lookup)(const char *));
+
 BRIDGE_EXPORT void gles_bridge_resolve(void *(*lookup)(const char *)) {
   for (size_t i = 0; i < sizeof(kEntries) / sizeof(kEntries[0]); i++) *kEntries[i].slot = lookup(kEntries[i].name);
+  gles_bridge_resolve_manual(lookup);
 }
 
 static const struct { const char *name; void *fn; } kExports[] = {
@@ -5134,6 +5139,8 @@ static const struct { const char *name; void *fn; } kExports[] = {
     {"glTextureFoveationParametersQCOM", (void *)glTextureFoveationParametersQCOM},
     {"glStartTilingQCOM", (void *)glStartTilingQCOM},
     {"glEndTilingQCOM", (void *)glEndTilingQCOM},
+    {"glDebugMessageCallback", (void *)glDebugMessageCallback},
+    {"glDebugMessageCallbackKHR", (void *)glDebugMessageCallbackKHR},
 };
 
 BRIDGE_EXPORT void *gles_bridge_resolve_export(const char *name) {
