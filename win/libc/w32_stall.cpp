@@ -15,6 +15,7 @@ namespace {
 int64_t g_frames_gap_ns;
 struct FrameWindow {
   int64_t first_ns, start_ns, last_ns, longest_ns;
+  uint64_t fs_emulated;
   uint32_t frames, over25, over50, over100;
 };
 FrameWindow g_frames;
@@ -41,6 +42,12 @@ void note_frame() {
     w32_debug("frames: t=%.1f %u in %.1f s (%.1f per second), gaps over 25/50/100 ms: %u/%u/%u, longest %.1f ms",
               static_cast<double>(now - f.first_ns) / 1e9, f.frames, seconds, f.frames / seconds, f.over25, f.over50,
               f.over100, static_cast<double>(f.longest_ns) / 1e6);
+    const uint64_t emulated = __atomic_load_n(&g_w32_fs_emulated, __ATOMIC_RELAXED);
+    if (emulated != f.fs_emulated) {
+      w32_debug("fs reads emulated: %llu since the last frames line",
+                static_cast<unsigned long long>(emulated - f.fs_emulated));
+      f.fs_emulated = emulated;
+    }
     f.start_ns = now;
     f.frames = f.over25 = f.over50 = f.over100 = 0;
     f.longest_ns = 0;

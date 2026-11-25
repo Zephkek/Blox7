@@ -138,6 +138,7 @@ void give_fs_block(uintptr_t* block) {
 }  // namespace
 
 bool g_w32_fs_modern;
+uint64_t g_w32_fs_emulated;
 
 void w32_fs_rearm_now() {
   const auto block = reinterpret_cast<uintptr_t>(teb()[kTlsSlots + g_fs_block_slot]);

@@ -541,7 +541,10 @@ long WINAPI on_exception(WinExceptionPointers* ep) {
   switch (r->code) {
     case kAccessViolation:
       if (r->information[1] < 0x10000 && w32_fs_redirect(c)) return kContinueExecution;
-      if (r->information[0] == 0 && r->information[1] != c->rip && emulate_fs_read(c)) return kContinueExecution;
+      if (r->information[0] == 0 && r->information[1] != c->rip && emulate_fs_read(c)) {
+        __atomic_add_fetch(&g_w32_fs_emulated, 1, __ATOMIC_RELAXED);
+        return kContinueExecution;
+      }
       sig = SIGSEGV;
       code = SEGV_ACCERR;
       addr = reinterpret_cast<void*>(r->information[1]);

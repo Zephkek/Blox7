@@ -103,6 +103,7 @@ inline void w32_fs_rearm() {
 }
 struct WinContext;
 bool w32_fs_redirect(WinContext* c);
+extern uint64_t g_w32_fs_emulated;
 
 [[noreturn]] void w32_fatal(const char* message);
 void w32_debug(const char* format, ...) __printflike(1, 2);
