@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "blox7/audio/sdl_audio_capture.h"
@@ -54,24 +55,24 @@ class NativeInputCapture {
     auto capture =
         std::atomic_load_explicit(&g_native_capture, std::memory_order_acquire);
     if (!capture) return {};
-    std::lock_guard lock(capture->mutex_);
-    return {{}, capture->enabled_ && !capture->closed_ ? 1ULL : 0ULL};
+    const bool open = capture->enabled_ &&
+                      !capture->closed_.load(std::memory_order_acquire);
+    return {{}, open ? 1ULL : 0ULL};
   }
   static void Latency(void* self, std::uint32_t* playback,
                       std::uint32_t* recording) {
     auto capture =
         std::atomic_load_explicit(&g_native_capture, std::memory_order_acquire);
-    if (!capture) return;
-    std::lock_guard lock(capture->mutex_);
-    if (capture->closed_) return;
+    if (!capture || capture->closed_.load(std::memory_order_acquire)) return;
     capture->abi_.latency(self, playback, recording);
-    if (recording) {
-      *recording = 10;
-      auto it = capture->sessions_.find(self);
-      if (it != capture->sessions_.end()) {
-        std::lock_guard queue_lock(it->second->queue_mutex);
-        *recording += static_cast<std::uint32_t>(it->second->count * 10);
-      }
+    if (!recording) return;
+    *recording = kFrameMs;
+    std::unique_lock lock(capture->mutex_, std::defer_lock);
+    if (!capture->EnterBetweenDeviceWork(lock)) return;
+    auto it = capture->sessions_.find(self);
+    if (it != capture->sessions_.end()) {
+      std::lock_guard queue_lock(it->second->queue_mutex);
+      *recording += static_cast<std::uint32_t>(it->second->count * kFrameMs);
     }
   }
   static bool Start(void* self, NativeSharedSink* sink) {
@@ -88,8 +89,9 @@ class NativeInputCapture {
     auto capture =
         std::atomic_load_explicit(&g_native_capture, std::memory_order_acquire);
     if (!capture) return false;
-    std::lock_guard lock(capture->mutex_);
-    return capture->sessions_.find(self) != capture->sessions_.end();
+    std::lock_guard lock(capture->recording_mutex_);
+    return std::find(capture->recording_.begin(), capture->recording_.end(),
+                     self) != capture->recording_.end();
   }
   static void Poll(void* self) {
     auto capture =
@@ -97,17 +99,38 @@ class NativeInputCapture {
     if (capture) capture->Deliver(self);
   }
   void Shutdown() {
+    closed_.store(true, std::memory_order_release);
+    DeviceWork work(device_work_);
     std::lock_guard lock(mutex_);
-    closed_ = true;
     for (auto& [self, session] : sessions_) Close(*session);
     sessions_.clear();
+    std::lock_guard recording_lock(recording_mutex_);
+    recording_.clear();
   }
 
  private:
+  static constexpr std::size_t kFrameSamples = 480;
+  static constexpr std::size_t kQueuedFrames = 20;
+  static constexpr std::uint32_t kFrameMs = 10;
+  static constexpr std::uint64_t kSampleRateHz = 48000;
   struct Sink {
     NativeSharedSink shared;
     DeliverPcm deliver;
   };
+  struct DeviceWork {
+    explicit DeviceWork(std::atomic<int>& count) : count_(count) {
+      count_.fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~DeviceWork() { count_.fetch_sub(1, std::memory_order_acq_rel); }
+    std::atomic<int>& count_;
+  };
+  bool EnterBetweenDeviceWork(std::unique_lock<std::mutex>& lock) {
+    while (!lock.try_lock()) {
+      if (device_work_.load(std::memory_order_acquire) != 0) return false;
+      std::this_thread::yield();
+    }
+    return true;
+  }
   struct SharedCount {
     const std::uintptr_t* vtable;
     long shared_owners;
@@ -118,9 +141,11 @@ class NativeInputCapture {
     std::unique_ptr<AudioCapture> input;
     std::vector<Sink> sinks;
     std::mutex queue_mutex;
-    std::array<std::array<std::int16_t, 480>, 20> frames{};
+    std::array<std::array<std::int16_t, kFrameSamples>, kQueuedFrames> frames{};
+    std::array<std::int16_t, kFrameSamples * kQueuedFrames> handover{};
     std::size_t head = 0, count = 0;
     std::uint64_t delivered = 0, dropped = 0;
+    std::uint64_t captured_samples = 0;
     bool audible = false;
   };
   static void OnData(void* context, std::size_t bytes) {
@@ -152,8 +177,10 @@ class NativeInputCapture {
     return true;
   }
   bool StartSink(void* self, NativeSharedSink* sink) {
+    DeviceWork work(device_work_);
     std::lock_guard lock(mutex_);
-    if (closed_ || !enabled_ || !self || !sink || !sink->object || !sink->owner)
+    if (closed_.load(std::memory_order_acquire) || !enabled_ || !self ||
+        !sink || !sink->object || !sink->owner)
       return false;
     if (!IsGuestVtable(sink->object, 3, {2}) ||
         !IsGuestVtable(sink->owner, 5, {2, 4})) {
@@ -178,6 +205,10 @@ class NativeInputCapture {
         return false;
       }
       it = sessions_.emplace(self, std::move(session)).first;
+      {
+        std::lock_guard recording_lock(recording_mutex_);
+        recording_.push_back(self);
+      }
       std::fprintf(stderr,
           "  [audio-input] native capture started: 48000 Hz mono signed16\n");
     }
@@ -206,6 +237,7 @@ class NativeInputCapture {
         static_cast<unsigned long long>(session.dropped));
   }
   void StopSink(void* self, NativeSharedSink* sink) {
+    DeviceWork work(device_work_);
     std::lock_guard lock(mutex_);
     auto it = sessions_.find(self);
     if (it == sessions_.end() || !sink) return;
@@ -216,43 +248,60 @@ class NativeInputCapture {
     Release(*existing);
     session.sinks.erase(existing);
     if (session.sinks.empty()) {
+      {
+        std::lock_guard recording_lock(recording_mutex_);
+        recording_.erase(
+            std::remove(recording_.begin(), recording_.end(), self),
+            recording_.end());
+      }
       Close(session);
       sessions_.erase(it);
     }
   }
   void Deliver(void* self) {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_, std::defer_lock);
+    if (!EnterBetweenDeviceWork(lock)) return;
     auto it = sessions_.find(self);
     if (it == sessions_.end()) return;
     auto& session = *it->second;
-    for (std::size_t n = 0; n < session.frames.size(); ++n) {
-      std::array<std::int16_t, 480> pcm;
-      std::uint64_t delay;
-      {
-        std::lock_guard queue_lock(session.queue_mutex);
-        if (!session.count) break;
-        pcm = session.frames[session.head];
-        delay = session.count * 10000000ULL;
+    std::size_t frames = 0;
+    {
+      std::lock_guard queue_lock(session.queue_mutex);
+      for (; session.count != 0; ++frames, --session.count) {
+        std::memcpy(session.handover.data() + frames * kFrameSamples,
+                    session.frames[session.head].data(),
+                    sizeof(session.frames[0]));
         session.head = (session.head + 1) % session.frames.size();
-        --session.count;
       }
-      const NativePcmFormat format;
-      for (const auto& sink : session.sinks)
-        sink.deliver(sink.shared.object, pcm.data(), pcm.size(), delay, &format);
-      if (++session.delivered == 1)
-        std::fprintf(stderr, "  [audio-input] PCM delivered to native voice sink\n");
-      if (!session.audible && std::any_of(pcm.begin(), pcm.end(),
-                                        [](auto value) { return value != 0; })) {
-        session.audible = true;
-        std::fprintf(stderr, "  [audio-input] nonzero microphone PCM delivered\n");
-      }
+    }
+    if (frames == 0) return;
+    const std::size_t samples = frames * kFrameSamples;
+    session.captured_samples += samples;
+    const std::uint64_t captured_ns =
+        1000000ULL * (1000ULL * session.captured_samples / kSampleRateHz);
+    const NativePcmFormat format;
+    for (const auto& sink : session.sinks)
+      sink.deliver(sink.shared.object, session.handover.data(), samples,
+                   captured_ns, &format);
+    if (session.delivered == 0)
+      std::fprintf(stderr, "  [audio-input] PCM delivered to native voice sink\n");
+    session.delivered += frames;
+    if (!session.audible &&
+        std::any_of(session.handover.begin(),
+                    session.handover.begin() + samples,
+                    [](auto value) { return value != 0; })) {
+      session.audible = true;
+      std::fprintf(stderr, "  [audio-input] nonzero microphone PCM delivered\n");
     }
   }
   SinkAbi abi_;
-  bool enabled_;
-  bool closed_ = false;
+  const bool enabled_;
+  std::atomic<bool> closed_{false};
+  std::atomic<int> device_work_{0};
   std::mutex mutex_;
   std::map<void*, std::unique_ptr<Session>> sessions_;
+  std::mutex recording_mutex_;
+  std::vector<void*> recording_;
 };
 
 
