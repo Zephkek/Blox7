@@ -1349,6 +1349,22 @@ bool Etc2EmulatedPhysicalDevice(VkPhysicalDevice physical_device) {
                            "vkGetPhysicalDeviceFeatures", nullptr));
 }
 
+bool EmulatedEtc2ImageSupported(VkImageType type, VkImageTiling tiling,
+                                VkImageUsageFlags usage,
+                                VkImageCreateFlags flags) {
+  constexpr VkImageUsageFlags kUsage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                       VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                       VK_IMAGE_USAGE_SAMPLED_BIT;
+  constexpr VkImageCreateFlags kFlags =
+      VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT |
+      VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT |
+      VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT |
+      VK_IMAGE_CREATE_SPARSE_BINDING_BIT | VK_IMAGE_CREATE_SPARSE_ALIASED_BIT |
+      VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
+  return type == VK_IMAGE_TYPE_2D && tiling == VK_IMAGE_TILING_OPTIMAL &&
+         (usage & ~kUsage) == 0 && (flags & ~kFlags) == 0;
+}
+
 void ReleaseEtc2PoolCommandBuffers(VkDevice device,
                                    VkCommandPool command_pool) {
   std::vector<VkCommandBuffer> command_buffers;
@@ -3556,13 +3572,18 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
     return host(physical_device, format, type, tiling, usage, flags,
                 properties);
   }
-  if (tiling != VK_IMAGE_TILING_OPTIMAL || type != VK_IMAGE_TYPE_2D) {
+  if (!EmulatedEtc2ImageSupported(type, tiling, usage, flags)) {
+    if (properties != nullptr) {
+      *properties = {};
+    }
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
   }
-  return host(physical_device, mapped.host_format, type, tiling, usage,
-              flags & ~static_cast<VkImageCreateFlags>(
-                          VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT),
-              properties);
+  const VkResult result = host(physical_device, mapped.host_format, type,
+                               tiling, usage, flags, properties);
+  if (result == VK_SUCCESS && properties != nullptr) {
+    properties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+  }
+  return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
@@ -3581,15 +3602,20 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
       !Etc2EmulatedPhysicalDevice(physical_device)) {
     return host(physical_device, info, properties);
   }
-  if (info->tiling != VK_IMAGE_TILING_OPTIMAL ||
-      info->type != VK_IMAGE_TYPE_2D) {
+  if (!EmulatedEtc2ImageSupported(info->type, info->tiling, info->usage,
+                                  info->flags)) {
+    if (properties != nullptr) {
+      properties->imageFormatProperties = {};
+    }
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
   }
   VkPhysicalDeviceImageFormatInfo2 host_info = *info;
   host_info.format = mapped.host_format;
-  host_info.flags &= ~static_cast<VkImageCreateFlags>(
-      VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT);
-  return host(physical_device, &host_info, properties);
+  const VkResult result = host(physical_device, &host_info, properties);
+  if (result == VK_SUCCESS && properties != nullptr) {
+    properties->imageFormatProperties.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+  }
+  return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
