@@ -196,6 +196,8 @@ struct HostDevice {
   PFN_vkCmdCopyBufferToImage2 copy_buffer_to_image2 = nullptr;
   PFN_vkCmdCopyImage copy_image = nullptr;
   PFN_vkCmdCopyImage2 copy_image2 = nullptr;
+  PFN_vkCmdCopyImageToBuffer copy_image_to_buffer = nullptr;
+  PFN_vkCmdCopyImageToBuffer2 copy_image_to_buffer2 = nullptr;
   PFN_vkCmdBlitImage blit_image = nullptr;
   PFN_vkCmdExecuteCommands execute_commands = nullptr;
   PFN_vkCreateBuffer create_buffer = nullptr;
@@ -865,6 +867,7 @@ struct VulkanEtc2Emulation::State {
                       VkImage source, VkImageLayout source_layout,
                       VkImage destination, VkImageLayout destination_layout,
                       std::uint32_t count, const VkImageCopy* regions);
+  bool MixedCopy(const HostDevice& dev, VkImage source, VkImage destination);
 
   bool LookupImage(const HostDevice& dev, VkImage image,
                    ImageRecord* record) {
@@ -1042,6 +1045,10 @@ void VulkanEtc2Emulation::RegisterDevice(
   dev->copy_image = DeviceProc<PFN_vkCmdCopyImage>(get, device, "vkCmdCopyImage");
   dev->copy_image2 = DeviceProc<PFN_vkCmdCopyImage2>(
       get, device, "vkCmdCopyImage2", "vkCmdCopyImage2KHR");
+  dev->copy_image_to_buffer = DeviceProc<PFN_vkCmdCopyImageToBuffer>(
+      get, device, "vkCmdCopyImageToBuffer");
+  dev->copy_image_to_buffer2 = DeviceProc<PFN_vkCmdCopyImageToBuffer2>(
+      get, device, "vkCmdCopyImageToBuffer2", "vkCmdCopyImageToBuffer2KHR");
   dev->blit_image = DeviceProc<PFN_vkCmdBlitImage>(get, device, "vkCmdBlitImage");
   dev->execute_commands =
       DeviceProc<PFN_vkCmdExecuteCommands>(get, device, "vkCmdExecuteCommands");
@@ -1446,13 +1453,40 @@ bool VulkanEtc2Emulation::State::BlitScaledCopy(
   return true;
 }
 
+bool VulkanEtc2Emulation::State::MixedCopy(const HostDevice& dev,
+                                           VkImage source,
+                                           VkImage destination) {
+  if (!dev.emulated) {
+    return false;
+  }
+  ImageRecord source_record;
+  ImageRecord destination_record;
+  const bool source_emulated = LookupImage(dev, source, &source_record);
+  const bool destination_emulated =
+      LookupImage(dev, destination, &destination_record);
+  if (!source_emulated && !destination_emulated) {
+    return false;
+  }
+  const auto texel_bytes = [](VkFormat format) {
+    return format == VK_FORMAT_R16_UNORM || format == VK_FORMAT_R16_SNORM ? 2 : 4;
+  };
+  if (source_emulated && destination_emulated &&
+      texel_bytes(source_record.format.host_format) ==
+          texel_bytes(destination_record.format.host_format)) {
+    return false;
+  }
+  LogFailure("skipped an image copy between an ETC2 image and another format");
+  return true;
+}
+
 void VulkanEtc2Emulation::CmdCopyImage(
     VkDevice device, VkCommandBuffer command_buffer, VkImage source,
     VkImageLayout source_layout, VkImage destination,
     VkImageLayout destination_layout, std::uint32_t region_count,
     const VkImageCopy* regions) {
   const HostDevice* dev = state_->Find(device);
-  if (dev == nullptr || dev->copy_image == nullptr) {
+  if (dev == nullptr || dev->copy_image == nullptr ||
+      state_->MixedCopy(*dev, source, destination)) {
     return;
   }
   if (dev->emulated && state_->upscale > 1 &&
@@ -1469,7 +1503,8 @@ void VulkanEtc2Emulation::CmdCopyImage2(VkDevice device,
                                         VkCommandBuffer command_buffer,
                                         const VkCopyImageInfo2* info) {
   const HostDevice* dev = state_->Find(device);
-  if (dev == nullptr || dev->copy_image2 == nullptr || info == nullptr) {
+  if (dev == nullptr || dev->copy_image2 == nullptr || info == nullptr ||
+      state_->MixedCopy(*dev, info->srcImage, info->dstImage)) {
     return;
   }
   if (dev->emulated && state_->upscale > 1 && info->pRegions != nullptr) {
@@ -1489,6 +1524,38 @@ void VulkanEtc2Emulation::CmdCopyImage2(VkDevice device,
     }
   }
   dev->copy_image2(command_buffer, info);
+}
+
+void VulkanEtc2Emulation::CmdCopyImageToBuffer(
+    VkDevice device, VkCommandBuffer command_buffer, VkImage source,
+    VkImageLayout layout, VkBuffer destination, std::uint32_t region_count,
+    const VkBufferImageCopy* regions) {
+  const HostDevice* dev = state_->Find(device);
+  if (dev == nullptr || dev->copy_image_to_buffer == nullptr) {
+    return;
+  }
+  ImageRecord record;
+  if (dev->emulated && state_->LookupImage(*dev, source, &record)) {
+    LogFailure("skipped a copy from an ETC2 image to a buffer");
+    return;
+  }
+  dev->copy_image_to_buffer(command_buffer, source, layout, destination,
+                            region_count, regions);
+}
+
+void VulkanEtc2Emulation::CmdCopyImageToBuffer2(
+    VkDevice device, VkCommandBuffer command_buffer,
+    const VkCopyImageToBufferInfo2* info) {
+  const HostDevice* dev = state_->Find(device);
+  if (dev == nullptr || dev->copy_image_to_buffer2 == nullptr || info == nullptr) {
+    return;
+  }
+  ImageRecord record;
+  if (dev->emulated && state_->LookupImage(*dev, info->srcImage, &record)) {
+    LogFailure("skipped a copy from an ETC2 image to a buffer");
+    return;
+  }
+  dev->copy_image_to_buffer2(command_buffer, info);
 }
 
 void VulkanEtc2Emulation::CmdExecuteCommands(

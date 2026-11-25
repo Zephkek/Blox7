@@ -993,6 +993,8 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
   BLOX7_VK_PROC(vkCmdCopyBufferToImage)
   BLOX7_VK_PROC(vkCmdCopyImage)
   BLOX7_VK_PROC(vkCmdCopyImage2)
+  BLOX7_VK_PROC(vkCmdCopyImageToBuffer)
+  BLOX7_VK_PROC(vkCmdCopyImageToBuffer2)
   BLOX7_VK_PROC(vkCmdCopyBufferToImage2)
   BLOX7_VK_PROC(vkCmdExecuteCommands)
 #undef BLOX7_VK_PROC
@@ -1010,6 +1012,7 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
                     vkGetPhysicalDeviceImageFormatProperties2)
   BLOX7_VK_ALIAS(vkBindBufferMemory2KHR, vkBindBufferMemory2)
   BLOX7_VK_ALIAS(vkCmdCopyImage2KHR, vkCmdCopyImage2)
+  BLOX7_VK_ALIAS(vkCmdCopyImageToBuffer2KHR, vkCmdCopyImageToBuffer2)
   BLOX7_VK_ALIAS(vkMapMemory2KHR, vkMapMemory2)
   BLOX7_VK_ALIAS(vkUnmapMemory2KHR, vkUnmapMemory2)
   BLOX7_VK_ALIAS(vkCmdCopyBufferToImage2KHR, vkCmdCopyBufferToImage2)
@@ -1036,7 +1039,8 @@ bool IsEtc2DeviceProc(const char* name) {
       "vkFreeMemory",           "vkDestroyBuffer",
       "vkCmdCopyBufferToImage", "vkCmdCopyBufferToImage2",
       "vkCmdCopyImage",         "vkCmdCopyImage2",
-      "vkCmdCopyImage2KHR",
+      "vkCmdCopyImage2KHR",     "vkCmdCopyImageToBuffer",
+      "vkCmdCopyImageToBuffer2", "vkCmdCopyImageToBuffer2KHR",
       "vkCmdCopyBufferToImage2KHR", "vkCmdExecuteCommands",
   };
   return NameInList(name, kNames, sizeof(kNames) / sizeof(kNames[0]));
@@ -3738,6 +3742,22 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2(VkCommandBuffer command_buffer,
                                            const VkCopyImageInfo2* info) {
   State().etc2.CmdCopyImage2(
+      HostDispatchForCommandBuffer(command_buffer).device, command_buffer,
+      info);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer(
+    VkCommandBuffer command_buffer, VkImage source, VkImageLayout layout,
+    VkBuffer destination, std::uint32_t region_count,
+    const VkBufferImageCopy* regions) {
+  State().etc2.CmdCopyImageToBuffer(
+      HostDispatchForCommandBuffer(command_buffer).device, command_buffer,
+      source, layout, destination, region_count, regions);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2(
+    VkCommandBuffer command_buffer, const VkCopyImageToBufferInfo2* info) {
+  State().etc2.CmdCopyImageToBuffer2(
       HostDispatchForCommandBuffer(command_buffer).device, command_buffer,
       info);
 }

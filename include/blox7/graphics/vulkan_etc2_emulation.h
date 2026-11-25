@@ -89,6 +89,12 @@ class VulkanEtc2Emulation final {
                     std::uint32_t region_count, const VkImageCopy* regions);
   void CmdCopyImage2(VkDevice device, VkCommandBuffer command_buffer,
                      const VkCopyImageInfo2* info);
+  void CmdCopyImageToBuffer(VkDevice device, VkCommandBuffer command_buffer,
+                            VkImage source, VkImageLayout layout,
+                            VkBuffer destination, std::uint32_t region_count,
+                            const VkBufferImageCopy* regions);
+  void CmdCopyImageToBuffer2(VkDevice device, VkCommandBuffer command_buffer,
+                             const VkCopyImageToBufferInfo2* info);
   void CmdExecuteCommands(VkDevice device, VkCommandBuffer command_buffer,
                           std::uint32_t count,
                           const VkCommandBuffer* secondaries);
