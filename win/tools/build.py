@@ -331,7 +331,10 @@ def build_bridge_sources():
                                   'glDeleteFramebuffers=gles_delete_framebuffers,'
                                   'glCopyImageSubData=gles_copy_image_sub_data_core,glCopyImageSubDataEXT=gles_copy_image_sub_data,'
                                   'glCopyImageSubDataOES=gles_copy_image_sub_data,'
-                                  'glGetPointerv=gles_get_pointerv,glGetPointervKHR=gles_get_pointerv',
+                                  'glGetPointerv=gles_get_pointerv,glGetPointervKHR=gles_get_pointerv,'
+                                  'glGenerateMipmap=gles_generate_mipmap,glDeleteTextures=gles_delete_textures,'
+                                  'glGetTexLevelParameteriv=gles_get_tex_level_parameteriv,'
+                                  'glGetTexLevelParameterfv=gles_get_tex_level_parameterfv',
                                   '--manual', 'glDebugMessageCallback,glDebugMessageCallbackKHR'])
     with open(gles, encoding='utf-8') as f:
         lines = f.read().split('\n')

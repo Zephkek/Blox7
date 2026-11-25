@@ -183,9 +183,14 @@ static unsigned long long tex_pixel_bytes(GLenum format, GLenum type) {
   }
 }
 
+static size_t g_etc_live;
+static GLuint bound_texture(GLenum target);
+static void etc_set(GLuint name, GLenum format);
+
 void gles_tex_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*),
                        GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border, GLenum format,
                        GLenum type, const void* pixels) {
+  if (g_etc_live && !g_tex_nested) etc_set(bound_texture(target), 0);
   if (!tex_stats_enabled() || !pixels || g_tex_nested) {
     real(target, level, internal, w, h, border, format, type, pixels);
     return;
@@ -243,6 +248,122 @@ static void unpack_restore(const struct unpack_state* s) {
   if (s->buffer) glBindBuffer(GL_PIXEL_UNPACK_BUFFER, (GLuint)s->buffer);
 }
 
+struct etc_entry {
+  GLuint name;
+  GLenum format;
+};
+
+static struct etc_entry* g_etc_tex;
+static size_t g_etc_cap, g_etc_used, g_etc_live;
+
+static GLenum texture_binding(GLenum target) {
+  switch (target) {
+    case GL_TEXTURE_2D: return GL_TEXTURE_BINDING_2D;
+    case GL_TEXTURE_3D: return GL_TEXTURE_BINDING_3D;
+    case GL_TEXTURE_2D_ARRAY: return GL_TEXTURE_BINDING_2D_ARRAY;
+    case GL_TEXTURE_CUBE_MAP_ARRAY: return GL_TEXTURE_BINDING_CUBE_MAP_ARRAY;
+    case GL_TEXTURE_CUBE_MAP:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Y:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
+    case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
+    case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z: return GL_TEXTURE_BINDING_CUBE_MAP;
+    default: return 0;
+  }
+}
+
+static GLuint bound_texture(GLenum target) {
+  const GLenum binding = texture_binding(target);
+  GLint name = 0;
+  if (binding) glGetIntegerv(binding, &name);
+  return (GLuint)name;
+}
+
+static size_t etc_slot(GLuint name) {
+  size_t i = ((size_t)name * 2654435761u) & (g_etc_cap - 1);
+  while (g_etc_tex[i].name && g_etc_tex[i].name != name) i = (i + 1) & (g_etc_cap - 1);
+  return i;
+}
+
+static GLenum etc_format_of(GLuint name) {
+  if (!name || !g_etc_live) return 0;
+  return g_etc_tex[etc_slot(name)].format;
+}
+
+static void etc_set(GLuint name, GLenum format) {
+  if (!name || (!format && !g_etc_live)) return;
+  if ((g_etc_used + 1) * 2 > g_etc_cap) {
+    const size_t old_cap = g_etc_cap;
+    struct etc_entry* old = g_etc_tex;
+    const size_t cap = old_cap ? old_cap * 2 : 256;
+    struct etc_entry* table = calloc(cap, sizeof *table);
+    if (!table) return;
+    g_etc_tex = table;
+    g_etc_cap = cap;
+    g_etc_used = g_etc_live = 0;
+    for (size_t i = 0; i < old_cap; i++)
+      if (old[i].name && old[i].format) {
+        g_etc_tex[etc_slot(old[i].name)] = old[i];
+        g_etc_used++;
+        g_etc_live++;
+      }
+    free(old);
+  }
+  struct etc_entry* e = &g_etc_tex[etc_slot(name)];
+  if (!e->name) {
+    if (!format) return;
+    e->name = name;
+    g_etc_used++;
+  }
+  if (e->format && !format) g_etc_live--;
+  if (!e->format && format) g_etc_live++;
+  e->format = format;
+}
+
+static void raise_invalid_value(void) { glLineWidth(0.0f); }
+
+static void raise_invalid_operation(void) {
+  GLint active = 0;
+  glGetIntegerv(GL_TRANSFORM_FEEDBACK_ACTIVE, &active);
+  if (active) glBeginTransformFeedback(GL_POINTS);
+  else glEndTransformFeedback();
+}
+
+static int etc_block_bytes(GLenum format) {
+  return format == GL_COMPRESSED_RGBA8_ETC2_EAC || format == GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC ? 16 : 8;
+}
+
+static int etc_size_valid(GLenum format, GLsizei w, GLsizei h, GLsizei d, GLsizei size) {
+  if (w < 0 || h < 0 || d < 0 || size < 0) return 0;
+  return (long long)((w + 3) / 4) * ((h + 3) / 4) * d * etc_block_bytes(format) == (long long)size;
+}
+
+static int etc_source_valid(const void* data, GLsizei size) {
+  GLint buffer = 0;
+  glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &buffer);
+  if (!buffer) return 1;
+  GLint mapped = 0;
+  GLint64 length = 0;
+  glGetBufferParameteriv(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_MAPPED, &mapped);
+  glGetBufferParameteri64v(GL_PIXEL_UNPACK_BUFFER, GL_BUFFER_SIZE, &length);
+  return !mapped && (long long)(uintptr_t)data + size <= length;
+}
+
+static int etc_sub_valid(GLenum target, GLenum format, GLsizei w, GLsizei h, GLsizei d, GLsizei size, const void* data,
+                         int* use_driver) {
+  *use_driver = 0;
+  if (etc_format_of(bound_texture(target)) != format || !etc_source_valid(data, size)) {
+    *use_driver = 1;
+    return 0;
+  }
+  if (!etc_size_valid(format, w, h, d, size)) {
+    raise_invalid_value();
+    return 0;
+  }
+  return 1;
+}
+
 static void* etc_texels(int decoder, const void* data, GLsizei size, GLsizei w, GLsizei h, GLsizei layers,
                         struct unpack_state* s) {
   s->buffer = 0;
@@ -267,7 +388,7 @@ void gles_compressed_tex_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, 
   const unsigned long long start = tex_stats_enabled() ? tex_now_ns() : 0;
   int decoder;
   const GLenum storage = gles_etc_storage_format(internal, &decoder);
-  if (storage) {
+  if (storage && etc_size_valid(internal, w, h, 1, size) && etc_source_valid(data, size)) {
     struct unpack_state s;
     void* texels = etc_texels(decoder, data, size, w, h, 1, &s);
     if (texels || (!data && !s.buffer)) {
@@ -277,6 +398,7 @@ void gles_compressed_tex_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, 
       if (texels) glTexSubImage2D(target, level, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, texels);
       g_tex_nested = 0;
       unpack_restore(&s);
+      etc_set(bound_texture(target), internal);
       if (start) tex_note(internal | 0x40000u, (unsigned long long)size, start);
       return;
     }
@@ -291,7 +413,11 @@ void gles_compressed_tex_sub_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLin
                                       GLsizei size, const void* data) {
   const unsigned long long start = tex_stats_enabled() ? tex_now_ns() : 0;
   int decoder;
-  if (gles_etc_storage_format(format, &decoder)) {
+  int use_driver = 1;
+  if (gles_etc_storage_format(format, &decoder) && !etc_sub_valid(target, format, w, h, 1, size, data, &use_driver) &&
+      !use_driver)
+    return;
+  if (!use_driver) {
     struct unpack_state s;
     void* texels = etc_texels(decoder, data, size, w, h, 1, &s);
     if (texels) {
@@ -315,7 +441,7 @@ void gles_compressed_tex_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, 
   const unsigned long long start = tex_stats_enabled() ? tex_now_ns() : 0;
   int decoder;
   const GLenum storage = gles_etc_storage_format(internal, &decoder);
-  if (storage && d > 0) {
+  if (storage && d > 0 && etc_size_valid(internal, w, h, d, size) && etc_source_valid(data, size)) {
     struct unpack_state s;
     void* texels = etc_texels(decoder, data, size, w, h, d, &s);
     if (texels || (!data && !s.buffer)) {
@@ -325,6 +451,7 @@ void gles_compressed_tex_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, 
       if (texels) glTexSubImage3D(target, level, 0, 0, 0, w, h, d, GL_RGBA, GL_UNSIGNED_BYTE, texels);
       g_tex_nested = 0;
       unpack_restore(&s);
+      etc_set(bound_texture(target), internal);
       if (start) tex_note(internal | 0x50000u, (unsigned long long)size, start);
       return;
     }
@@ -339,7 +466,11 @@ void gles_compressed_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLin
                                       GLsizei d, GLenum format, GLsizei size, const void* data) {
   const unsigned long long start = tex_stats_enabled() ? tex_now_ns() : 0;
   int decoder;
-  if (gles_etc_storage_format(format, &decoder) && d > 0) {
+  int use_driver = 1;
+  if (gles_etc_storage_format(format, &decoder) && d > 0 &&
+      !etc_sub_valid(target, format, w, h, d, size, data, &use_driver) && !use_driver)
+    return;
+  if (!use_driver) {
     struct unpack_state s;
     void* texels = etc_texels(decoder, data, size, w, h, d, &s);
     if (texels) {
@@ -361,6 +492,7 @@ void gles_tex_storage_2d(void (BRIDGE_MS* real)(GLenum, GLsizei, GLenum, GLsizei
   int decoder;
   const GLenum storage = gles_etc_storage_format(internal, &decoder);
   real(target, levels, storage ? storage : internal, w, h);
+  if (storage || g_etc_live) etc_set(bound_texture(target), storage ? internal : 0);
 }
 
 
@@ -448,6 +580,7 @@ void gles_tex_storage_3d(void (BRIDGE_MS* real)(GLenum, GLsizei, GLenum, GLsizei
   int decoder;
   const GLenum storage = gles_etc_storage_format(internal, &decoder);
   real(target, levels, storage ? storage : internal, w, h, d);
+  if (storage || g_etc_live) etc_set(bound_texture(target), storage ? internal : 0);
 }
 
 void gles_tex_sub_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum,
@@ -525,6 +658,48 @@ void gles_copy_image_sub_data_core(void (BRIDGE_MS* real)(GLuint, GLenum, GLint,
                              dst_y, dst_z, width, height, depth);
 }
 
+void gles_generate_mipmap(void (BRIDGE_MS* real)(GLenum), GLenum target) {
+  if (g_etc_live && etc_format_of(bound_texture(target))) {
+    raise_invalid_operation();
+    return;
+  }
+  real(target);
+}
+
+void gles_delete_textures(void (BRIDGE_MS* real)(GLsizei, const GLuint*), GLsizei n, const GLuint* textures) {
+  if (g_etc_live && textures)
+    for (GLsizei i = 0; i < n; i++) etc_set(textures[i], 0);
+  real(n, textures);
+}
+
+static void (BRIDGE_MS* g_get_level_iv)(GLenum, GLint, GLenum, GLint*);
+
+static GLenum etc_level_format(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, GLint*), GLenum target, GLint level) {
+  if (!g_etc_live) return 0;
+  const GLenum format = etc_format_of(bound_texture(target));
+  if (!format) return 0;
+  int decoder;
+  GLint internal = 0;
+  real(target, level, GL_TEXTURE_INTERNAL_FORMAT, &internal);
+  return (GLenum)internal == gles_etc_storage_format(format, &decoder) ? format : 0;
+}
+
+void gles_get_tex_level_parameteriv(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, GLint*), GLenum target, GLint level,
+                                    GLenum pname, GLint* params) {
+  real(target, level, pname, params);
+  if (!params || (pname != GL_TEXTURE_COMPRESSED && pname != GL_TEXTURE_INTERNAL_FORMAT)) return;
+  const GLenum format = etc_level_format(real, target, level);
+  if (format) *params = pname == GL_TEXTURE_COMPRESSED ? GL_TRUE : (GLint)format;
+}
+
+void gles_get_tex_level_parameterfv(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, GLfloat*), GLenum target,
+                                    GLint level, GLenum pname, GLfloat* params) {
+  real(target, level, pname, params);
+  if (!params || !g_get_level_iv || (pname != GL_TEXTURE_COMPRESSED && pname != GL_TEXTURE_INTERNAL_FORMAT)) return;
+  const GLenum format = etc_level_format(g_get_level_iv, target, level);
+  if (format) *params = pname == GL_TEXTURE_COMPRESSED ? 1.0f : (GLfloat)format;
+}
+
 static GLDEBUGPROC g_debug_proc;
 static const void* g_debug_user;
 static void (BRIDGE_MS* g_real_debug_callback)(void*, const void*);
@@ -542,6 +717,7 @@ static BRIDGE_MS void debug_trampoline(GLenum source, GLenum type, GLuint id, GL
 void gles_bridge_resolve_manual(void* (*lookup)(const char*)) {
   g_real_debug_callback = (void (BRIDGE_MS*)(void*, const void*))lookup("glDebugMessageCallback");
   g_real_debug_callback_khr = (void (BRIDGE_MS*)(void*, const void*))lookup("glDebugMessageCallbackKHR");
+  g_get_level_iv = (void (BRIDGE_MS*)(GLenum, GLint, GLenum, GLint*))lookup("glGetTexLevelParameteriv");
 }
 
 static void set_debug_callback(void (BRIDGE_MS* real)(void*, const void*), GLDEBUGPROC callback, const void* user) {

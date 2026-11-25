@@ -146,8 +146,9 @@ BRIDGE_EXPORT void glDeleteShader(GLuint a0) {
   p_glDeleteShader(a0);
 }
 static void (BRIDGE_MS *p_glDeleteTextures)(GLsizei, const GLuint *);
+void gles_delete_textures(void (BRIDGE_MS *)(GLsizei, const GLuint *), GLsizei a0, const GLuint * a1);
 BRIDGE_EXPORT void glDeleteTextures(GLsizei a0, const GLuint * a1) {
-  p_glDeleteTextures(a0, a1);
+  gles_delete_textures(p_glDeleteTextures, a0, a1);
 }
 static void (BRIDGE_MS *p_glDepthFunc)(GLenum);
 BRIDGE_EXPORT void glDepthFunc(GLenum a0) {
@@ -216,8 +217,9 @@ BRIDGE_EXPORT void glGenBuffers(GLsizei a0, GLuint * a1) {
   p_glGenBuffers(a0, a1);
 }
 static void (BRIDGE_MS *p_glGenerateMipmap)(GLenum);
+void gles_generate_mipmap(void (BRIDGE_MS *)(GLenum), GLenum a0);
 BRIDGE_EXPORT void glGenerateMipmap(GLenum a0) {
-  p_glGenerateMipmap(a0);
+  gles_generate_mipmap(p_glGenerateMipmap, a0);
 }
 static void (BRIDGE_MS *p_glGenFramebuffers)(GLsizei, GLuint *);
 BRIDGE_EXPORT void glGenFramebuffers(GLsizei a0, GLuint * a1) {
@@ -1257,12 +1259,14 @@ BRIDGE_EXPORT void glSampleMaski(GLuint a0, GLbitfield a1) {
   p_glSampleMaski(a0, a1);
 }
 static void (BRIDGE_MS *p_glGetTexLevelParameteriv)(GLenum, GLint, GLenum, GLint *);
+void gles_get_tex_level_parameteriv(void (BRIDGE_MS *)(GLenum, GLint, GLenum, GLint *), GLenum a0, GLint a1, GLenum a2, GLint * a3);
 BRIDGE_EXPORT void glGetTexLevelParameteriv(GLenum a0, GLint a1, GLenum a2, GLint * a3) {
-  p_glGetTexLevelParameteriv(a0, a1, a2, a3);
+  gles_get_tex_level_parameteriv(p_glGetTexLevelParameteriv, a0, a1, a2, a3);
 }
 static void (BRIDGE_MS *p_glGetTexLevelParameterfv)(GLenum, GLint, GLenum, GLfloat *);
+void gles_get_tex_level_parameterfv(void (BRIDGE_MS *)(GLenum, GLint, GLenum, GLfloat *), GLenum a0, GLint a1, GLenum a2, GLfloat * a3);
 BRIDGE_EXPORT void glGetTexLevelParameterfv(GLenum a0, GLint a1, GLenum a2, GLfloat * a3) {
-  p_glGetTexLevelParameterfv(a0, a1, a2, a3);
+  gles_get_tex_level_parameterfv(p_glGetTexLevelParameterfv, a0, a1, a2, a3);
 }
 static void (BRIDGE_MS *p_glBindVertexBuffer)(GLuint, GLuint, GLintptr, GLsizei);
 BRIDGE_EXPORT void glBindVertexBuffer(GLuint a0, GLuint a1, GLintptr a2, GLsizei a3) {
