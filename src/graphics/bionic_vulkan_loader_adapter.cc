@@ -152,6 +152,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
     VkInstance instance, std::uint32_t* group_count,
     VkPhysicalDeviceGroupProperties* groups);
+VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
+    VkPhysicalDevice physical_device, const char* layer_name,
+    std::uint32_t* property_count, VkExtensionProperties* properties);
 }
 
 namespace {
@@ -972,6 +975,7 @@ PFN_vkVoidFunction AdapterProc(const char* name) {
   BLOX7_VK_PROC(vkQueuePresentKHR)
   BLOX7_VK_PROC(vkEnumeratePhysicalDevices)
   BLOX7_VK_PROC(vkEnumeratePhysicalDeviceGroups)
+  BLOX7_VK_PROC(vkEnumerateDeviceExtensionProperties)
   BLOX7_VK_PROC(vkGetPhysicalDeviceFeatures)
   BLOX7_VK_PROC(vkGetPhysicalDeviceFeatures2)
   BLOX7_VK_PROC(vkGetPhysicalDeviceFormatProperties)
@@ -1057,6 +1061,17 @@ bool IsEtc2DeviceProc(const char* name) {
       "vkCmdCopyImage2KHR",     "vkCmdCopyImageToBuffer",
       "vkCmdCopyImageToBuffer2", "vkCmdCopyImageToBuffer2KHR",
       "vkCmdCopyBufferToImage2KHR", "vkCmdExecuteCommands",
+  };
+  return NameInList(name, kNames, sizeof(kNames) / sizeof(kNames[0]));
+}
+
+bool IsHostOnlyDeviceExtension(const char* name) {
+  static constexpr const char* kNames[] = {
+      "VK_EXT_full_screen_exclusive",    "VK_KHR_external_memory_win32",
+      "VK_KHR_external_semaphore_win32", "VK_KHR_external_fence_win32",
+      "VK_KHR_win32_keyed_mutex",        "VK_NV_external_memory_win32",
+      "VK_NV_win32_keyed_mutex",         "VK_NV_acquire_winrt_display",
+      "VK_EXT_present_timing",
   };
   return NameInList(name, kNames, sizeof(kNames) / sizeof(kNames[0]));
 }
@@ -3486,6 +3501,46 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
     groups[index].subsetAllocation = visible[index].subsetAllocation;
   }
   *group_count = copied;
+  return copied < visible.size() ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(
+    VkPhysicalDevice physical_device, const char* layer_name,
+    std::uint32_t* property_count, VkExtensionProperties* properties) {
+  const auto host =
+      HostPhysicalDeviceProc<PFN_vkEnumerateDeviceExtensionProperties>(
+          "vkEnumerateDeviceExtensionProperties", nullptr);
+  if (host == nullptr || property_count == nullptr) {
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  if (layer_name != nullptr) {
+    return host(physical_device, layer_name, property_count, properties);
+  }
+  std::uint32_t total = 0;
+  VkResult result = host(physical_device, nullptr, &total, nullptr);
+  if (result != VK_SUCCESS) {
+    return result;
+  }
+  std::vector<VkExtensionProperties> visible(total);
+  result = host(physical_device, nullptr, &total, visible.data());
+  if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+    return result;
+  }
+  visible.resize(total);
+  visible.erase(std::remove_if(visible.begin(), visible.end(),
+                               [](const VkExtensionProperties& extension) {
+                                 return IsHostOnlyDeviceExtension(
+                                     extension.extensionName);
+                               }),
+                visible.end());
+  if (properties == nullptr) {
+    *property_count = static_cast<std::uint32_t>(visible.size());
+    return VK_SUCCESS;
+  }
+  const std::uint32_t copied = std::min<std::uint32_t>(
+      *property_count, static_cast<std::uint32_t>(visible.size()));
+  std::copy_n(visible.begin(), copied, properties);
+  *property_count = copied;
   return copied < visible.size() ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
