@@ -253,6 +253,7 @@ struct AdapterState {
   VkDevice retired_swapchain_device = VK_NULL_HANDLE;
   VkSurfaceKHR retired_swapchain_surface = VK_NULL_HANDLE;
   std::unordered_map<VkInstance, std::string> instance_keys;
+  std::unordered_map<VkPhysicalDevice, VkInstance> physical_device_instances;
   std::unordered_map<VkDevice, std::string> device_keys;
   std::unordered_map<VkDevice, std::int64_t> device_allocations;
   std::unordered_map<VkSwapchainKHR, VkSurfaceKHR> swapchain_surfaces;
@@ -1287,6 +1288,46 @@ ObservedHostQueuePresent(VkQueue queue, const VkPresentInfoKHR* present_info) {
   return result;
 }
 
+void ForgetInstanceLocked(AdapterState& state, VkInstance instance) {
+  for (auto it = state.physical_device_instances.begin();
+       it != state.physical_device_instances.end();) {
+    it = it->second == instance ? state.physical_device_instances.erase(it)
+                                : std::next(it);
+  }
+  if (state.latest_instance != instance) {
+    return;
+  }
+  state.latest_instance = VK_NULL_HANDLE;
+  for (const auto& live : state.instance_keys) {
+    if (live.first != instance) {
+      state.latest_instance = live.first;
+      return;
+    }
+  }
+  if (state.kept_instance != instance) {
+    state.latest_instance = state.kept_instance;
+  }
+}
+
+void NotePhysicalDevices(VkInstance instance, const VkPhysicalDevice* devices,
+                         std::uint32_t count) {
+  if (devices == nullptr) {
+    return;
+  }
+  AdapterState& state = State();
+  std::lock_guard<std::mutex> lock(state.mutex);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    state.physical_device_instances[devices[i]] = instance;
+  }
+}
+
+VkInstance InstanceForPhysicalDeviceLocked(AdapterState& state,
+                                           VkPhysicalDevice physical_device) {
+  const auto found = state.physical_device_instances.find(physical_device);
+  return found != state.physical_device_instances.end() ? found->second
+                                                        : state.latest_instance;
+}
+
 template <typename Function>
 Function HostPhysicalDeviceProc(const char* name, const char* alias) {
   VkInstance instance = VK_NULL_HANDLE;
@@ -1587,6 +1628,9 @@ void ReleaseKeptObjects() {
     state.kept_surface_instance = VK_NULL_HANDLE;
     state.kept_instance = VK_NULL_HANDLE;
     state.kept_instance_key.clear();
+    if (instance != VK_NULL_HANDLE) {
+      ForgetInstanceLocked(state, instance);
+    }
   }
   if (surface != VK_NULL_HANDLE) {
     State().android_wsi.DestroySurface(surface_instance, surface, nullptr);
@@ -1788,6 +1832,7 @@ vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
   }
   AdapterState& state = State();
   std::lock_guard<std::mutex> lock(state.mutex);
+  ForgetInstanceLocked(state, instance);
   if (state.active_instance_count != 0) {
     --state.active_instance_count;
   }
@@ -1976,7 +2021,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
-    instance = state.latest_instance;
+    instance = InstanceForPhysicalDeviceLocked(state, physical_device);
     host_get_instance_proc_addr = state.host_get_instance_proc_addr;
     host_get_device_proc_addr =
         state.host_get_device_proc_addr.load(std::memory_order_acquire);
@@ -3312,7 +3357,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   if (!DevicePicked() || device_count == nullptr) {
-    return host(instance, device_count, devices);
+    const VkResult result = host(instance, device_count, devices);
+    if (result >= VK_SUCCESS && device_count != nullptr) {
+      NotePhysicalDevices(instance, devices, *device_count);
+    }
+    return result;
   }
   std::uint32_t total = 0;
   VkResult result = host(instance, &total, nullptr);
@@ -3342,6 +3391,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDevices(
       std::min<std::uint32_t>(*device_count, static_cast<std::uint32_t>(visible.size()));
   std::copy_n(visible.begin(), copied, devices);
   *device_count = copied;
+  NotePhysicalDevices(instance, devices, copied);
   return copied < visible.size() ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
