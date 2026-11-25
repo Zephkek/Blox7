@@ -488,6 +488,7 @@ target_link_options(blox7 PRIVATE
 )
 target_sources(blox7 PRIVATE win/runtime/text_layer_win.cc)
 target_sources(blox7 PRIVATE win/runtime/album_saver_win.cc)
+target_sources(blox7 PRIVATE win/runtime/gl_fullscreen_win.cc)
 target_link_libraries(blox7 PRIVATE Blox7::Update SDL3::SDL3)
 
 add_dependencies(blox7 all_stubs)

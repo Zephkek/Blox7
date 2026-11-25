@@ -43,6 +43,7 @@
 namespace blox7::win32 {
 bool UpdateTextLayer(void* game_window);
 void DestroyTextLayer();
+bool KeepFullscreenComposited(void* game_window);
 }  // namespace blox7::win32
 extern "C" void* __w32_pe_open(const char* utf8_path);
 extern "C" void* __w32_pe_symbol(void* module, const char* name);
@@ -726,6 +727,21 @@ bool ConfigureGraphicsBackendAfterSDLInit() {
   return true;
 }
 
+void KeepOpenGlFullscreenComposited(SDL_Window* window) {
+  if (SDL_GetHintBoolean(SDL_HINT_OPENGL_ES_DRIVER, false) ||
+      IsDisabledEnv("BLOX7_GL_COMPOSITED_FULLSCREEN")) {
+    return;
+  }
+  void* hwnd =
+      SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                             SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+  if (::blox7::win32::KeepFullscreenComposited(hwnd)) {
+    fprintf(stderr,
+            "  [window] fullscreen stays composited, the OpenGL window is one "
+            "row taller than the display\n");
+  }
+}
+
 void ShowWindowAccordingToStartupMode() {
   if (ShouldShowWindowImmediately()) {
     SDL_ShowWindow(g_state.sdl_window);
@@ -1156,6 +1172,7 @@ bool Init(int width, int height, const char* title) {
     SDL_Quit();
     return false;
   }
+  KeepOpenGlFullscreenComposited(g_state.sdl_window);
   ApplyWindowIcon(g_state.sdl_window);
   ApplyMinimumWindowSize(g_state.sdl_window);
   ApplyRestoredWindowPosition();
