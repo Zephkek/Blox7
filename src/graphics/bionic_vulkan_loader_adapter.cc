@@ -1856,6 +1856,9 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
 
 VKAPI_ATTR void VKAPI_CALL
 vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* allocator) {
+  if (instance == VK_NULL_HANDLE) {
+    return;
+  }
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
@@ -2346,6 +2349,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
 
 VKAPI_ATTR void VKAPI_CALL
 vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
   const auto host_destroy = reinterpret_cast<PFN_vkDestroyDevice>(
       HostDeviceProc(device, "vkDestroyDevice"));
   State().text_overlay.DestroyDevice(device);
