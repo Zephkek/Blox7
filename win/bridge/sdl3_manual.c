@@ -145,10 +145,17 @@ static void* lookup_gl(const char* name) {
   return g_real_gl_get_proc(name);
 }
 
+#ifdef BLOX7_GL_DEBUG
+#include "../test/gl_debug.h"
+#endif
+
 BRIDGE_EXPORT SDL_GLContext SDL_GL_CreateContext(SDL_Window* window) {
   static SDL_GLContext (BRIDGE_MS *create)(SDL_Window*);
   static void* implementation;
   if (!create) create = (SDL_GLContext (BRIDGE_MS*)(SDL_Window*))real("SDL_GL_CreateContext");
+#ifdef BLOX7_GL_DEBUG
+  gldbg_before_create();
+#endif
   SDL_GLContext context = create(window);
   if (context) {
     void* get_string = lookup_gl("glGetString");
@@ -166,12 +173,22 @@ BRIDGE_EXPORT bool SDL_GL_MakeCurrent(SDL_Window* window, SDL_GLContext context)
   if (!make_current) make_current = (bool (BRIDGE_MS*)(SDL_Window*, SDL_GLContext))real("SDL_GL_MakeCurrent");
   const bool ok = make_current(window, context);
   if (ok && context) gles_window_current();
+#ifdef BLOX7_GL_DEBUG
+  if (ok && context) gldbg_after_current(lookup_gl);
+#endif
   return ok;
 }
+
+#ifdef BLOX7_FRAME_DUMP
+#include "../test/frame_dump.h"
+#endif
 
 BRIDGE_EXPORT bool SDL_GL_SwapWindow(SDL_Window* window) {
   static bool (BRIDGE_MS *swap)(SDL_Window*);
   if (!swap) swap = (bool (BRIDGE_MS*)(SDL_Window*))real("SDL_GL_SwapWindow");
+#ifdef BLOX7_FRAME_DUMP
+  frame_dump(window, lookup_gl);
+#endif
   const bool ok = swap(window);
   __w32_frame_beat();
   return ok;
