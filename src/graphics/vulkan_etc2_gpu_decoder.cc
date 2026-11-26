@@ -408,6 +408,46 @@ void FillCheckBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count,
   }
 }
 
+constexpr EtcFormat kCheckFormats[] = {
+    EtcFormat::kEtc2Rgb8,     EtcFormat::kEtc2Rgb8A1,   EtcFormat::kEtc2Rgba8,
+    EtcFormat::kEacR11,       EtcFormat::kEacR11Signed, EtcFormat::kEacRg11,
+    EtcFormat::kEacRg11Signed};
+constexpr std::uint32_t kCheckWidth = 122;
+constexpr std::uint32_t kCheckHeight = 66;
+constexpr std::size_t kCheckBlocksWide = (kCheckWidth + 3) / 4;
+constexpr std::size_t kCheckBlocks =
+    kCheckBlocksWide * ((kCheckHeight + 3) / 4);
+
+void PrepareCheck(EtcToBcEncoder reference, std::vector<std::uint8_t>* blocks,
+                  std::vector<std::uint8_t>* expected) {
+  std::size_t source_bytes = 0;
+  std::size_t target_bytes = 0;
+  for (const EtcFormat format : kCheckFormats) {
+    source_bytes += kCheckBlocks * EtcBlockBytes(format);
+    target_bytes += kCheckBlocks * BcBlockBytes(format);
+  }
+  blocks->resize(source_bytes);
+  expected->resize(target_bytes);
+  std::size_t source_offset = 0;
+  std::size_t target_offset = 0;
+  std::uint32_t seed = 1;
+  for (const EtcFormat format : kCheckFormats) {
+    const std::size_t etc_bytes = kCheckBlocks * EtcBlockBytes(format);
+    const std::size_t bc_bytes = kCheckBlocks * BcBlockBytes(format);
+    FillCheckBlocks(format, blocks->data() + source_offset, kCheckBlocks,
+                    &seed);
+    if (!reference(format, blocks->data() + source_offset, etc_bytes,
+                   kCheckWidth, kCheckHeight, expected->data() + target_offset,
+                   bc_bytes)) {
+      blocks->clear();
+      expected->clear();
+      return;
+    }
+    source_offset += etc_bytes;
+    target_offset += bc_bytes;
+  }
+}
+
 bool LoadFunctions(VkDevice device,
                    PFN_vkGetDeviceProcAddr get_device_proc_addr,
                    Functions* vk) {
@@ -431,6 +471,8 @@ struct Etc2GpuEncoder::State {
   std::atomic<VkPipeline> pipeline{VK_NULL_HANDLE};
   std::atomic<int> verdict{0};
   EtcToBcEncoder reference = nullptr;
+  std::vector<std::uint8_t> check_blocks;
+  std::vector<std::uint8_t> check_expected;
   std::thread builder;
 };
 
@@ -455,10 +497,14 @@ std::shared_ptr<Etc2GpuEncoder> Etc2GpuEncoder::Start(
       built = CreateShader(shared->vk, shared->device, shared->pipeline_layout,
                            kEtc2BcEncodeShader, sizeof(kEtc2BcEncodeShader));
     }
-    shared->pipeline.store(built, std::memory_order_release);
     const double seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
             .count();
+    if (built != VK_NULL_HANDLE) {
+      PrepareCheck(shared->reference, &shared->check_blocks,
+                   &shared->check_expected);
+    }
+    shared->pipeline.store(built, std::memory_order_release);
     std::fprintf(stderr,
                  built != VK_NULL_HANDLE
                      ? "  [vulkan] BC encoder built in %.0f ms\n"
@@ -505,7 +551,13 @@ VkPipeline Etc2GpuEncoder::Pipeline() const {
              : state_->pipeline.load(std::memory_order_acquire);
 }
 
-EtcToBcEncoder Etc2GpuEncoder::Reference() const { return state_->reference; }
+const std::vector<std::uint8_t>& Etc2GpuEncoder::CheckBlocks() const {
+  return state_->check_blocks;
+}
+
+const std::vector<std::uint8_t>& Etc2GpuEncoder::CheckExpected() const {
+  return state_->check_expected;
+}
 
 bool Etc2GpuEncoder::Checked() const {
   return state_->verdict.load(std::memory_order_acquire) != 0;
@@ -1119,48 +1171,30 @@ bool Etc2GpuDecoder::State::SubmitBands(VkQueue queue, std::uint32_t family,
 }
 
 bool Etc2GpuDecoder::State::CheckEncoder(VkQueue queue, std::uint32_t family) {
-  constexpr EtcFormat kFormats[] = {
-      EtcFormat::kEtc2Rgb8,     EtcFormat::kEtc2Rgb8A1,   EtcFormat::kEtc2Rgba8,
-      EtcFormat::kEacR11,       EtcFormat::kEacR11Signed, EtcFormat::kEacRg11,
-      EtcFormat::kEacRg11Signed};
-  constexpr std::uint32_t kWidth = 122;
-  constexpr std::uint32_t kHeight = 66;
-  constexpr std::size_t kBlocksWide = (kWidth + 3) / 4;
-  constexpr std::size_t kBlocks = kBlocksWide * ((kHeight + 3) / 4);
-  std::size_t source_bytes = 0;
-  std::size_t target_bytes = 0;
-  for (const EtcFormat format : kFormats) {
-    source_bytes += kBlocks * EtcBlockBytes(format);
-    target_bytes += kBlocks * BcBlockBytes(format);
-  }
-  std::vector<std::uint8_t> blocks(source_bytes);
-  std::vector<std::uint8_t> expected(target_bytes);
+  const std::vector<std::uint8_t>& blocks = encoder->CheckBlocks();
+  const std::vector<std::uint8_t>& expected = encoder->CheckExpected();
+  const std::size_t source_bytes = blocks.size();
+  const std::size_t target_bytes = expected.size();
   std::vector<std::uint8_t> stored(target_bytes);
   std::vector<Etc2GpuUpload> uploads;
   std::size_t source_offset = 0;
   std::size_t target_offset = 0;
-  std::uint32_t seed = 1;
-  bool ran = true;
-  for (const EtcFormat format : kFormats) {
+  bool ran = source_bytes != 0;
+  for (const EtcFormat format : kCheckFormats) {
     const std::size_t etc_bytes = EtcBlockBytes(format);
     const std::size_t bc_bytes = BcBlockBytes(format);
-    FillCheckBlocks(format, blocks.data() + source_offset, kBlocks, &seed);
-    ran = ran && encoder->Reference()(format, blocks.data() + source_offset,
-                                      kBlocks * etc_bytes, kWidth, kHeight,
-                                      expected.data() + target_offset,
-                                      kBlocks * bc_bytes);
     Etc2GpuUpload upload;
     upload.format = format;
     upload.source_offset = source_offset;
-    upload.source_row_stride = kBlocksWide * etc_bytes;
-    upload.source_layer_stride = kBlocks * etc_bytes;
+    upload.source_row_stride = kCheckBlocksWide * etc_bytes;
+    upload.source_layer_stride = kCheckBlocks * etc_bytes;
     upload.target_offset = target_offset;
-    upload.width = kWidth;
-    upload.height = kHeight;
+    upload.width = kCheckWidth;
+    upload.height = kCheckHeight;
     upload.bc = true;
     uploads.push_back(upload);
-    source_offset += kBlocks * etc_bytes;
-    target_offset += kBlocks * bc_bytes;
+    source_offset += kCheckBlocks * etc_bytes;
+    target_offset += kCheckBlocks * bc_bytes;
   }
   VkBuffer source = VK_NULL_HANDLE;
   VkBuffer target = VK_NULL_HANDLE;
@@ -1204,7 +1238,7 @@ bool Etc2GpuDecoder::State::CheckEncoder(VkQueue queue, std::uint32_t family) {
     std::fprintf(stderr,
                  "  [vulkan] BC encoder checked: the GPU gives the same %zu "
                  "blocks as the CPU encoder\n",
-                 kBlocks * std::size(kFormats));
+                 kCheckBlocks * std::size(kCheckFormats));
   } else {
     std::fputs(ran ? "  [vulkan] BC encoder gives other blocks on this GPU "
                      "than the CPU encoder, uploads stay on the CPU encoder\n"

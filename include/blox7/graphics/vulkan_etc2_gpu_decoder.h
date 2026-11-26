@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "blox7/graphics/etc2_bc_encoder.h"
 #include "blox7/graphics/etc2_decoder.h"
@@ -48,7 +49,8 @@ class Etc2GpuEncoder final {
   Etc2GpuEncoder& operator=(const Etc2GpuEncoder&) = delete;
 
   VkPipeline Pipeline() const;
-  EtcToBcEncoder Reference() const;
+  const std::vector<std::uint8_t>& CheckBlocks() const;
+  const std::vector<std::uint8_t>& CheckExpected() const;
   bool Checked() const;
   void Judge(bool agrees);
   void Wait();
