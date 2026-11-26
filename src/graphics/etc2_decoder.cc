@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <pthread.h>
 
 #include <atomic>
@@ -43,23 +44,22 @@ int Expand5(int value) { return (value << 3) | (value >> 2); }
 int Expand6(int value) { return (value << 2) | (value >> 4); }
 int Expand7(int value) { return (value << 1) | (value >> 6); }
 
+constexpr std::uint8_t kRowMajor[16] = {0, 4, 8,  12, 1, 5, 9,  13,
+                                        2, 6, 10, 14, 3, 7, 11, 15};
+
+std::uint32_t Opaque(int r, int g, int b) {
+  return static_cast<std::uint32_t>(Clamp255(r)) |
+         static_cast<std::uint32_t>(Clamp255(g)) << 8 |
+         static_cast<std::uint32_t>(Clamp255(b)) << 16 | 0xFF000000U;
+}
+
 void DecodeRgbBlock(const std::uint8_t* b, bool punchthrough,
-                    std::array<std::uint8_t, 64>* out) {
+                    std::uint32_t* out) {
   static constexpr int kDelta[8] = {0, 1, 2, 3, -4, -3, -2, -1};
   const bool diff_or_opaque = (b[3] & 2) != 0;
   const bool opaque = !punchthrough || diff_or_opaque;
-  const int msb = (b[4] << 8) | b[5];
-  const int lsb = (b[6] << 8) | b[7];
-  auto index_of = [msb, lsb](int texel) {
-    return (((msb >> texel) & 1) << 1) | ((lsb >> texel) & 1);
-  };
-  auto write = [out](int texel, int r, int g, int bl, int a) {
-    const std::size_t o = static_cast<std::size_t>(texel) * 4;
-    (*out)[o] = Clamp255(r);
-    (*out)[o + 1] = Clamp255(g);
-    (*out)[o + 2] = Clamp255(bl);
-    (*out)[o + 3] = static_cast<std::uint8_t>(a);
-  };
+  const std::uint32_t msb = (static_cast<std::uint32_t>(b[4]) << 8) | b[5];
+  const std::uint32_t lsb = (static_cast<std::uint32_t>(b[6]) << 8) | b[7];
 
   const int r_sum = (b[0] >> 3) + kDelta[b[0] & 7];
   const int g_sum = (b[1] >> 3) + kDelta[b[1] & 7];
@@ -67,46 +67,40 @@ void DecodeRgbBlock(const std::uint8_t* b, bool punchthrough,
   const bool individual = !punchthrough && !diff_or_opaque;
 
   if (!individual && (r_sum < 0 || r_sum > 31 || g_sum < 0 || g_sum > 31)) {
-    std::array<std::array<int, 3>, 4> paint{};
+    std::uint32_t paint[4];
     if (r_sum < 0 || r_sum > 31) {
-      const std::array<int, 3> c1 = {
-          Expand4((((b[0] >> 3) & 3) << 2) | (b[0] & 3)),
-          Expand4(b[1] >> 4), Expand4(b[1] & 15)};
-      const std::array<int, 3> c2 = {Expand4(b[2] >> 4), Expand4(b[2] & 15),
-                                     Expand4(b[3] >> 4)};
+      const int c1[3] = {Expand4((((b[0] >> 3) & 3) << 2) | (b[0] & 3)),
+                         Expand4(b[1] >> 4), Expand4(b[1] & 15)};
+      const int c2[3] = {Expand4(b[2] >> 4), Expand4(b[2] & 15),
+                         Expand4(b[3] >> 4)};
       const int d = kDistance[(((b[3] >> 2) & 3) << 1) | (b[3] & 1)];
-      for (int c = 0; c < 3; ++c) {
-        paint[0][c] = c1[c];
-        paint[1][c] = c2[c] + d;
-        paint[2][c] = c2[c];
-        paint[3][c] = c2[c] - d;
-      }
+      paint[0] = Opaque(c1[0], c1[1], c1[2]);
+      paint[1] = Opaque(c2[0] + d, c2[1] + d, c2[2] + d);
+      paint[2] = Opaque(c2[0], c2[1], c2[2]);
+      paint[3] = Opaque(c2[0] - d, c2[1] - d, c2[2] - d);
     } else {
-      const std::array<int, 3> c1 = {
+      const int c1[3] = {
           Expand4((b[0] >> 3) & 15),
           Expand4(((b[0] & 7) << 1) | ((b[1] >> 4) & 1)),
           Expand4((b[1] & 8) | ((b[1] & 3) << 1) | (b[2] >> 7))};
-      const std::array<int, 3> c2 = {
-          Expand4((b[2] >> 3) & 15), Expand4(((b[2] & 7) << 1) | (b[3] >> 7)),
-          Expand4((b[3] >> 3) & 15)};
+      const int c2[3] = {Expand4((b[2] >> 3) & 15),
+                         Expand4(((b[2] & 7) << 1) | (b[3] >> 7)),
+                         Expand4((b[3] >> 3) & 15)};
       const int v1 = (c1[0] << 16) | (c1[1] << 8) | c1[2];
       const int v2 = (c2[0] << 16) | (c2[1] << 8) | c2[2];
       const int d =
           kDistance[(b[3] & 4) | ((b[3] & 1) << 1) | (v1 >= v2 ? 1 : 0)];
-      for (int c = 0; c < 3; ++c) {
-        paint[0][c] = c1[c] + d;
-        paint[1][c] = c1[c] - d;
-        paint[2][c] = c2[c] + d;
-        paint[3][c] = c2[c] - d;
-      }
+      paint[0] = Opaque(c1[0] + d, c1[1] + d, c1[2] + d);
+      paint[1] = Opaque(c1[0] - d, c1[1] - d, c1[2] - d);
+      paint[2] = Opaque(c2[0] + d, c2[1] + d, c2[2] + d);
+      paint[3] = Opaque(c2[0] - d, c2[1] - d, c2[2] - d);
+    }
+    if (!opaque) {
+      paint[2] = 0;
     }
     for (int texel = 0; texel < 16; ++texel) {
-      const int index = index_of(texel);
-      if (!opaque && index == 2) {
-        write(texel, 0, 0, 0, 0);
-      } else {
-        write(texel, paint[index][0], paint[index][1], paint[index][2], 255);
-      }
+      out[kRowMajor[texel]] =
+          paint[(((msb >> texel) & 1) << 1) | ((lsb >> texel) & 1)];
     }
     return;
   }
@@ -122,71 +116,110 @@ void DecodeRgbBlock(const std::uint8_t* b, bool punchthrough,
     const int rv = Expand6(((b[5] & 7) << 3) | (b[6] >> 5));
     const int gv = Expand7(((b[6] & 31) << 2) | (b[7] >> 6));
     const int bv = Expand6(b[7] & 63);
-    for (int x = 0; x < 4; ++x) {
-      for (int y = 0; y < 4; ++y) {
-        write(x * 4 + y, (x * (rh - ro) + y * (rv - ro) + 4 * ro + 2) >> 2,
-              (x * (gh - go) + y * (gv - go) + 4 * go + 2) >> 2,
-              (x * (bh - bo) + y * (bv - bo) + 4 * bo + 2) >> 2, 255);
+    for (int y = 0; y < 4; ++y) {
+      for (int x = 0; x < 4; ++x) {
+        out[y * 4 + x] =
+            Opaque((x * (rh - ro) + y * (rv - ro) + 4 * ro + 2) >> 2,
+                   (x * (gh - go) + y * (gv - go) + 4 * go + 2) >> 2,
+                   (x * (bh - bo) + y * (bv - bo) + 4 * bo + 2) >> 2);
       }
     }
     return;
   }
 
-  std::array<std::array<int, 3>, 2> base{};
-  for (int c = 0; c < 3; ++c) {
-    if (individual) {
-      base[0][c] = Expand4(b[c] >> 4);
-      base[1][c] = Expand4(b[c] & 15);
-    } else {
-      base[0][c] = Expand5(b[c] >> 3);
-      base[1][c] = Expand5((b[c] >> 3) + kDelta[b[c] & 7]);
-    }
-  }
   const int tables[2] = {b[3] >> 5, (b[3] >> 2) & 7};
-  const bool flipped = (b[3] & 1) != 0;
-  for (int x = 0; x < 4; ++x) {
-    for (int y = 0; y < 4; ++y) {
-      const int texel = x * 4 + y;
-      const int index = index_of(texel);
-      if (!opaque && index == 2) {
-        write(texel, 0, 0, 0, 0);
-        continue;
+  std::uint32_t colors[2][4];
+  for (int sub = 0; sub < 2; ++sub) {
+    int base[3];
+    for (int c = 0; c < 3; ++c) {
+      if (individual) {
+        base[c] = Expand4(sub == 0 ? b[c] >> 4 : b[c] & 15);
+      } else {
+        base[c] =
+            Expand5((b[c] >> 3) + (sub == 0 ? 0 : kDelta[b[c] & 7]));
       }
-      const int sub = flipped ? (y >= 2 ? 1 : 0) : (x >= 2 ? 1 : 0);
+    }
+    for (int index = 0; index < 4; ++index) {
       const int modifier =
           (!opaque && index == 0) ? 0 : kEtc1Modifiers[tables[sub]][index];
-      write(texel, base[sub][0] + modifier, base[sub][1] + modifier,
-            base[sub][2] + modifier, 255);
+      colors[sub][index] =
+          Opaque(base[0] + modifier, base[1] + modifier, base[2] + modifier);
     }
+    if (!opaque) {
+      colors[sub][2] = 0;
+    }
+  }
+  const int sub_shift = (b[3] & 1) != 0 ? 1 : 3;
+  for (int texel = 0; texel < 16; ++texel) {
+    out[kRowMajor[texel]] =
+        colors[(texel >> sub_shift) & 1]
+              [(((msb >> texel) & 1) << 1) | ((lsb >> texel) & 1)];
   }
 }
 
-int EacIndex(const std::uint8_t* b, int texel) {
+std::uint64_t EacIndices(const std::uint8_t* b) {
   std::uint64_t bits = 0;
   for (int i = 2; i < 8; ++i) {
     bits = (bits << 8) | b[i];
   }
-  return static_cast<int>((bits >> (45 - texel * 3)) & 7);
+  return bits;
 }
 
-int EacModifier(const std::uint8_t* b, int texel) {
-  return kEacModifiers[b[1] & 15][EacIndex(b, texel)];
-}
-
-std::uint16_t DecodeR11(const std::uint8_t* b, int texel, bool is_signed) {
+void DecodeAlphaBlock(const std::uint8_t* b, std::uint32_t* out) {
+  const int* modifiers = kEacModifiers[b[1] & 15];
   const int multiplier = b[1] >> 4;
-  const int modifier = EacModifier(b, texel);
-  const int scaled = multiplier != 0 ? modifier * multiplier * 8 : modifier;
-  if (!is_signed) {
-    const int value = std::clamp(b[0] * 8 + 4 + scaled, 0, 2047);
-    return static_cast<std::uint16_t>((value << 5) | (value >> 6));
+  std::uint32_t alpha[8];
+  for (int index = 0; index < 8; ++index) {
+    alpha[index] = static_cast<std::uint32_t>(
+                       Clamp255(b[0] + modifiers[index] * multiplier))
+                   << 24;
   }
-  const int base = std::max(-127, static_cast<int>(static_cast<std::int8_t>(b[0])));
-  const int value = std::clamp(base * 8 + scaled, -1023, 1023);
-  const int magnitude = value < 0 ? -value : value;
-  const int expanded = (magnitude << 5) | (magnitude >> 5);
-  return static_cast<std::uint16_t>(
-      static_cast<std::int16_t>(value < 0 ? -expanded : expanded));
+  const std::uint64_t bits = EacIndices(b);
+  for (int texel = 0; texel < 16; ++texel) {
+    std::uint32_t& pixel = out[kRowMajor[texel]];
+    pixel = (pixel & 0x00FFFFFFU) | alpha[(bits >> (45 - texel * 3)) & 7];
+  }
+}
+
+void DecodeR11Block(const std::uint8_t* b, bool is_signed,
+                    std::uint16_t* out) {
+  const int* modifiers = kEacModifiers[b[1] & 15];
+  const int multiplier = b[1] >> 4;
+  std::uint16_t values[8];
+  for (int index = 0; index < 8; ++index) {
+    const int scaled = multiplier != 0 ? modifiers[index] * multiplier * 8
+                                       : modifiers[index];
+    if (!is_signed) {
+      const int value = std::clamp(b[0] * 8 + 4 + scaled, 0, 2047);
+      values[index] = static_cast<std::uint16_t>((value << 5) | (value >> 6));
+      continue;
+    }
+    const int base =
+        std::max(-127, static_cast<int>(static_cast<std::int8_t>(b[0])));
+    const int value = std::clamp(base * 8 + scaled, -1023, 1023);
+    const int magnitude = value < 0 ? -value : value;
+    const int expanded = (magnitude << 5) | (magnitude >> 5);
+    values[index] = static_cast<std::uint16_t>(
+        static_cast<std::int16_t>(value < 0 ? -expanded : expanded));
+  }
+  const std::uint64_t bits = EacIndices(b);
+  for (int texel = 0; texel < 16; ++texel) {
+    out[kRowMajor[texel]] = values[(bits >> (45 - texel * 3)) & 7];
+  }
+}
+
+template <typename Texel>
+void StoreBlock(const Texel* texels, std::uint8_t* target, std::size_t stride,
+                std::uint32_t columns, std::uint32_t rows) {
+  if (columns == 4) {
+    for (std::uint32_t y = 0; y < rows; ++y) {
+      std::memcpy(target + y * stride, texels + y * 4, 4 * sizeof(Texel));
+    }
+    return;
+  }
+  for (std::uint32_t y = 0; y < rows; ++y) {
+    std::memcpy(target + y * stride, texels + y * 4, columns * sizeof(Texel));
+  }
 }
 
 }  // namespace
@@ -430,51 +463,52 @@ bool DecodeEtcImageBlockRows(EtcFormat format, const std::uint8_t* source,
   const std::size_t texel_bytes = EtcDecodedTexelBytes(format);
   const std::size_t block_bytes = EtcBlockBytes(format);
 
-  std::array<std::uint8_t, 64> rgba{};
+  const bool is_signed = format == EtcFormat::kEacR11Signed ||
+                         format == EtcFormat::kEacRg11Signed;
+  const std::size_t stride = static_cast<std::size_t>(width) * texel_bytes;
   const std::uint64_t end_block_row =
       static_cast<std::uint64_t>(first_block_row) + block_row_count;
   for (std::uint64_t by = first_block_row; by < end_block_row; ++by) {
-    for (std::uint64_t bx = 0; bx < blocks_wide; ++bx) {
-      const std::uint8_t* block =
-          source + (by * blocks_wide + bx) * block_bytes;
-      if (format == EtcFormat::kEtc2Rgb8 || format == EtcFormat::kEtc2Rgb8A1) {
-        DecodeRgbBlock(block, format == EtcFormat::kEtc2Rgb8A1, &rgba);
-      } else if (format == EtcFormat::kEtc2Rgba8) {
-        DecodeRgbBlock(block + 8, false, &rgba);
-      }
-      for (std::uint32_t y = 0; y < 4 && by * 4 + y < height; ++y) {
-        for (std::uint32_t x = 0; x < 4 && bx * 4 + x < width; ++x) {
-          const int texel = static_cast<int>(x * 4 + y);
-          std::uint8_t* out =
-              destination + ((by * 4 + y) * width + bx * 4 + x) * texel_bytes;
-          switch (format) {
-            case EtcFormat::kEtc2Rgb8:
-            case EtcFormat::kEtc2Rgb8A1:
-            case EtcFormat::kEtc2Rgba8:
-              std::copy_n(rgba.data() + texel * 4, 4, out);
-              if (format == EtcFormat::kEtc2Rgba8) {
-                const int alpha =
-                    block[0] + EacModifier(block, texel) * (block[1] >> 4);
-                out[3] = Clamp255(alpha);
-              }
-              break;
-            case EtcFormat::kEacR11:
-            case EtcFormat::kEacR11Signed:
-            case EtcFormat::kEacRg11:
-            case EtcFormat::kEacRg11Signed: {
-              const bool is_signed = format == EtcFormat::kEacR11Signed ||
-                                     format == EtcFormat::kEacRg11Signed;
-              const int channels = texel_bytes / 2;
-              for (int channel = 0; channel < channels; ++channel) {
-                const std::uint16_t value =
-                    DecodeR11(block + channel * 8, texel, is_signed);
-                out[channel * 2] = static_cast<std::uint8_t>(value);
-                out[channel * 2 + 1] = static_cast<std::uint8_t>(value >> 8);
-              }
-              break;
-            }
+    const std::uint32_t rows = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(4, height - by * 4));
+    const std::uint8_t* block = source + by * blocks_wide * block_bytes;
+    std::uint8_t* target = destination + by * 4 * stride;
+    for (std::uint64_t bx = 0; bx < blocks_wide;
+         ++bx, block += block_bytes, target += 4 * texel_bytes) {
+      const std::uint32_t columns = static_cast<std::uint32_t>(
+          std::min<std::uint64_t>(4, width - bx * 4));
+      std::uint32_t wide[16];
+      std::uint16_t narrow[16];
+      std::uint16_t second[16];
+      switch (format) {
+        case EtcFormat::kEtc2Rgb8:
+          DecodeRgbBlock(block, false, wide);
+          StoreBlock(wide, target, stride, columns, rows);
+          break;
+        case EtcFormat::kEtc2Rgb8A1:
+          DecodeRgbBlock(block, true, wide);
+          StoreBlock(wide, target, stride, columns, rows);
+          break;
+        case EtcFormat::kEtc2Rgba8:
+          DecodeRgbBlock(block + 8, false, wide);
+          DecodeAlphaBlock(block, wide);
+          StoreBlock(wide, target, stride, columns, rows);
+          break;
+        case EtcFormat::kEacR11:
+        case EtcFormat::kEacR11Signed:
+          DecodeR11Block(block, is_signed, narrow);
+          StoreBlock(narrow, target, stride, columns, rows);
+          break;
+        case EtcFormat::kEacRg11:
+        case EtcFormat::kEacRg11Signed:
+          DecodeR11Block(block, is_signed, narrow);
+          DecodeR11Block(block + 8, is_signed, second);
+          for (int texel = 0; texel < 16; ++texel) {
+            wide[texel] = narrow[texel] |
+                          static_cast<std::uint32_t>(second[texel]) << 16;
           }
-        }
+          StoreBlock(wide, target, stride, columns, rows);
+          break;
       }
     }
   }
