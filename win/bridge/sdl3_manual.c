@@ -353,12 +353,19 @@ BRIDGE_EXPORT bool SDL_Vulkan_CreateSurface(SDL_Window* window, VkInstance insta
   return create(window, instance, vkb_allocator(allocator), surface);
 }
 
+#ifdef BLOX7_VK_LOSE_SURFACE
+void vkb_test_surface_destroyed(VkSurfaceKHR surface);
+#endif
+
 BRIDGE_EXPORT void SDL_Vulkan_DestroySurface(VkInstance instance, VkSurfaceKHR surface,
                                              const struct VkAllocationCallbacks* allocator) {
   static void (BRIDGE_MS *destroy)(VkInstance, VkSurfaceKHR, const struct VkAllocationCallbacks*);
   if (!destroy)
     destroy = (void (BRIDGE_MS*)(VkInstance, VkSurfaceKHR, const struct VkAllocationCallbacks*))real(
         "SDL_Vulkan_DestroySurface");
+#ifdef BLOX7_VK_LOSE_SURFACE
+  vkb_test_surface_destroyed(surface);
+#endif
   destroy(instance, surface, vkb_allocator(allocator));
 }
 

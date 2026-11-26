@@ -272,6 +272,10 @@ static void vkb_set(const struct vkb_command* c, void* fn, int device_lookup) {
   fprintf(stderr, "[vulkan bridge] %s: two drivers answered; using the loader's entry point\n", c->name);
 }
 
+#ifdef BLOX7_VK_LOSE_SURFACE
+#include "../test/vk_lose_surface.h"
+#endif
+
 static PFN_vkVoidFunction answer(const char* name, void* fn, int device_lookup) {
   const struct vkb_command* c = (const struct vkb_command*)bsearch(name, vkb_commands, vkb_command_count,
                                                                     sizeof vkb_commands[0], by_name);
@@ -290,6 +294,11 @@ static PFN_vkVoidFunction answer(const char* name, void* fn, int device_lookup) 
     return NULL;
   }
   vkb_set(c, fn, device_lookup);
+#ifdef BLOX7_VK_LOSE_SURFACE
+  const int device_wrapper = device_lookup && c->device_wrapper;
+  const PFN_vkVoidFunction lost = lose_answer(name, device_wrapper ? c->device_wrapper : c->wrapper, device_wrapper);
+  if (lost) return lost;
+#endif
   return (PFN_vkVoidFunction)(device_lookup && c->device_wrapper ? c->device_wrapper : c->wrapper);
 }
 
