@@ -255,6 +255,8 @@ struct AdapterState {
   VkSwapchainKHR retired_swapchain = VK_NULL_HANDLE;
   VkDevice retired_swapchain_device = VK_NULL_HANDLE;
   VkSurfaceKHR retired_swapchain_surface = VK_NULL_HANDLE;
+  std::vector<VkSurfaceKHR> lost_surfaces;
+  std::uint64_t lost_surface_noted_ns = 0;
   std::unordered_map<VkInstance, std::string> instance_keys;
   std::unordered_map<VkPhysicalDevice, VkInstance> physical_device_instances;
   std::unordered_map<VkDevice, std::string> device_keys;
@@ -399,6 +401,77 @@ VkResult NormalizeSwapchainResult(VkResult result) {
     NoteSuboptimalTranslation();
   }
   return blox7::graphics::NormalizeAndroidSwapchainResult(result);
+}
+
+void NoteSurfaceOutOfDate() {
+  const NoteSurfaceOutOfDateFn note_surface_out_of_date =
+      State().note_surface_out_of_date.load(std::memory_order_acquire);
+  if (note_surface_out_of_date != nullptr) {
+    note_surface_out_of_date();
+  }
+}
+
+void NoteLostSurface(VkSurfaceKHR surface) {
+  constexpr std::uint64_t kRepeatNs = 1000000000ULL;
+  bool first = false;
+  bool due = true;
+  if (surface != VK_NULL_HANDLE) {
+    timespec now{};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const std::uint64_t now_ns =
+        static_cast<std::uint64_t>(now.tv_sec) * 1000000000ULL +
+        static_cast<std::uint64_t>(now.tv_nsec);
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    first = std::find(state.lost_surfaces.begin(), state.lost_surfaces.end(),
+                      surface) == state.lost_surfaces.end();
+    if (first) {
+      state.lost_surfaces.push_back(surface);
+    }
+    due = first || now_ns - state.lost_surface_noted_ns >= kRepeatNs;
+    if (due) {
+      state.lost_surface_noted_ns = now_ns;
+    }
+  }
+  if (first) {
+    std::fprintf(stderr,
+                 "  [vulkan] the host lost the window surface "
+                 "(VK_ERROR_SURFACE_LOST_KHR); the next one is created new\n");
+  }
+  if (due) {
+    NoteSurfaceOutOfDate();
+  }
+}
+
+VkResult NoteSurfaceResult(VkSurfaceKHR surface, VkResult result) {
+  if (result == VK_ERROR_SURFACE_LOST_KHR) {
+    NoteLostSurface(surface);
+  }
+  return result;
+}
+
+VkSurfaceKHR SurfaceOf(const VkPhysicalDeviceSurfaceInfo2KHR* surface_info) {
+  return surface_info != nullptr ? surface_info->surface : VK_NULL_HANDLE;
+}
+
+void NoteSwapchainResult(VkSwapchainKHR swapchain, VkResult result) {
+  if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    NoteSurfaceOutOfDate();
+    return;
+  }
+  if (result != VK_ERROR_SURFACE_LOST_KHR) {
+    return;
+  }
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (const auto found = state.swapchain_surfaces.find(swapchain);
+        found != state.swapchain_surfaces.end()) {
+      surface = found->second;
+    }
+  }
+  NoteLostSurface(surface);
 }
 
 PFN_vkVoidFunction HostInstanceProc(VkInstance instance, const char* name) {
@@ -1708,6 +1781,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.device_keys.clear();
   state.device_allocations.clear();
   state.swapchain_surfaces.clear();
+  state.lost_surfaces.clear();
   state.hidden_images.clear();
   state.hidden_image_count.store(0, std::memory_order_release);
   state.shown_surface = VK_NULL_HANDLE;
@@ -1935,8 +2009,14 @@ vkDestroySurfaceKHR(VkInstance instance, VkSurfaceKHR surface,
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
+    const auto lost = std::find(state.lost_surfaces.begin(),
+                                state.lost_surfaces.end(), surface);
+    const bool was_lost = lost != state.lost_surfaces.end();
+    if (was_lost) {
+      state.lost_surfaces.erase(lost);
+    }
     const auto key = state.instance_keys.find(instance);
-    if (surface != VK_NULL_HANDLE && allocator == nullptr &&
+    if (!was_lost && surface != VK_NULL_HANDLE && allocator == nullptr &&
         state.kept_surface == VK_NULL_HANDLE &&
         key != state.instance_keys.end() && !key->second.empty()) {
       state.kept_surface = surface;
@@ -2600,7 +2680,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     }
   }
   if (result != VK_SUCCESS) {
-    return result;
+    return NoteSurfaceResult(create_info->surface, result);
   }
   {
     AdapterState& state = State();
@@ -2692,13 +2772,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
   const VkResult host_result = host_acquire(
       device, swapchain, timeout, semaphore, fence, image_index);
   const VkResult result = NormalizeSwapchainResult(host_result);
-  if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-    const NoteSurfaceOutOfDateFn note_surface_out_of_date =
-        State().note_surface_out_of_date.load(std::memory_order_acquire);
-    if (note_surface_out_of_date != nullptr) {
-      note_surface_out_of_date();
-    }
-  }
+  NoteSwapchainResult(swapchain, result);
   observation.SetResult(result);
   return result;
 }
@@ -2731,13 +2805,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
   const VkResult host_result =
       host_acquire(device, acquire_info, image_index);
   const VkResult result = NormalizeSwapchainResult(host_result);
-  if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-    const NoteSurfaceOutOfDateFn note_surface_out_of_date =
-        State().note_surface_out_of_date.load(std::memory_order_acquire);
-    if (note_surface_out_of_date != nullptr) {
-      note_surface_out_of_date();
-    }
-  }
+  NoteSwapchainResult(acquire_info->swapchain, result);
   observation.SetResult(result);
   return result;
 }
@@ -3113,8 +3181,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
   if (host_capabilities == nullptr || capabilities == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  const VkResult result =
-      host_capabilities(physical_device, surface, capabilities);
+  const VkResult result = NoteSurfaceResult(
+      surface, host_capabilities(physical_device, surface, capabilities));
   if (result != VK_SUCCESS ||
       (capabilities->currentExtent.width != UINT32_MAX &&
        capabilities->currentExtent.height != UINT32_MAX)) {
@@ -3172,14 +3240,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
   std::uint32_t host_count = 0;
   VkResult result = host_query(physical_device, surface, &host_count, nullptr);
   if (result != VK_SUCCESS) {
-    return result;
+    return NoteSurfaceResult(surface, result);
   }
   std::vector<VkPresentModeKHR> host_modes(host_count);
   if (host_count != 0) {
     result =
         host_query(physical_device, surface, &host_count, host_modes.data());
     if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
-      return result;
+      return NoteSurfaceResult(surface, result);
     }
     host_modes.resize(host_count);
   }
@@ -3222,9 +3290,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
     std::lock_guard<std::mutex> lock(state.mutex);
     host_query = state.host_surface_support;
   }
-  return host_query != nullptr ? host_query(physical_device, queue_family_index,
-                                            surface, supported)
-                               : VK_ERROR_INITIALIZATION_FAILED;
+  return host_query != nullptr
+             ? NoteSurfaceResult(surface,
+                                 host_query(physical_device, queue_family_index,
+                                            surface, supported))
+             : VK_ERROR_INITIALIZATION_FAILED;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
@@ -3242,7 +3312,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
     host_query = state.host_surface_formats;
   }
   return host_query != nullptr
-             ? host_query(physical_device, surface, format_count, formats)
+             ? NoteSurfaceResult(surface, host_query(physical_device, surface,
+                                                     format_count, formats))
              : VK_ERROR_INITIALIZATION_FAILED;
 }
 
@@ -3262,7 +3333,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
     host_query = state.host_surface_formats2;
   }
   return host_query != nullptr
-             ? host_query(physical_device, surface_info, format_count, formats)
+             ? NoteSurfaceResult(SurfaceOf(surface_info),
+                                 host_query(physical_device, surface_info,
+                                            format_count, formats))
              : VK_ERROR_INITIALIZATION_FAILED;
 }
 
@@ -3282,7 +3355,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
     host_query = state.host_surface_capabilities2;
   }
   return host_query != nullptr
-             ? host_query(physical_device, surface_info, capabilities)
+             ? NoteSurfaceResult(SurfaceOf(surface_info),
+                                 host_query(physical_device, surface_info,
+                                            capabilities))
              : VK_ERROR_INITIALIZATION_FAILED;
 }
 
@@ -3358,12 +3433,18 @@ vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* present_info) {
   const VkResult result = state.text_overlay.QueuePresent(
       queue, present_info, ObservedHostQueuePresent);
   const VkResult normalized_result = NormalizeSwapchainResult(result);
-  if (normalized_result == VK_ERROR_OUT_OF_DATE_KHR) {
-    const NoteSurfaceOutOfDateFn note_surface_out_of_date =
-        state.note_surface_out_of_date.load(std::memory_order_acquire);
-    if (note_surface_out_of_date != nullptr) {
-      note_surface_out_of_date();
+  if (normalized_result == VK_ERROR_SURFACE_LOST_KHR &&
+      present_info != nullptr) {
+    for (std::uint32_t index = 0; index < present_info->swapchainCount;
+         ++index) {
+      if (present_info->pResults == nullptr ||
+          present_info->pResults[index] == VK_ERROR_SURFACE_LOST_KHR) {
+        NoteSwapchainResult(present_info->pSwapchains[index],
+                            VK_ERROR_SURFACE_LOST_KHR);
+      }
     }
+  } else {
+    NoteSwapchainResult(VK_NULL_HANDLE, normalized_result);
   }
   if (normalized_result == VK_SUCCESS && note_present != nullptr) {
     note_present();
