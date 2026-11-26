@@ -262,6 +262,133 @@ void MakeOneColor(EtcFormat format, std::uint8_t* block) {
   std::memset(color + 4, 0, 4);
 }
 
+void SetOverflow(std::uint8_t* byte, bool overflow) {
+  const int base = *byte >> 3;
+  const int delta = (*byte & 3) - (*byte & 4);
+  if ((base + delta < 0 || base + delta > 31) == overflow) {
+    return;
+  }
+  if (!overflow) {
+    *byte ^= 0x80;
+    return;
+  }
+  const int high = (*byte >> 3) & 3;
+  const int low = *byte & 3;
+  *byte = static_cast<std::uint8_t>(high + low >= 4 ? 0xe0 | (high << 3) | low
+                                                    : (high << 3) | 4 | low);
+}
+
+void MakeKind(EtcFormat format, std::uint8_t* color, int overflowing) {
+  for (int channel = 0; channel < 3; ++channel) {
+    if (channel <= overflowing) {
+      SetOverflow(color + channel, channel == overflowing);
+    }
+  }
+  if (format != EtcFormat::kEtc2Rgb8A1) {
+    color[3] |= 2;
+  }
+}
+
+void LimitIndices(std::uint8_t* color, std::size_t choice) {
+  if (choice == 0) {
+    color[4] = 0;
+    color[5] = 0;
+  } else if (choice == 1) {
+    color[6] = color[4];
+    color[7] = color[5];
+  } else if (choice == 2) {
+    color[6] &= color[4];
+    color[7] &= color[5];
+  } else if (choice == 3) {
+    color[4] = static_cast<std::uint8_t>(~color[6]);
+    color[5] = static_cast<std::uint8_t>(~color[7]);
+  } else if (choice == 4) {
+    color[6] |= color[4];
+    color[7] |= color[5];
+  } else {
+    color[6] = 0;
+    color[7] = 0;
+  }
+}
+
+void ShapeEacBlock(std::uint8_t* channel, std::size_t recipe,
+                   std::size_t turn) {
+  constexpr std::uint8_t kEveryThirdBit[] = {0x92, 0x49, 0x24};
+  if (recipe == 0) {
+    std::memset(channel + 2, 0, 6);
+  } else if (recipe == 2) {
+    channel[0] = static_cast<std::uint8_t>(turn % 2 == 0 ? 0 : 255);
+  } else if (recipe == 4 || recipe == 6) {
+    channel[1] &= 0x0f;
+    for (std::size_t at = 2; at < 8 && recipe == 6; ++at) {
+      channel[at] &= kEveryThirdBit[(at - 2) % 3];
+    }
+  }
+}
+
+void ShapeColorBlock(EtcFormat format, std::uint8_t* block, std::size_t recipe,
+                     std::size_t turn) {
+  constexpr int kRed = 0;
+  constexpr int kGreen = 1;
+  constexpr int kBlue = 2;
+  constexpr int kNone = 3;
+  std::uint8_t* color = block + EtcBlockBytes(format) - 8;
+  if (format == EtcFormat::kEtc2Rgba8 && (turn / 4) % 2 == 0) {
+    block[0] = 255;
+    block[1] &= 0x0f;
+  }
+  if (recipe == 0) {
+    MakeOneColor(format, block);
+    if (turn % 4 == 1 && format == EtcFormat::kEtc2Rgba8) {
+      block[0] = static_cast<std::uint8_t>(turn * 5);
+    } else if (turn % 4 >= 2) {
+      color[4] = 255;
+      color[5] = 255;
+      if (turn % 4 == 3) {
+        color[6] = 255;
+        color[7] = 255;
+      } else if (format == EtcFormat::kEtc2Rgb8A1 && turn % 8 == 2) {
+        color[3] &= 0xfd;
+      }
+    }
+    if (turn % 8 == 4 || turn % 8 == 6) {
+      color[0] = static_cast<std::uint8_t>(turn % 8 == 4 ? 0x78 : 0x80);
+      color[3] = 0x26;
+    }
+  } else if (recipe == 2 || recipe == 5) {
+    MakeKind(format, color, kRed);
+  } else if (recipe == 3 || recipe == 6) {
+    MakeKind(format, color, kGreen);
+  } else if (recipe == 4) {
+    MakeKind(format, color, kBlue);
+  } else if (recipe == 7) {
+    if (turn % 4 == 0) {
+      std::memset(color, turn % 8 == 0 ? 0 : 0xf8, 3);
+      color[3] |= 0xfc;
+      if (turn % 16 >= 8) {
+        LimitIndices(color, 4);
+        if (format == EtcFormat::kEtc2Rgb8A1) {
+          color[3] &= 0xfd;
+        }
+      }
+    } else if (turn % 4 == 1) {
+      for (int at = 4; at < 8; ++at) {
+        color[at] = static_cast<std::uint8_t>((color[at] & 1) != 0 ? 255 : 0);
+      }
+    } else if (turn % 4 == 3) {
+      LimitIndices(color, (turn / 4) % 4);
+    }
+    MakeKind(format, color, kNone);
+  }
+  if (recipe == 5 && turn % 8 >= 6) {
+    color[2] = static_cast<std::uint8_t>((color[2] & 0xf0) | (color[1] >> 4));
+    color[3] = static_cast<std::uint8_t>((color[3] & 0x0f) | (color[1] << 4));
+    LimitIndices(color, 5);
+  } else if (recipe == 5 || recipe == 6) {
+    LimitIndices(color, turn % 4);
+  }
+}
+
 void FillCheckBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count,
                      std::uint32_t* seed) {
   const std::size_t bytes = EtcBlockBytes(format);
@@ -269,8 +396,15 @@ void FillCheckBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count,
     *seed = *seed * 1664525u + 1013904223u;
     blocks[index] = static_cast<std::uint8_t>(*seed >> 24);
   }
-  for (std::size_t index = 0; index < count; index += 4) {
-    MakeOneColor(format, blocks + index * bytes);
+  for (std::size_t index = 0; index < count; ++index) {
+    std::uint8_t* block = blocks + index * bytes;
+    if (!IsEac(format)) {
+      ShapeColorBlock(format, block, index % 8, index / 8);
+      continue;
+    }
+    for (std::size_t channel = 0; channel < bytes; channel += 8) {
+      ShapeEacBlock(block + channel, index % 8, index / 8);
+    }
   }
 }
 
@@ -989,8 +1123,8 @@ bool Etc2GpuDecoder::State::CheckEncoder(VkQueue queue, std::uint32_t family) {
       EtcFormat::kEtc2Rgb8,     EtcFormat::kEtc2Rgb8A1,   EtcFormat::kEtc2Rgba8,
       EtcFormat::kEacR11,       EtcFormat::kEacR11Signed, EtcFormat::kEacRg11,
       EtcFormat::kEacRg11Signed};
-  constexpr std::uint32_t kWidth = 62;
-  constexpr std::uint32_t kHeight = 30;
+  constexpr std::uint32_t kWidth = 122;
+  constexpr std::uint32_t kHeight = 66;
   constexpr std::size_t kBlocksWide = (kWidth + 3) / 4;
   constexpr std::size_t kBlocks = kBlocksWide * ((kHeight + 3) / 4);
   std::size_t source_bytes = 0;
