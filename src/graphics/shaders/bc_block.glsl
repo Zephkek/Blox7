@@ -131,6 +131,7 @@ void BcSnapEnds(BC_INOUT(uint, low), BC_INOUT(uint, high), int mask, int codec, 
   if (codec == kBcByte) {
     return;
   }
+  const bool parities = codec == kBcUnique || codec == kBcShared;
   uint even_low = low;
   uint odd_low = low;
   uint even_high = high;
@@ -143,7 +144,7 @@ void BcSnapEnds(BC_INOUT(uint, low), BC_INOUT(uint, high), int mask, int codec, 
     if (!BcIn(mask, c)) {
       continue;
     }
-    for (int trial = 0; trial < 4; ++trial) {
+    for (int trial = 0; trial < 4; trial += parities ? 1 : 2) {
       const int value = BcGet(trial < 2 ? low : high, c);
       const int snapped = BcSnap(value, codec, trial & 1);
       const int gap = (snapped - value) * (snapped - value);
@@ -172,8 +173,8 @@ void BcSnapEnds(BC_INOUT(uint, low), BC_INOUT(uint, high), int mask, int codec, 
     low_odd = forced == 1;
     high_odd = low_odd;
   }
-  low = low_odd ? odd_low : even_low;
-  high = high_odd ? odd_high : even_high;
+  low = parities && low_odd ? odd_low : even_low;
+  high = parities && high_odd ? odd_high : even_high;
 }
 
 void BcSolid(uint color, int mask, int codec, int forced, BC_INOUT(uint, low), BC_INOUT(uint, high)) {
@@ -434,6 +435,9 @@ int BcPolish(uint c0, uint c1, uint c2, uint c3, int n0, int n1, int n2, int n3,
         }
       }
       total += channel_best;
+      if (total >= best) {
+        break;
+      }
     }
     if (total < best) {
       best = total;
@@ -494,7 +498,7 @@ int BcFitRamp(uint c0, uint c1, uint c2, uint c3, int n0, int n1, int n2, int n3
   int best_map = 0;
   for (int attempt = 0; attempt < 2; ++attempt) {
     const int choice = attempt == 0 ? first : second;
-    if (choice < 0) {
+    if (choice < 0 || best == 0) {
       break;
     }
     int map = 0;
@@ -1209,7 +1213,7 @@ void BcEncodeColor(BC_IN_ARRAY(uint, px, 16), uint valid, BC_IN_ARRAY(uint, b, 8
     uint trial_lone_low = 0u;
     uint trial_lone_high = 0u;
     int error = 0;
-    for (int part = 0; part < (plan_mode == 6 ? 1 : 2); ++part) {
+    for (int part = 0; part < (plan_mode == 6 ? 1 : 2) && error < best; ++part) {
       const uint part_members = !paired ? valid : (part == 0 ? valid & ~members : valid & members);
       const int mask = plan_mode == 6 ? (mixed ? 15 : 7) : (paired || part == 0 ? 7 : 8);
       uint part_low = paired && part == 1 ? trial_far_low : trial_low;
