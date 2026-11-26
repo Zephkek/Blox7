@@ -257,6 +257,8 @@ struct AdapterState {
   VkSurfaceKHR retired_swapchain_surface = VK_NULL_HANDLE;
   std::vector<VkSurfaceKHR> lost_surfaces;
   std::uint64_t lost_surface_noted_ns = 0;
+  std::vector<VkDevice> lost_devices;
+  std::uint64_t lost_device_noted_ns = 0;
   std::unordered_map<VkInstance, std::string> instance_keys;
   std::unordered_map<VkPhysicalDevice, VkInstance> physical_device_instances;
   std::unordered_map<VkDevice, std::string> device_keys;
@@ -472,6 +474,53 @@ void NoteSwapchainResult(VkSwapchainKHR swapchain, VkResult result) {
     }
   }
   NoteLostSurface(surface);
+}
+
+void NoteLostDevice(VkDevice device, bool drawing) {
+  constexpr std::uint64_t kRepeatNs = 1000000000ULL;
+  if (device == VK_NULL_HANDLE) {
+    return;
+  }
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  const std::uint64_t now_ns =
+      static_cast<std::uint64_t>(now.tv_sec) * 1000000000ULL +
+      static_cast<std::uint64_t>(now.tv_nsec);
+  bool first = false;
+  bool unanswered = false;
+  {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    first = std::find(state.lost_devices.begin(), state.lost_devices.end(),
+                      device) == state.lost_devices.end();
+    if (first) {
+      state.lost_devices.push_back(device);
+      state.lost_device_noted_ns = now_ns;
+    }
+    unanswered =
+        drawing && now_ns - state.lost_device_noted_ns >= kRepeatNs;
+    if (unanswered) {
+      state.lost_device_noted_ns = now_ns;
+    }
+  }
+  if (first) {
+    std::fprintf(stderr,
+                 "  [vulkan] the host lost the device (VK_ERROR_DEVICE_LOST); "
+                 "the next one is created new\n");
+  }
+  if (unanswered) {
+    std::fprintf(stderr,
+                 "  [vulkan] Roblox still draws on the lost device; asking "
+                 "for a new surface so it builds its renderer again\n");
+    NoteSurfaceOutOfDate();
+  }
+}
+
+VkResult NoteDeviceResult(VkDevice device, VkResult result, bool drawing) {
+  if (__builtin_expect(result == VK_ERROR_DEVICE_LOST, 0)) {
+    NoteLostDevice(device, drawing);
+  }
+  return result;
 }
 
 PFN_vkVoidFunction HostInstanceProc(VkInstance instance, const char* name) {
@@ -791,6 +840,13 @@ bool TakeHiddenImage(VkDevice device, VkSwapchainKHR swapchain,
   std::lock_guard<std::mutex> lock(state.spare_queue_mutex);
   *result = host_submit(spare_queue, 1, &submit, fence);
   return true;
+}
+
+VkResult NoteQueueResult(VkQueue queue, VkResult result, bool drawing) {
+  if (__builtin_expect(result == VK_ERROR_DEVICE_LOST, 0)) {
+    NoteLostDevice(HostDispatchForQueue(queue).device, drawing);
+  }
+  return result;
 }
 
 void RegisterHostQueueBinding(VkDevice device, VkQueue queue) {
@@ -1366,7 +1422,8 @@ VkResult WaitForSemaphoresObserved(const char* call_name,
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   static_cast<void>(call_name);
-  const VkResult result = host_wait(device, wait_info, timeout);
+  const VkResult result =
+      NoteDeviceResult(device, host_wait(device, wait_info, timeout), false);
   if (observation != nullptr) {
     observation->SetResult(result);
   }
@@ -1797,6 +1854,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.device_allocations.clear();
   state.swapchain_surfaces.clear();
   state.lost_surfaces.clear();
+  state.lost_devices.clear();
   state.hidden_images.clear();
   state.hidden_image_count.store(0, std::memory_order_release);
   state.shown_surface = VK_NULL_HANDLE;
@@ -2474,9 +2532,16 @@ vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
   State().etc2.DestroyDevice(device);
   std::string key;
   std::int64_t allocations = 0;
+  bool lost = false;
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
+    if (const auto found = std::find(state.lost_devices.begin(),
+                                     state.lost_devices.end(), device);
+        found != state.lost_devices.end()) {
+      state.lost_devices.erase(found);
+      lost = true;
+    }
     if (const auto found = state.device_keys.find(device);
         found != state.device_keys.end()) {
       key = std::move(found->second);
@@ -2488,7 +2553,8 @@ vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
       state.device_allocations.erase(found);
     }
   }
-  bool keep = device != VK_NULL_HANDLE && allocator == nullptr && !key.empty();
+  bool keep = !lost && device != VK_NULL_HANDLE && allocator == nullptr &&
+              !key.empty();
   if (keep && allocations != 0) {
     std::fprintf(stderr, "  [vulkan] VkDevice destroyed with %lld allocations left\n",
                  static_cast<long long>(allocations));
@@ -2716,6 +2782,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     }
   }
   if (result != VK_SUCCESS) {
+    NoteDeviceResult(device, result, false);
     return NoteSurfaceResult(create_info->surface, result);
   }
   {
@@ -2796,6 +2863,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
   VkResult kept = VK_SUCCESS;
   if (TakeHiddenImage(device, swapchain, semaphore, fence, image_index,
                       &kept)) {
+    NoteDeviceResult(device, kept, true);
     observation.SetResult(kept);
     return kept;
   }
@@ -2809,6 +2877,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImageKHR(
       device, swapchain, timeout, semaphore, fence, image_index);
   const VkResult result = NormalizeSwapchainResult(host_result);
   NoteSwapchainResult(swapchain, result);
+  NoteDeviceResult(device, result, true);
   observation.SetResult(result);
   return result;
 }
@@ -2835,6 +2904,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
   VkResult kept = VK_SUCCESS;
   if (TakeHiddenImage(device, acquire_info->swapchain, acquire_info->semaphore,
                       acquire_info->fence, image_index, &kept)) {
+    NoteDeviceResult(device, kept, true);
     observation.SetResult(kept);
     return kept;
   }
@@ -2842,6 +2912,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAcquireNextImage2KHR(
       host_acquire(device, acquire_info, image_index);
   const VkResult result = NormalizeSwapchainResult(host_result);
   NoteSwapchainResult(acquire_info->swapchain, result);
+  NoteDeviceResult(device, result, true);
   observation.SetResult(result);
   return result;
 }
@@ -2856,8 +2927,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  const VkResult result =
-      host_wait(device, fence_count, fences, wait_all, timeout);
+  const VkResult result = NoteDeviceResult(
+      device, host_wait(device, fence_count, fences, wait_all, timeout), false);
   observation.SetResult(result);
   return result;
 }
@@ -3071,8 +3142,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(
           static_cast<std::uint32_t>(command_buffers.size()));
     }
   }
-  const VkResult result = State().text_overlay.QueueSubmit(
-      queue, submit_count, submits, fence, host_submit);
+  const VkResult result = NoteQueueResult(
+      queue,
+      State().text_overlay.QueueSubmit(queue, submit_count, submits, fence,
+                                       host_submit),
+      true);
   observation.SetResult(result);
   return result;
 }
@@ -3094,8 +3168,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(
     return signaled;
   }
   PrepareEtc2Submit2(queue, submit_count, submits);
-  const VkResult result = State().text_overlay.QueueSubmit2(
-      queue, submit_count, submits, fence, host_submit);
+  const VkResult result = NoteQueueResult(
+      queue,
+      State().text_overlay.QueueSubmit2(queue, submit_count, submits, fence,
+                                        host_submit),
+      true);
   observation.SetResult(result);
   return result;
 }
@@ -3117,9 +3194,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2KHR(
     return signaled;
   }
   PrepareEtc2Submit2(queue, submit_count, submits);
-  const VkResult result = State().text_overlay.QueueSubmit2(
-      queue, submit_count, submits, fence,
-      reinterpret_cast<PFN_vkQueueSubmit2>(host_submit));
+  const VkResult result = NoteQueueResult(
+      queue,
+      State().text_overlay.QueueSubmit2(
+          queue, submit_count, submits, fence,
+          reinterpret_cast<PFN_vkQueueSubmit2>(host_submit)),
+      true);
   observation.SetResult(result);
   return result;
 }
@@ -3140,8 +3220,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(
     observation.SetResult(signaled);
     return signaled;
   }
-  const VkResult result = State().text_overlay.QueueBindSparse(
-      queue, bind_info_count, bind_info, fence, host_bind);
+  const VkResult result = NoteQueueResult(
+      queue,
+      State().text_overlay.QueueBindSparse(queue, bind_info_count, bind_info,
+                                           fence, host_bind),
+      false);
   observation.SetResult(result);
   return result;
 }
@@ -3154,8 +3237,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  const VkResult result =
-      State().text_overlay.QueueWaitIdle(queue, host_wait);
+  const VkResult result = NoteQueueResult(
+      queue, State().text_overlay.QueueWaitIdle(queue, host_wait), false);
   observation.SetResult(result);
   return result;
 }
@@ -3168,8 +3251,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  const VkResult result =
-      State().text_overlay.DeviceWaitIdle(device, host_wait);
+  const VkResult result = NoteDeviceResult(
+      device, State().text_overlay.DeviceWaitIdle(device, host_wait), false);
   observation.SetResult(result);
   return result;
 }
@@ -3453,7 +3536,7 @@ vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* present_info) {
   }
   VkResult kept = VK_SUCCESS;
   if (KeepHiddenPresent(queue, present_info, &kept)) {
-    return kept;
+    return NoteQueueResult(queue, kept, true);
   }
   WaitWhileWindowHoldsPresents();
   VulkanCallObservation observation("vkQueuePresentKHR(adapter)");
@@ -3482,6 +3565,7 @@ vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* present_info) {
   } else {
     NoteSwapchainResult(VK_NULL_HANDLE, normalized_result);
   }
+  NoteQueueResult(queue, normalized_result, true);
   if (normalized_result == VK_SUCCESS && note_present != nullptr) {
     note_present();
   }
