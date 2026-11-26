@@ -516,11 +516,24 @@ void gles_buffer_sub_data(void (BRIDGE_MS* real)(GLenum, GLintptr, GLsizeiptr, c
   if (start) tex_note(kCallBufferSubData, (unsigned long long)size, start);
 }
 
+static GLenum (BRIDGE_MS* g_reset_status)(void);
+
+void gles_reset_status_source(void* status) { g_reset_status = (GLenum (BRIDGE_MS*)(void))status; }
+
+void gles_end_if_context_lost(const char* failed) {
+  const GLenum status = g_reset_status ? g_reset_status() : GL_NO_ERROR;
+  if (status == GL_NO_ERROR) return;
+  fprintf(stderr, "[gles] the graphics driver was reset: %s failed and the context is lost (reset status 0x%04x)\n", failed,
+          status);
+  __w32_fatal("The graphics driver restarted, Roblox can't draw anymore. Start it again.");
+}
+
 // tried orphaning roblox's buffer maps: 5x faster in texbench, way worse in bedwars. don't
 void* gles_map_buffer_range(void* (BRIDGE_MS* real)(GLenum, GLintptr, GLsizeiptr, GLbitfield), GLenum target,
                             GLintptr offset, GLsizeiptr length, GLbitfield access) {
   const unsigned long long start = tex_stats_enabled() ? tex_now_ns() : 0;
   void* mapped = real(target, offset, length, access);
+  if (__builtin_expect(mapped == NULL, 0)) gles_end_if_context_lost("glMapBufferRange");
   if (start) {
     tex_note(kCallMapBufferRange, (unsigned long long)length, start);
     const unsigned long long ns = tex_now_ns() - start;

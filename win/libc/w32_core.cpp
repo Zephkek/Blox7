@@ -134,6 +134,8 @@ void w32_fatal(const char* message) {
   __builtin_trap();
 }
 
+extern "C" __attribute__((visibility("default"))) void __w32_fatal(const char* message) { w32_fatal(message); }
+
 int w32_utf8_to_utf16(const char* in, WCHAR* out, size_t out_units) {
   const unsigned char* s = reinterpret_cast<const unsigned char*>(in);
   size_t n = 0;

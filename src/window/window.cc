@@ -49,6 +49,7 @@ extern "C" void* __w32_pe_open(const char* utf8_path);
 extern "C" void* __w32_pe_symbol(void* module, const char* name);
 extern "C" const char* __w32_exe_dir(void);
 extern "C" int blox7_angle_blob_cache(const char* dir);
+extern "C" int blox7_egl_has_extension(void* display, const char* name);
 
 namespace blox7 {
 namespace window {
@@ -82,6 +83,8 @@ static constexpr EGLint EGL_PLATFORM_ANGLE_DEVICE_TYPE_D3D_WARP_ANGLE_VAL =
 static constexpr EGLint EGL_FEATURE_OVERRIDES_ENABLED_ANGLE_VAL = 0x3466;
 static constexpr EGLint EGL_EXPERIMENTAL_PRESENT_PATH_ANGLE_VAL = 0x33A4;
 static constexpr EGLint EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE_VAL = 0x33A9;
+static constexpr EGLint EGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_VAL = 0x3138;
+static constexpr EGLint EGL_LOSE_CONTEXT_ON_RESET_VAL = 0x31BF;
 static constexpr EGLBoolean EGL_TRUE_B = 1;
 static constexpr EGLBoolean EGL_FALSE_B = 0;
 
@@ -607,6 +610,22 @@ SDL_EGLAttrib* SDLCALL AngleD3D11PlatformAttributes(void*) {
   return attrs;
 }
 
+SDL_EGLint* SDLCALL AngleContextAttributes(void*, SDL_EGLDisplay display,
+                                           SDL_EGLConfig) {
+  SDL_EGLint* attrs =
+      static_cast<SDL_EGLint*>(SDL_malloc(sizeof(SDL_EGLint) * 3));
+  if (attrs == nullptr) {
+    return nullptr;
+  }
+  int i = 0;
+  if (blox7_egl_has_extension(display, "EGL_EXT_create_context_robustness")) {
+    attrs[i++] = EGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_VAL;
+    attrs[i++] = EGL_LOSE_CONTEXT_ON_RESET_VAL;
+  }
+  attrs[i++] = EGL_NONE_VAL;
+  return attrs;
+}
+
 const char* WindowsGlString(unsigned int name) {
   using GetString = const unsigned char* (*)(unsigned int);
   const auto get_string =
@@ -713,7 +732,7 @@ bool ConfigureGraphicsBackendAfterSDLInit() {
       return false;
     }
     SDL_EGL_SetAttributeCallbacks(AngleD3D11PlatformAttributes, nullptr,
-                                  nullptr, nullptr);
+                                  AngleContextAttributes, nullptr);
     const char* level = GetEnvNonEmpty("BLOX7_ANGLE_FEATURE_LEVEL");
     int major = 0;
     int minor = 0;

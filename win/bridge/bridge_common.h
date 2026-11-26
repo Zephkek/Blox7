@@ -19,6 +19,7 @@ extern "C" {
 
 void* __w32_attach_thread(void);
 void __w32_frame_beat(void);
+__attribute__((noreturn)) void __w32_fatal(const char* message);
 void* __w32_pe_open(const char* utf8_path);
 void* __w32_pe_symbol(void* module, const char* name);
 const char* __w32_exe_dir(void);

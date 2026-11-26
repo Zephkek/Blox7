@@ -12,6 +12,8 @@ void gles_bridge_resolve(void* (*lookup)(const char*));
 void* gles_bridge_resolve_export(const char* name);
 void gles_window_current(void);
 void gles_window_reset(void);
+void gles_reset_status_source(void* status);
+void gles_end_if_context_lost(const char* failed);
 int gles_bridge_always_has(const char* name);
 
 static void* real(const char* name) { return __w32_pe_symbol(bridge_module_kEntries, name); }
@@ -163,6 +165,10 @@ BRIDGE_EXPORT SDL_GLContext SDL_GL_CreateContext(SDL_Window* window) {
       implementation = get_string;
       gles_bridge_resolve(lookup_gl);
     }
+    void* status = lookup_gl("glGetGraphicsResetStatus");
+    if (!status) status = lookup_gl("glGetGraphicsResetStatusKHR");
+    if (!status) status = lookup_gl("glGetGraphicsResetStatusEXT");
+    gles_reset_status_source(status);
     gles_window_reset();
   }
   return context;
@@ -190,6 +196,7 @@ BRIDGE_EXPORT bool SDL_GL_SwapWindow(SDL_Window* window) {
   frame_dump(window, lookup_gl);
 #endif
   const bool ok = swap(window);
+  if (__builtin_expect(!ok, 0)) gles_end_if_context_lost("the swap");
   __w32_frame_beat();
   return ok;
 }
@@ -300,6 +307,18 @@ static void blob_trim(const char* dir, long long limit) {
     }
   }
   closedir(d);
+}
+
+BRIDGE_EXPORT int blox7_egl_has_extension(void* display, const char* name) {
+  static void* (BRIDGE_MS *egl_proc)(const char*);
+  if (!egl_proc) egl_proc = (void* (BRIDGE_MS*)(const char*))real("SDL_EGL_GetProcAddress");
+  const char* (BRIDGE_MS *query)(void*, int) =
+      egl_proc ? (const char* (BRIDGE_MS*)(void*, int))egl_proc("eglQueryString") : NULL;
+  const char* extensions = display && query ? query(display, 0x3055) : NULL;
+  const size_t length = strlen(name);
+  for (const char* at = extensions; at && (at = strstr(at, name)) != NULL; at += length)
+    if ((at == extensions || at[-1] == ' ') && (at[length] == ' ' || at[length] == '\0')) return 1;
+  return 0;
 }
 
 BRIDGE_EXPORT int blox7_angle_blob_cache(const char* dir) {
