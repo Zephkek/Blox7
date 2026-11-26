@@ -212,6 +212,10 @@ VkResult vkb_m_vkCreateInstance(const VkInstanceCreateInfo* info, const VkAlloca
   return result;
 }
 
+#ifdef BLOX7_VK_FRAME_DUMP
+static void vkdump_device(VkPhysicalDevice physical, VkDevice device);
+#endif
+
 VkResult vkb_m_vkCreateDevice(VkPhysicalDevice physical_device, const VkDeviceCreateInfo* info,
                               const VkAllocationCallbacks* allocator, VkDevice* device) {
   if (info == NULL) return vkb_ms_vkCreateDevice(physical_device, info, vkb_allocator(allocator), device);
@@ -220,6 +224,9 @@ VkResult vkb_m_vkCreateDevice(VkPhysicalDevice physical_device, const VkDeviceCr
   if (!translate_chain(info->pNext, &copy.pNext, &c)) return VK_ERROR_INITIALIZATION_FAILED;
   const VkResult result = vkb_ms_vkCreateDevice(physical_device, &copy, vkb_allocator(allocator), device);
   free_chain(&c);
+#ifdef BLOX7_VK_FRAME_DUMP
+  if (result == VK_SUCCESS && device) vkdump_device(physical_device, *device);
+#endif
   return result;
 }
 
@@ -272,6 +279,9 @@ static void vkb_set(const struct vkb_command* c, void* fn, int device_lookup) {
   fprintf(stderr, "[vulkan bridge] %s: two drivers answered; using the loader's entry point\n", c->name);
 }
 
+#ifdef BLOX7_VK_FRAME_DUMP
+#include "../test/vk_frame_dump.h"
+#endif
 #ifdef BLOX7_VK_LOSE_SURFACE
 #include "../test/vk_lose_surface.h"
 #endif
@@ -294,12 +304,21 @@ static PFN_vkVoidFunction answer(const char* name, void* fn, int device_lookup) 
     return NULL;
   }
   vkb_set(c, fn, device_lookup);
-#ifdef BLOX7_VK_LOSE_SURFACE
+#if defined(BLOX7_VK_FRAME_DUMP) || defined(BLOX7_VK_LOSE_SURFACE)
   const int device_wrapper = device_lookup && c->device_wrapper;
-  const PFN_vkVoidFunction lost = lose_answer(name, device_wrapper ? c->device_wrapper : c->wrapper, device_wrapper);
-  if (lost) return lost;
+  PFN_vkVoidFunction wrapper = (PFN_vkVoidFunction)(device_wrapper ? c->device_wrapper : c->wrapper);
+#ifdef BLOX7_VK_FRAME_DUMP
+  const PFN_vkVoidFunction dump = vkdump_answer(name, (void*)wrapper, device_wrapper);
+  if (dump) wrapper = dump;
 #endif
+#ifdef BLOX7_VK_LOSE_SURFACE
+  const PFN_vkVoidFunction lost = lose_answer(name, (void*)wrapper, device_wrapper);
+  if (lost) wrapper = lost;
+#endif
+  return wrapper;
+#else
   return (PFN_vkVoidFunction)(device_lookup && c->device_wrapper ? c->device_wrapper : c->wrapper);
+#endif
 }
 
 PFN_vkVoidFunction vkb_m_vkGetInstanceProcAddr(VkInstance instance, const char* name) {
