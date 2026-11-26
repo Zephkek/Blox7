@@ -143,6 +143,7 @@ enum Control : int {
   kSelfUpdate,
   kDateLink,
   kAeroOff,
+  kTextures,
 };
 
 constexpr int option_id(Control control, size_t option) { return kOptionFirst + control * 100 + static_cast<int>(option); }
@@ -1065,7 +1066,7 @@ void page_graphics(const D2D1_RECT_F& page) {
   y += 50 + kMargin;
 
   static const std::vector<std::wstring> qualities = {L"auto", L"performance", L"balanced", L"high", L"superhq"};
-  group(rect(x, y, w, 76), L"Quality");
+  group(rect(x, y, w, 102), L"Quality");
   combo_row(L"Preset:", ix, y + 16, 64, 200, kQuality, {L"Roblox decides", L"Performance", L"Balanced", L"High", L"Super HQ"},
             index_of(qualities, g.pending.quality), true, [](size_t i) {
               g.pending.quality = qualities[i];
@@ -1085,7 +1086,12 @@ void page_graphics(const D2D1_RECT_F& page) {
     text(L"3D at " + std::to_wstring(size.cx) + L" x " + std::to_wstring(size.cy), g.fonts.body,
          rect(ix + 194, y + 46, iw - 194, 15), kSecondary);
   }
-  y += 76 + kMargin;
+  combo_row(L"Textures:", ix, y + 68, 64, 120, kTextures, {L"Uncompressed", L"Compressed"},
+            g.pending.compressed_textures ? 1 : 0, runs_vulkan(g.pending), [](size_t i) {
+              g.pending.compressed_textures = i == 1;
+              mark_dirty();
+            });
+  y += 102 + kMargin;
 
   std::vector<std::wstring> labels{L"Automatic"};
   size_t selected = g.pending.gpu.empty() ? 0 : g.gpus.size() + 1;

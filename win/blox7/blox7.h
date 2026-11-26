@@ -37,6 +37,7 @@ struct Settings {
   std::wstring backend = L"direct-vulkan";
   bool vulkan_on_modded_driver = false;
   bool angle = false;
+  bool compressed_textures = false;
   std::wstring frame_rate_limit = L"-1";
   std::wstring vsync = L"auto";
   std::wstring present_mode = L"auto";
