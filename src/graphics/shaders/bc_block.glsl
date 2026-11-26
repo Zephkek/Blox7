@@ -101,9 +101,6 @@ int BcScaled(int value, int factor, int scale) {
 }
 
 int BcSnap(int value, int codec, int parity) {
-  if (codec == kBcByte) {
-    return value;
-  }
   if (codec == kBcUnique) {
     const int snapped = (((value - parity + 1) >> 1) << 1) + parity;
     return snapped > 255 ? snapped - 2 : snapped;
@@ -849,10 +846,10 @@ void BcPack(int mode, int shape, int lone, int wide_lone, uint low, uint high, u
   const bool lone_first = mode == 4 && wide_lone == 0;
   for (int field = 0; field < (planes ? 32 : 16); ++field) {
     const int i = field & 15;
-    const bool from_lone = (field >= 16) != lone_first && planes;
+    const bool from_lone = (field >= 16) != lone_first;
     const int width = from_lone ? lone_bits : bits;
     const int level = from_lone ? BcLevel(lone_low, lone_high, i) : BcLevel(levels_low, levels_high, i);
-    BcPut(w0, w1, w2, w3, cursor, level, i == 0 || (i == anchor && paired) ? width - 1 : width);
+    BcPut(w0, w1, w2, w3, cursor, level, i == 0 || i == anchor ? width - 1 : width);
   }
   block[0] = w0;
   block[1] = w1;
@@ -885,8 +882,11 @@ int BcEtcKind(BC_IN_ARRAY(uint, b, 8), bool punchthrough) {
     const int delta = int(b[c] & 7u);
     const int sum = int(b[c] >> 3) + (delta >= 4 ? delta - 8 : delta);
     if (sum < 0 || sum > 31) {
-      paint = paint || c < 2;
-      planar = planar || c == 2;
+      if (c < 2) {
+        paint = true;
+      } else {
+        planar = true;
+      }
     }
   }
   if (!individual && paint) {
@@ -1277,10 +1277,6 @@ void BcEncodeScalar(BC_IN_ARRAY(int, values, 16), uint valid, bool is_signed, BC
       low = min(low, wanted);
       high = max(high, wanted);
     }
-  }
-  if (high < low) {
-    low = 0;
-    high = 0;
   }
   uint best_levels_low = 0u;
   uint best_levels_high = 0u;
