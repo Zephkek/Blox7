@@ -42,6 +42,8 @@ struct EtcDecodeJob {
   std::uint8_t* destination = nullptr;
   std::size_t destination_bytes = 0;
   bool ok = false;
+  bool (*rows)(const EtcDecodeJob& job, std::uint32_t first_block_row,
+               std::uint32_t block_row_count) = nullptr;
 };
 
 void DecodeEtcJobs(EtcDecodeJob* jobs, std::size_t count,

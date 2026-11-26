@@ -301,6 +301,10 @@ struct DecodeBandQueue {
       }
       const DecodeBand& band = bands[index];
       const EtcDecodeJob& job = *band.job;
+      if (job.rows != nullptr) {
+        job.rows(job, band.first_block_row, band.block_row_count);
+        continue;
+      }
       DecodeEtcImageBlockRows(job.format, job.source, job.source_bytes,
                               job.width, job.height, band.first_block_row,
                               band.block_row_count, job.destination,
@@ -412,8 +416,12 @@ void DecodeEtcJobs(EtcDecodeJob* jobs, std::size_t count,
   std::uint64_t total_blocks = 0;
   for (std::size_t index = 0; index < count; ++index) {
     EtcDecodeJob& job = jobs[index];
-    job.ok = ImageFits(job.format, job.source, job.source_bytes, job.width,
-                       job.height, job.destination, job.destination_bytes);
+    job.ok =
+        job.rows != nullptr
+            ? job.source != nullptr && job.destination != nullptr &&
+                  job.width != 0 && job.height != 0
+            : ImageFits(job.format, job.source, job.source_bytes, job.width,
+                        job.height, job.destination, job.destination_bytes);
     if (!job.ok) {
       continue;
     }
