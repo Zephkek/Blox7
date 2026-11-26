@@ -259,6 +259,7 @@ struct AdapterState {
   std::uint64_t lost_surface_noted_ns = 0;
   std::vector<VkDevice> lost_devices;
   std::uint64_t lost_device_noted_ns = 0;
+  std::uint64_t lost_device_times_ns[4] = {};
   std::unordered_map<VkInstance, std::string> instance_keys;
   std::unordered_map<VkPhysicalDevice, VkInstance> physical_device_instances;
   std::unordered_map<VkDevice, std::string> device_keys;
@@ -476,8 +477,11 @@ void NoteSwapchainResult(VkSwapchainKHR swapchain, VkResult result) {
   NoteLostSurface(surface);
 }
 
+extern "C" [[noreturn]] void __w32_fatal(const char* message);
+
 void NoteLostDevice(VkDevice device, bool drawing) {
   constexpr std::uint64_t kRepeatNs = 1000000000ULL;
+  constexpr std::uint64_t kGiveUpNs = 60000000000ULL;
   if (device == VK_NULL_HANDLE) {
     return;
   }
@@ -488,6 +492,7 @@ void NoteLostDevice(VkDevice device, bool drawing) {
       static_cast<std::uint64_t>(now.tv_nsec);
   bool first = false;
   bool unanswered = false;
+  bool fifth = false;
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
@@ -496,12 +501,25 @@ void NoteLostDevice(VkDevice device, bool drawing) {
     if (first) {
       state.lost_devices.push_back(device);
       state.lost_device_noted_ns = now_ns;
+      std::uint64_t* const times = state.lost_device_times_ns;
+      fifth = times[0] != 0 && now_ns - times[0] < kGiveUpNs;
+      times[0] = times[1];
+      times[1] = times[2];
+      times[2] = times[3];
+      times[3] = now_ns;
     }
     unanswered =
         drawing && now_ns - state.lost_device_noted_ns >= kRepeatNs;
     if (unanswered) {
       state.lost_device_noted_ns = now_ns;
     }
+  }
+  if (fifth) {
+    std::fprintf(stderr,
+                 "  [vulkan] the host lost the device for the fifth time in a "
+                 "minute (VK_ERROR_DEVICE_LOST); closing\n");
+    __w32_fatal("The graphics driver keeps restarting, Roblox can't go on. "
+                "Start it again.");
   }
   if (first) {
     std::fprintf(stderr,
