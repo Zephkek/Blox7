@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -15,18 +16,22 @@
 #include <SDL3/SDL_vulkan.h>
 #endif
 
+#include "blox7/graphics/etc2_bc_encoder.h"
 #include "blox7/graphics/etc2_decoder.h"
 #include "blox7/graphics/vulkan_etc2_emulation.h"
 #include "blox7/graphics/vulkan_etc2_gpu_decoder.h"
 
 namespace {
 
+using blox7::graphics::BcBlockBytes;
 using blox7::graphics::DecodeEtcImage;
+using blox7::graphics::EncodeEtcImageToBc;
 using blox7::graphics::DecodeEtcJobs;
 using blox7::graphics::Etc2EmulatedFormat;
 using blox7::graphics::Etc2GpuCopy;
 using blox7::graphics::Etc2GpuDecodable;
 using blox7::graphics::Etc2GpuDecoder;
+using blox7::graphics::Etc2GpuEncoder;
 using blox7::graphics::Etc2GpuUpload;
 using blox7::graphics::EtcBlockBytes;
 using blox7::graphics::EtcDecodedTexelBytes;
@@ -38,6 +43,8 @@ using blox7::graphics::VulkanEtc2Emulation;
 #define INSTANCE_FUNCTIONS(X)               \
   X(EnumeratePhysicalDevices)               \
   X(GetPhysicalDeviceProperties)            \
+  X(GetPhysicalDeviceFeatures)              \
+  X(GetPhysicalDeviceFormatProperties)      \
   X(GetPhysicalDeviceQueueFamilyProperties) \
   X(GetPhysicalDeviceMemoryProperties)      \
   X(CreateDevice)                           \
@@ -68,6 +75,10 @@ using blox7::graphics::VulkanEtc2Emulation;
   X(CmdPipelineBarrier)          \
   X(CmdFillBuffer)               \
   X(CmdCopyBuffer)               \
+  X(CreateImage)                 \
+  X(DestroyImage)                \
+  X(CmdCopyBufferToImage)        \
+  X(CmdBlitImage)                \
   X(CmdCopyImageToBuffer)
 
 struct Vk {
@@ -97,6 +108,7 @@ struct Queue {
 std::vector<Queue> queues;
 int failures = 0;
 bool has_copy2 = false;
+bool has_bc = false;
 
 const EtcFormat kFormats[] = {
     EtcFormat::kEtc2Rgb8,  EtcFormat::kEtc2Rgb8A1,   EtcFormat::kEtc2Rgba8,
@@ -351,7 +363,15 @@ struct Spec {
   VkDeviceSize target_gap = 0;
   std::size_t source_buffer = 0;
   std::size_t target_buffer = 0;
+  bool bc = false;
 };
+
+std::size_t StoredLayerBytes(const Spec& spec) {
+  return spec.bc ? static_cast<std::size_t>((spec.width + 3) / 4) *
+                       ((spec.height + 3) / 4) * BcBlockBytes(spec.format)
+                 : static_cast<std::size_t>(spec.width) * spec.height *
+                       EtcDecodedTexelBytes(spec.format);
+}
 
 using Filler = void (*)(EtcFormat format, std::uint8_t* blocks,
                         std::size_t count);
@@ -375,10 +395,14 @@ struct Options {
 void ShowMismatch(const Spec& spec, std::uint32_t layer, std::size_t byte,
                   const std::uint8_t* packed, const std::uint8_t* gpu,
                   const std::uint8_t* cpu) {
-  const std::size_t texel_bytes = EtcDecodedTexelBytes(spec.format);
+  const std::size_t texel_bytes =
+      spec.bc ? BcBlockBytes(spec.format) : EtcDecodedTexelBytes(spec.format);
   const std::size_t texel = byte / texel_bytes;
-  const std::uint32_t x = static_cast<std::uint32_t>(texel % spec.width);
-  const std::uint32_t y = static_cast<std::uint32_t>(texel / spec.width);
+  const std::uint32_t row = spec.bc ? (spec.width + 3) / 4 : spec.width;
+  const std::uint32_t x =
+      static_cast<std::uint32_t>(texel % row) * (spec.bc ? 4 : 1);
+  const std::uint32_t y =
+      static_cast<std::uint32_t>(texel / row) * (spec.bc ? 4 : 1);
   const std::size_t block_bytes = EtcBlockBytes(spec.format);
   const std::size_t block = (y / 4) * ((spec.width + 3) / 4) + (x / 4);
   std::printf("    %s %ux%u layer %u texel (%u,%u) block", Name(spec.format),
@@ -426,11 +450,10 @@ bool Run(const std::string& name, Etc2GpuDecoder& decoder, Queue& queue,
     source_end[spec.source_buffer] =
         upload.source_offset + (spec.layers - 1) * upload.source_layer_stride +
         (block_rows - 1) * upload.source_row_stride + blocks_wide * block_bytes;
+    upload.bc = spec.bc;
     upload.target_offset = target_end[spec.target_buffer] + spec.target_gap;
     target_end[spec.target_buffer] =
-        upload.target_offset + VkDeviceSize{spec.width} * spec.height *
-                                   EtcDecodedTexelBytes(spec.format) *
-                                   spec.layers;
+        upload.target_offset + StoredLayerBytes(spec) * spec.layers;
     outcome.blocks += blocks_wide * block_rows * spec.layers;
   }
   std::vector<Buffer> sources(source_count);
@@ -496,9 +519,7 @@ bool Run(const std::string& name, Etc2GpuDecoder& decoder, Queue& queue,
     const std::size_t block_bytes = EtcBlockBytes(spec.format);
     const std::size_t blocks_wide = (spec.width + 3) / 4;
     const std::size_t block_rows = (spec.height + 3) / 4;
-    const std::size_t layer_bytes = static_cast<std::size_t>(spec.width) *
-                                    spec.height *
-                                    EtcDecodedTexelBytes(spec.format);
+    const std::size_t layer_bytes = StoredLayerBytes(spec);
     std::vector<std::uint8_t> packed(blocks_wide * block_rows * block_bytes);
     std::vector<std::uint8_t> expected(layer_bytes);
     for (std::uint32_t layer = 0; layer < spec.layers; ++layer) {
@@ -526,9 +547,13 @@ bool Run(const std::string& name, Etc2GpuDecoder& decoder, Queue& queue,
           }
         }
       }
-      if (!DecodeEtcImage(spec.format, packed.data(), packed.size(),
-                          spec.width, spec.height, expected.data(),
-                          expected.size())) {
+      if (!(spec.bc ? EncodeEtcImageToBc(spec.format, packed.data(),
+                                         packed.size(), spec.width,
+                                         spec.height, expected.data(),
+                                         expected.size())
+                    : DecodeEtcImage(spec.format, packed.data(), packed.size(),
+                                     spec.width, spec.height, expected.data(),
+                                     expected.size()))) {
         std::printf("    CPU decoder refused %s %ux%u\n", Name(spec.format),
                     spec.width, spec.height);
         ok = false;
@@ -540,7 +565,9 @@ bool Run(const std::string& name, Etc2GpuDecoder& decoder, Queue& queue,
       std::fill(mask.begin() + offset, mask.begin() + offset + layer_bytes,
                 true);
       if (std::memcmp(gpu, expected.data(), layer_bytes) != 0) {
-        const std::size_t texel_bytes = EtcDecodedTexelBytes(spec.format);
+        const std::size_t texel_bytes = spec.bc
+                                            ? BcBlockBytes(spec.format)
+                                            : EtcDecodedTexelBytes(spec.format);
         for (std::size_t byte = 0; byte < layer_bytes; byte += texel_bytes) {
           if (std::memcmp(gpu + byte, expected.data() + byte, texel_bytes) !=
               0) {
@@ -816,6 +843,530 @@ void DecoderTests(Etc2GpuDecoder& decoder, Etc2GpuDecoder& stress,
   }
 }
 
+void EncoderTests(Etc2GpuDecoder& encoder, Etc2GpuDecoder& stress,
+                  Etc2GpuDecoder& plain, Queue& main,
+                  std::uint64_t random_blocks) {
+  for (EtcFormat format : kFormats) {
+    if (IsColor(format) && format != EtcFormat::kEtc2Rgba8) {
+      continue;
+    }
+    Spec spec;
+    spec.format = format;
+    spec.width = 1024;
+    spec.height = 1024;
+    spec.bc = true;
+    Options options;
+    options.fill = SweepEac;
+    Run(std::string("encoded: every EAC base, multiplier and table, ") +
+            Name(format),
+        encoder, main, {spec}, options);
+  }
+
+  for (EtcFormat format : kFormats) {
+    std::vector<Spec> specs;
+    std::uint64_t blocks = 0;
+    while (blocks < random_blocks) {
+      Spec spec;
+      spec.format = format;
+      spec.width = 2048;
+      spec.height = 2048;
+      spec.bc = true;
+      spec.target_buffer = specs.size();
+      specs.push_back(spec);
+      blocks += 512 * 512;
+    }
+    Run(std::string("encoded: random blocks, ") + Name(format), encoder, main,
+        specs);
+  }
+
+  const std::uint32_t sizes[][2] = {
+      {1, 1},     {2, 1},   {1, 2},    {2, 2},   {3, 3},    {4, 4},
+      {5, 5},     {6, 2},   {7, 9},    {8, 8},   {12, 4},   {13, 11},
+      {16, 16},   {31, 33}, {64, 64},  {100, 37}, {257, 129}, {4, 1024},
+      {1024, 4}};
+  Options quiet;
+  quiet.quiet = true;
+  for (EtcFormat format : kFormats) {
+    std::vector<Spec> batch;
+    bool single_ok = true;
+    for (const auto& size : sizes) {
+      Spec spec;
+      spec.format = format;
+      spec.width = size[0];
+      spec.height = size[1];
+      spec.bc = true;
+      batch.push_back(spec);
+      single_ok = Run("single", encoder, main, {spec}, quiet) && single_ok;
+    }
+    Result(single_ok,
+           std::string("encoded: every size alone, ") + Name(format));
+    Run(std::string("encoded: every size in one batch, ") + Name(format),
+        encoder, main, batch);
+  }
+
+  for (EtcFormat format : kFormats) {
+    std::vector<Spec> specs;
+    const std::uint32_t shapes[][7] = {{37, 21, 3, 2, 3, 0, 0},
+                                       {64, 8, 6, 0, 0, 0, 0},
+                                       {2, 2, 5, 1, 1, 0, 0},
+                                       {18, 30, 2, 0, 0, 4, 16},
+                                       {33, 7, 4, 7, 0, 8, 48},
+                                       {90, 90, 1, 3, 0, 4100, 4112}};
+    for (const auto& shape : shapes) {
+      Spec spec;
+      spec.format = format;
+      spec.width = shape[0];
+      spec.height = shape[1];
+      spec.layers = shape[2];
+      spec.row_pad = shape[3];
+      spec.layer_pad = shape[4];
+      spec.source_gap = shape[5];
+      spec.target_gap = shape[6];
+      spec.bc = true;
+      specs.push_back(spec);
+    }
+    Run(std::string("encoded: layers, padded rows and layers, odd offsets, ") +
+            Name(format),
+        encoder, main, specs);
+  }
+
+  for (int round = 0; round < 2; ++round) {
+    Etc2GpuDecoder& subject = round == 0 ? encoder : stress;
+    const std::uint32_t max_width = round == 0 ? 300 : 200;
+    bool all = true;
+    std::uint64_t blocks = 0;
+    std::uint64_t uploads = 0;
+    for (int iteration = 0; iteration < 40; ++iteration) {
+      std::vector<Spec> specs(1 + Below(60));
+      for (Spec& spec : specs) {
+        spec.format = kFormats[Below(7)];
+        spec.bc = Below(4) != 0;
+        spec.width = 1 + Below(max_width);
+        if (!spec.bc) {
+          spec.width = std::min(EvenFor(spec.format, spec.width), max_width);
+        }
+        spec.height = 1 + Below(300);
+        spec.layers = 1 + Below(4);
+        spec.row_pad = Below(4);
+        spec.layer_pad = Below(3);
+        spec.source_gap = Below(17) * 4;
+        spec.target_gap = Below(17) * 4;
+        spec.source_buffer = Below(3);
+        spec.target_buffer = Below(3);
+        blocks += VkDeviceSize{(spec.width + 3) / 4} *
+                  ((spec.height + 3) / 4) * spec.layers;
+      }
+      uploads += specs.size();
+      all = Run("random batch", subject, main, specs, quiet) && all;
+    }
+    Result(all, std::string(round == 0
+                                ? "40 random batches of encodes and decodes"
+                                : "40 random batches of encodes and decodes, "
+                                  "split into bands and passes by tiny "
+                                  "limits") +
+                    ", " + std::to_string(uploads) + " uploads, " +
+                    std::to_string(blocks) + " blocks");
+  }
+
+  {
+    Spec spec;
+    spec.format = EtcFormat::kEtc2Rgb8;
+    spec.width = 64;
+    spec.height = 64;
+    spec.bc = true;
+    Options refused;
+    refused.expect = false;
+    Run("a decoder built without the encoder refuses an encode untouched",
+        plain, main, {spec}, refused);
+  }
+
+  for (Queue& queue : queues) {
+    if (&queue == &main) {
+      continue;
+    }
+    std::vector<Spec> specs;
+    for (EtcFormat format : kFormats) {
+      Spec spec;
+      spec.format = format;
+      spec.width = 77;
+      spec.height = 45;
+      spec.layers = 2;
+      spec.row_pad = 1;
+      spec.bc = true;
+      specs.push_back(spec);
+    }
+    Options options;
+    options.expect = queue.compute;
+    Run(std::string("encoded: every format on the ") + queue.name + " queue",
+        encoder, queue, specs, options);
+  }
+}
+
+void PlainBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count) {
+  const std::size_t block_bytes = EtcBlockBytes(format);
+  for (std::size_t index = 0; index < count; ++index) {
+    std::uint8_t* block = blocks + index * block_bytes;
+    if (IsColor(format)) {
+      std::uint8_t* color = format == EtcFormat::kEtc2Rgba8 ? block + 8 : block;
+      const std::uint32_t pick = Below(4);
+      color[0] = static_cast<std::uint8_t>(Below(32) << 3);
+      color[1] = static_cast<std::uint8_t>(Below(32) << 3);
+      color[2] = static_cast<std::uint8_t>(Below(32) << 3);
+      const std::uint32_t table = Below(8);
+      color[3] = static_cast<std::uint8_t>((table << 5) | (table << 2) | 2 |
+                                           Below(2));
+      color[4] = color[5] = (pick & 2) != 0 ? 0xff : 0;
+      color[6] = color[7] = (pick & 1) != 0 ? 0xff : 0;
+      if (format == EtcFormat::kEtc2Rgba8) {
+        block[0] = static_cast<std::uint8_t>(Below(256));
+        block[1] = static_cast<std::uint8_t>(Below(16));
+      }
+      continue;
+    }
+    for (std::size_t channel = 0; channel < block_bytes / 8; ++channel) {
+      std::uint8_t* eac = block + channel * 8;
+      std::uint64_t bits = 0;
+      const std::uint64_t pick = Below(8);
+      for (int texel = 0; texel < 16; ++texel) {
+        bits |= pick << (texel * 3);
+      }
+      eac[0] = static_cast<std::uint8_t>(Below(256));
+      eac[1] = static_cast<std::uint8_t>(Below(256));
+      for (int byte = 0; byte < 6; ++byte) {
+        eac[2 + byte] = static_cast<std::uint8_t>(bits >> (40 - byte * 8));
+      }
+    }
+  }
+}
+
+void GentleBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count) {
+  static const std::uint8_t kSteps[5] = {0, 1, 2, 7, 6};
+  const std::size_t block_bytes = EtcBlockBytes(format);
+  for (std::size_t index = 0; index < count; ++index) {
+    std::uint8_t* block = blocks + index * block_bytes;
+    if (IsColor(format)) {
+      std::uint8_t* color = format == EtcFormat::kEtc2Rgba8 ? block + 8 : block;
+      for (int channel = 0; channel < 3; ++channel) {
+        color[channel] = static_cast<std::uint8_t>(((4 + Below(24)) << 3) |
+                                                   kSteps[Below(5)]);
+      }
+      color[3] = static_cast<std::uint8_t>((Below(3) << 5) | (Below(3) << 2) |
+                                           2 | Below(2));
+      if (format == EtcFormat::kEtc2Rgba8) {
+        block[0] = static_cast<std::uint8_t>(Below(256));
+        block[1] = static_cast<std::uint8_t>(((1 + Below(4)) << 4) | Below(16));
+      }
+      continue;
+    }
+    for (std::size_t channel = 0; channel < block_bytes / 8; ++channel) {
+      block[channel * 8] = static_cast<std::uint8_t>(Below(256));
+      block[channel * 8 + 1] =
+          static_cast<std::uint8_t>(((1 + Below(4)) << 4) | Below(16));
+    }
+  }
+}
+
+const char* g_wanted_kind = "";
+
+void KindBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count) {
+  for (std::size_t index = 0; index < count; ++index) {
+    std::uint8_t* block = blocks + index * 8;
+    do {
+      FillRandom(block, 8);
+    } while (std::strcmp(RgbMode(block, false), g_wanted_kind) != 0);
+  }
+}
+
+VkImage MakeImage(VkFormat format, std::uint32_t width, std::uint32_t height,
+                  VkDeviceMemory* memory) {
+  VkImageCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  info.imageType = VK_IMAGE_TYPE_2D;
+  info.format = format;
+  info.extent = {width, height, 1};
+  info.mipLevels = 1;
+  info.arrayLayers = 1;
+  info.samples = VK_SAMPLE_COUNT_1_BIT;
+  info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  VkImage image = VK_NULL_HANDLE;
+  if (vk.CreateImage(device, &info, nullptr, &image) != VK_SUCCESS) {
+    return VK_NULL_HANDLE;
+  }
+  VkMemoryRequirements requirements{};
+  vk.GetImageMemoryRequirements(device, image, &requirements);
+  VkMemoryAllocateInfo allocate{};
+  allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocate.allocationSize = requirements.size;
+  allocate.memoryTypeIndex = MemoryType(requirements.memoryTypeBits,
+                                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  vk.AllocateMemory(device, &allocate, nullptr, memory);
+  vk.BindImageMemory(device, image, *memory, 0);
+  return image;
+}
+
+void MoveImage(VkCommandBuffer command, VkImage image, VkImageLayout from,
+               VkImageLayout to, std::uint32_t mips = 1,
+               std::uint32_t layers = 1) {
+  VkImageMemoryBarrier barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = image;
+  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mips, 0, layers};
+  barrier.oldLayout = from;
+  barrier.newLayout = to;
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask =
+      VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+  vk.CmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                        nullptr, 1, &barrier);
+}
+
+struct StoredFormats {
+  VkFormat stored;
+  VkFormat plain;
+};
+
+StoredFormats FormatsFor(EtcFormat format) {
+  switch (format) {
+    case EtcFormat::kEacR11:
+      return {VK_FORMAT_BC4_UNORM_BLOCK, VK_FORMAT_R16_UNORM};
+    case EtcFormat::kEacR11Signed:
+      return {VK_FORMAT_BC4_SNORM_BLOCK, VK_FORMAT_R16_SNORM};
+    case EtcFormat::kEacRg11:
+      return {VK_FORMAT_BC5_UNORM_BLOCK, VK_FORMAT_R16G16_UNORM};
+    case EtcFormat::kEacRg11Signed:
+      return {VK_FORMAT_BC5_SNORM_BLOCK, VK_FORMAT_R16G16_SNORM};
+    default:
+      return {VK_FORMAT_BC7_UNORM_BLOCK, VK_FORMAT_R8G8B8A8_UNORM};
+  }
+}
+
+bool ThroughDriver(Queue& queue, EtcFormat format, std::uint32_t width,
+                   std::uint32_t height, const Buffer& blocks,
+                   std::vector<std::uint8_t>* texels) {
+  const StoredFormats formats = FormatsFor(format);
+  VkFormatProperties plain_properties{};
+  vk.GetPhysicalDeviceFormatProperties(physical, formats.plain,
+                                       &plain_properties);
+  VkFormatProperties stored_properties{};
+  vk.GetPhysicalDeviceFormatProperties(physical, formats.stored,
+                                       &stored_properties);
+  if ((plain_properties.optimalTilingFeatures &
+       VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0 ||
+      (stored_properties.optimalTilingFeatures &
+       VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0) {
+    return false;
+  }
+  VkDeviceMemory stored_memory = VK_NULL_HANDLE;
+  VkDeviceMemory plain_memory = VK_NULL_HANDLE;
+  const VkImage stored = MakeImage(formats.stored, width, height, &stored_memory);
+  const VkImage plain = MakeImage(formats.plain, width, height, &plain_memory);
+  const std::size_t bytes =
+      static_cast<std::size_t>(width) * height * EtcDecodedTexelBytes(format);
+  Buffer readback = MakeBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+  Begin(queue);
+  MoveImage(queue.command, stored, VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+  VkBufferImageCopy region{};
+  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  region.imageExtent = {width, height, 1};
+  vk.CmdCopyBufferToImage(queue.command, blocks.buffer, stored,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+  MoveImage(queue.command, stored, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  MoveImage(queue.command, plain, VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+  VkImageBlit blit{};
+  blit.srcSubresource = region.imageSubresource;
+  blit.dstSubresource = region.imageSubresource;
+  blit.srcOffsets[1] = {static_cast<std::int32_t>(width),
+                        static_cast<std::int32_t>(height), 1};
+  blit.dstOffsets[1] = blit.srcOffsets[1];
+  vk.CmdBlitImage(queue.command, stored, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                  plain, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                  VK_FILTER_NEAREST);
+  MoveImage(queue.command, plain, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+  vk.CmdCopyImageToBuffer(queue.command, plain,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer,
+                          1, &region);
+  HostBarrier(queue.command);
+  vk.EndCommandBuffer(queue.command);
+  const bool ok = SubmitAndWait(queue);
+  texels->assign(readback.data, readback.data + bytes);
+  FreeBuffer(&readback);
+  vk.DestroyImage(device, stored, nullptr);
+  vk.DestroyImage(device, plain, nullptr);
+  vk.FreeMemory(device, stored_memory, nullptr);
+  vk.FreeMemory(device, plain_memory, nullptr);
+  return ok;
+}
+
+struct Fidelity {
+  double color = 0;
+  double alpha = 0;
+  int worst = 0;
+  bool ran = false;
+};
+
+Fidelity StoredAgainstExact(Etc2GpuDecoder& encoder, Queue& queue,
+                            EtcFormat format, Filler fill) {
+  const std::uint32_t kSize = 256;
+  const std::size_t blocks = (kSize / 4) * (kSize / 4);
+  const std::size_t etc_bytes = blocks * EtcBlockBytes(format);
+  const std::size_t bc_bytes = blocks * BcBlockBytes(format);
+  Buffer source = MakeBuffer(etc_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+  Buffer stored = MakeBuffer(bc_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+  FillRandom(source.data, source.size);
+  if (fill != nullptr) {
+    fill(format, source.data, blocks);
+  }
+  Etc2GpuUpload upload;
+  upload.format = format;
+  upload.source = source.buffer;
+  upload.source_row_stride = (kSize / 4) * EtcBlockBytes(format);
+  upload.target = stored.buffer;
+  upload.width = kSize;
+  upload.height = kSize;
+  upload.bc = true;
+  Fidelity result;
+  std::vector<std::uint8_t> got;
+  if (encoder.Decode(queue.queue, queue.family, &upload, 1) &&
+      vk.QueueWaitIdle(queue.queue) == VK_SUCCESS &&
+      ThroughDriver(queue, format, kSize, kSize, stored, &got)) {
+    std::vector<std::uint8_t> exact(got.size());
+    DecodeEtcImage(format, source.data, etc_bytes, kSize, kSize, exact.data(),
+                   exact.size());
+    result.ran = true;
+    double color = 0;
+    double alpha = 0;
+    const bool wide = EtcDecodedTexelBytes(format) == 4 && !IsColor(format);
+    const std::size_t texels = static_cast<std::size_t>(kSize) * kSize;
+    const bool is_signed = format == EtcFormat::kEacR11Signed ||
+                           format == EtcFormat::kEacRg11Signed;
+    for (std::size_t texel = 0; texel < texels; ++texel) {
+      if (IsColor(format)) {
+        for (int channel = 0; channel < 4; ++channel) {
+          const int gap = static_cast<int>(got[texel * 4 + channel]) -
+                          exact[texel * 4 + channel];
+          (channel < 3 ? color : alpha) += static_cast<double>(gap) * gap;
+          result.worst = std::max(result.worst, std::abs(gap));
+        }
+        continue;
+      }
+      for (int channel = 0; channel < (wide ? 2 : 1); ++channel) {
+        const std::size_t at = (texel * (wide ? 2 : 1) + channel) * 2;
+        std::uint16_t a = 0;
+        std::uint16_t b = 0;
+        std::memcpy(&a, got.data() + at, 2);
+        std::memcpy(&b, exact.data() + at, 2);
+        const int gap = is_signed ? static_cast<std::int16_t>(a) -
+                                        static_cast<std::int16_t>(b)
+                                  : static_cast<int>(a) - b;
+        color += static_cast<double>(gap) * gap;
+        result.worst = std::max(result.worst, std::abs(gap));
+      }
+    }
+    const double peak = IsColor(format) ? 255.0 : 65535.0;
+    const double samples =
+        static_cast<double>(texels) * (IsColor(format) ? 3 : (wide ? 2 : 1));
+    result.color =
+        color == 0 ? 99.0 : 10 * std::log10(peak * peak * samples / color);
+    result.alpha =
+        alpha == 0 ? 99.0 : 10 * std::log10(peak * peak * texels / alpha);
+  }
+  FreeBuffer(&source);
+  FreeBuffer(&stored);
+  return result;
+}
+
+void StoredFidelity(Etc2GpuDecoder& encoder, Queue& queue) {
+  for (EtcFormat format : kFormats) {
+    const Fidelity plain =
+        StoredAgainstExact(encoder, queue, format, PlainBlocks);
+    const Fidelity gentle =
+        StoredAgainstExact(encoder, queue, format, GentleBlocks);
+    const Fidelity random = StoredAgainstExact(encoder, queue, format, nullptr);
+    if (!plain.ran || !gentle.ran || !random.ran) {
+      std::printf("     %s: the driver cannot blit this pair of formats, "
+                  "stored image not read back\n",
+                  Name(format));
+      continue;
+    }
+    const bool color = IsColor(format);
+    const bool mixed = format == EtcFormat::kEtc2Rgba8;
+    const bool ok = (color ? plain.worst == 0 : plain.color >= 70) &&
+                    gentle.color >= (mixed ? 32 : (color ? 48 : 42)) &&
+                    gentle.alpha >= 36 && random.color >= (color ? 20 : 34) &&
+                    random.alpha >= 28;
+    char line[320];
+    std::snprintf(line, sizeof(line),
+                  "%s stored as BC and read back through the driver: one "
+                  "colour blocks %s (%.1f dB), gentle blocks %.1f dB (alpha "
+                  "%.1f dB), random blocks %.1f dB (alpha %.1f dB)",
+                  Name(format), plain.worst == 0 ? "exact" : "close",
+                  plain.color, gentle.color, gentle.alpha, random.color,
+                  random.alpha);
+    Result(ok, line);
+  }
+}
+
+void StoredKinds(Etc2GpuDecoder& encoder, Queue& queue) {
+  const struct {
+    const char* kind;
+    double floor;
+  } kinds[] = {{"individual", 25}, {"differential", 25.5}, {"T", 31}, {"H", 28}, {"planar", 28}};
+  bool ok = true;
+  char line[320] = "ETC2_RGB8 stored as BC, random blocks of one kind each:";
+  for (const auto& kind : kinds) {
+    g_wanted_kind = kind.kind;
+    const Fidelity result =
+        StoredAgainstExact(encoder, queue, EtcFormat::kEtc2Rgb8, KindBlocks);
+    ok = ok && result.ran && result.color >= kind.floor;
+    char part[64];
+    std::snprintf(part, sizeof(part), " %s %.1f dB", kind.kind, result.color);
+    std::strncat(line, part, sizeof(line) - std::strlen(line) - 1);
+  }
+  Result(ok, line);
+}
+
+void EncoderBenchmark(Etc2GpuDecoder& encoder, Queue& main) {
+  const std::uint32_t kCount = 16;
+  const std::uint32_t kSize = 1024;
+  for (int kind = 0; kind < 3; ++kind) {
+    std::vector<Spec> specs;
+    for (std::uint32_t index = 0; index < kCount; ++index) {
+      Spec spec;
+      spec.format = EtcFormat::kEtc2Rgba8;
+      spec.width = kSize;
+      spec.height = kSize;
+      spec.bc = true;
+      spec.target_buffer = index % 4;
+      specs.push_back(spec);
+    }
+    Outcome warm;
+    Options options;
+    options.quiet = true;
+    options.fill = kind == 0 ? PlainBlocks : (kind == 1 ? GentleBlocks : nullptr);
+    Run("benchmark warm-up", encoder, main, specs, options);
+    options.out = &warm;
+    Run("benchmark", encoder, main, specs, options);
+    std::printf("     encode %u x %ux%u ETC2_RGBA8, %s blocks: GPU %.1f ms "
+                "submit to done, %.1f million blocks a second\n",
+                kCount, kSize, kSize,
+                kind == 0 ? "one colour" : (kind == 1 ? "gentle" : "random"),
+                warm.seconds * 1000, warm.blocks / warm.seconds / 1e6);
+  }
+}
+
 struct CopySpec {
   VkDeviceSize size = 0;
   VkDeviceSize gap = 0;
@@ -944,12 +1495,20 @@ struct ImageCase {
 bool EmulatedUpload(VulkanEtc2Emulation& emulation, Queue& queue,
                     VkFormat format, const ImageCase& shape, bool tracked,
                     bool copy2, bool resubmit, std::uint32_t* gpu_eligible,
-                    std::uint32_t* uploads_total) {
+                    std::uint32_t* uploads_total, bool bc = false) {
   Etc2EmulatedFormat mapped;
   LookupEmulatedEtc2Format(format, &mapped);
   const EtcFormat etc = mapped.etc_format;
   const VkDeviceSize block_bytes = EtcBlockBytes(etc);
-  const VkDeviceSize texel_bytes = EtcDecodedTexelBytes(etc);
+  const auto stored_bytes = [etc, bc](std::uint32_t width,
+                                      std::uint32_t height) {
+    Spec spec;
+    spec.format = etc;
+    spec.width = width;
+    spec.height = height;
+    spec.bc = bc;
+    return StoredLayerBytes(spec);
+  };
 
   VkImageCreateInfo image_info{};
   image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -1024,9 +1583,9 @@ bool EmulatedUpload(VulkanEtc2Emulation& emulation, Queue& queue,
     readback.imageExtent = region.imageExtent;
     readbacks.push_back(readback);
     readback_end +=
-        (VkDeviceSize{width} * height * texel_bytes * shape.layers + 3) / 4 * 4;
+        (stored_bytes(width, height) * shape.layers + 15) / 16 * 16;
     ++*uploads_total;
-    if (Etc2GpuDecodable(etc, width)) {
+    if (bc || Etc2GpuDecodable(etc, width)) {
       ++*gpu_eligible;
     }
   }
@@ -1100,8 +1659,7 @@ bool EmulatedUpload(VulkanEtc2Emulation& emulation, Queue& queue,
           VkDeviceSize{blocks_wide + shape.row_pad} * block_bytes;
       const VkDeviceSize layer_stride =
           VkDeviceSize{block_rows + shape.height_pad} * row_stride;
-      const std::size_t layer_bytes =
-          static_cast<std::size_t>(width) * height * texel_bytes;
+      const std::size_t layer_bytes = stored_bytes(width, height);
       std::vector<std::uint8_t> packed(blocks_wide * block_rows * block_bytes);
       std::vector<std::uint8_t> expected(layer_bytes);
       for (std::uint32_t layer = 0; layer < shape.layers; ++layer) {
@@ -1111,8 +1669,13 @@ bool EmulatedUpload(VulkanEtc2Emulation& emulation, Queue& queue,
                           layer * layer_stride + row * row_stride,
                       blocks_wide * block_bytes);
         }
-        DecodeEtcImage(etc, packed.data(), packed.size(), width, height,
-                       expected.data(), expected.size());
+        if (bc) {
+          EncodeEtcImageToBc(etc, packed.data(), packed.size(), width, height,
+                             expected.data(), expected.size());
+        } else {
+          DecodeEtcImage(etc, packed.data(), packed.size(), width, height,
+                         expected.data(), expected.size());
+        }
         if (std::memcmp(readback.data + readbacks[mip].bufferOffset +
                             layer * layer_bytes,
                         expected.data(), layer_bytes) != 0) {
@@ -1150,7 +1713,8 @@ const std::vector<ImageCase> kFullChains = {{64, 32, 7, 1, 0, 0, 0},
                                             {3, 5, 3, 2, 0, 0, 0}};
 
 bool EmulatedSet(VulkanEtc2Emulation& emulation, Queue& queue, bool gpu_only,
-                 std::uint32_t* eligible, std::uint32_t* total) {
+                 std::uint32_t* eligible, std::uint32_t* total,
+                 bool bc = false) {
   bool ok = true;
   for (VkFormat format : kVkFormats) {
     Etc2EmulatedFormat mapped;
@@ -1166,7 +1730,7 @@ bool EmulatedSet(VulkanEtc2Emulation& emulation, Queue& queue, bool gpu_only,
         }
         return true;
       };
-      if (gpu_only && narrow) {
+      if (gpu_only && narrow && !bc) {
         while (used.mips > 1 && !all_even(used.mips)) {
           --used.mips;
         }
@@ -1177,7 +1741,7 @@ bool EmulatedSet(VulkanEtc2Emulation& emulation, Queue& queue, bool gpu_only,
       for (int variant = 0; variant < 2; ++variant) {
         ok = EmulatedUpload(emulation, queue, format, used, !gpu_only,
                             variant == 1 && has_copy2, variant == 1, eligible,
-                            total) &&
+                            total, bc) &&
              ok;
       }
     }
@@ -1240,6 +1804,292 @@ void EmulationTests(PFN_vkGetDeviceProcAddr gdpa) {
                    " uploads, images read back match the CPU decode");
     emulation.DestroyDevice(device);
   }
+}
+
+bool GrownTexture(VulkanEtc2Emulation& emulation, Queue& queue,
+                  VkFormat format, bool bc) {
+  Etc2EmulatedFormat mapped;
+  LookupEmulatedEtc2Format(format, &mapped);
+  const EtcFormat etc = mapped.etc_format;
+  const std::uint32_t kSmall = 64;
+  const std::uint32_t kSmallMips = 7;
+  const VkDeviceSize block_bytes = EtcBlockBytes(etc);
+  const auto stored_bytes = [etc, bc](std::uint32_t size) {
+    Spec spec;
+    spec.format = etc;
+    spec.width = size;
+    spec.height = size;
+    spec.bc = bc;
+    return StoredLayerBytes(spec);
+  };
+  VkImage images[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkDeviceMemory memories[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  for (int index = 0; index < 2; ++index) {
+    VkImageCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = format;
+    info.extent = {kSmall << index, kSmall << index, 1};
+    info.mipLevels = kSmallMips + index;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (emulation.CreateImage(device, &info, nullptr, &images[index]) !=
+        VK_SUCCESS) {
+      std::printf("    emulated vkCreateImage failed\n");
+      return false;
+    }
+    VkMemoryRequirements requirements{};
+    vk.GetImageMemoryRequirements(device, images[index], &requirements);
+    VkMemoryAllocateInfo allocate{};
+    allocate.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocate.allocationSize = requirements.size;
+    allocate.memoryTypeIndex = MemoryType(requirements.memoryTypeBits,
+                                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vk.AllocateMemory(device, &allocate, nullptr, &memories[index]);
+    vk.BindImageMemory(device, images[index], memories[index], 0);
+  }
+
+  std::vector<VkBufferImageCopy> small_uploads;
+  std::vector<VkImageCopy> copies;
+  std::vector<VkBufferImageCopy> readbacks;
+  VkDeviceSize source_end = 0;
+  VkDeviceSize readback_end = 0;
+  for (std::uint32_t mip = 0; mip < kSmallMips; ++mip) {
+    const std::uint32_t size = std::max(1U, kSmall >> mip);
+    VkBufferImageCopy upload{};
+    upload.bufferOffset = source_end;
+    upload.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1};
+    upload.imageExtent = {size, size, 1};
+    source_end += VkDeviceSize{(size + 3) / 4} * ((size + 3) / 4) * block_bytes;
+    small_uploads.push_back(upload);
+    VkImageCopy copy{};
+    copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1};
+    copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip + 1, 0, 1};
+    copy.extent = {size, size, 1};
+    copies.push_back(copy);
+  }
+  VkBufferImageCopy top{};
+  top.bufferOffset = source_end;
+  top.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+  top.imageExtent = {kSmall * 2, kSmall * 2, 1};
+  source_end += VkDeviceSize{kSmall / 2} * (kSmall / 2) * block_bytes;
+  for (std::uint32_t mip = 0; mip <= kSmallMips; ++mip) {
+    const std::uint32_t size = std::max(1U, (kSmall * 2) >> mip);
+    VkBufferImageCopy readback{};
+    readback.bufferOffset = readback_end;
+    readback.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1};
+    readback.imageExtent = {size, size, 1};
+    readbacks.push_back(readback);
+    readback_end += (stored_bytes(size) + 15) / 16 * 16;
+  }
+  Buffer source = MakeBuffer(source_end + 64, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                             &emulation);
+  Buffer readback =
+      MakeBuffer(readback_end + 64, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+  FillRandom(source.data, source.size);
+  std::memset(readback.data, 0xcd, readback.size);
+
+  Begin(queue);
+  MoveImage(queue.command, images[0], VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kSmallMips);
+  MoveImage(queue.command, images[1], VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kSmallMips + 1);
+  emulation.CmdCopyBufferToImage(
+      device, queue.command, source.buffer, images[0],
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      static_cast<std::uint32_t>(small_uploads.size()), small_uploads.data());
+  MoveImage(queue.command, images[0], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, kSmallMips);
+  emulation.CmdCopyImage(device, queue.command, images[0],
+                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, images[1],
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         static_cast<std::uint32_t>(copies.size()),
+                         copies.data());
+  emulation.CmdCopyBufferToImage(device, queue.command, source.buffer,
+                                 images[1],
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &top);
+  MoveImage(queue.command, images[1], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, kSmallMips + 1);
+  vk.CmdCopyImageToBuffer(queue.command, images[1],
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          readback.buffer,
+                          static_cast<std::uint32_t>(readbacks.size()),
+                          readbacks.data());
+  HostBarrier(queue.command);
+  vk.EndCommandBuffer(queue.command);
+  emulation.PrepareSubmit(queue.queue, &queue.command, 1);
+  bool ok = SubmitAndWait(queue);
+  for (std::uint32_t mip = 0; ok && mip <= kSmallMips; ++mip) {
+    const std::uint32_t size = std::max(1U, (kSmall * 2) >> mip);
+    const VkDeviceSize from =
+        mip == 0 ? top.bufferOffset : small_uploads[mip - 1].bufferOffset;
+    const std::size_t packed =
+        static_cast<std::size_t>((size + 3) / 4) * ((size + 3) / 4) *
+        block_bytes;
+    std::vector<std::uint8_t> expected(stored_bytes(size));
+    if (bc) {
+      EncodeEtcImageToBc(etc, source.data + from, packed, size, size,
+                         expected.data(), expected.size());
+    } else {
+      DecodeEtcImage(etc, source.data + from, packed, size, size,
+                     expected.data(), expected.size());
+    }
+    if (std::memcmp(readback.data + readbacks[mip].bufferOffset,
+                    expected.data(), expected.size()) != 0) {
+      std::printf("    format %d: level %u of the grown texture differs\n",
+                  static_cast<int>(format), mip);
+      ok = false;
+    }
+  }
+  emulation.ReleaseCommandBuffer(queue.command);
+  FreeBuffer(&readback);
+  FreeBuffer(&source, &emulation);
+  for (int index = 0; index < 2; ++index) {
+    emulation.DestroyImage(device, images[index], nullptr);
+    vk.FreeMemory(device, memories[index], nullptr);
+  }
+  return ok;
+}
+
+void StoredEmulationTests(PFN_vkGetDeviceProcAddr gdpa) {
+  for (int stored = 0; stored < 2; ++stored) {
+    VulkanEtc2Emulation emulation;
+    emulation.RegisterDevice(device, physical, true, memory_properties, gdpa,
+                             &properties.limits, families.data(),
+                             static_cast<std::uint32_t>(families.size()),
+                             stored == 1);
+    for (const Queue& queue : queues) {
+      emulation.RegisterQueue(device, queue.queue, queue.family);
+    }
+    bool grown = true;
+    for (VkFormat format : kVkFormats) {
+      grown = GrownTexture(emulation, queues[0], format, stored == 1) && grown;
+    }
+    Result(grown,
+           std::string("a texture grown the way Roblox does it (every level "
+                       "copied one level down into a larger image), ") +
+               (stored == 1 ? "stored as BC" : "stored decoded") +
+               ": every format, every level matches");
+    if (stored == 0) {
+      emulation.DestroyDevice(device);
+      continue;
+    }
+    emulation.WaitForEncoder(device);
+    for (Queue& queue : queues) {
+      for (int mode = 0; mode < 2; ++mode) {
+        const bool gpu_only = queue.compute && mode == 0;
+        if (!queue.compute && mode == 0) {
+          continue;
+        }
+        std::uint32_t eligible = 0;
+        std::uint32_t total = 0;
+        bool ok =
+            EmulatedSet(emulation, queue, gpu_only, &eligible, &total, true);
+        if (gpu_only && eligible != total) {
+          ok = false;
+        }
+        char line[256];
+        std::snprintf(
+            line, sizeof(line),
+            "emulated uploads stored as BC on the %s queue, %s: %u uploads, "
+            "images read back match the CPU encoder",
+            queue.name,
+            gpu_only ? "source memory hidden from the CPU path"
+                     : (queue.compute ? "mixed GPU and CPU uploads"
+                                      : "CPU encode carried into GPU staging"),
+            total);
+        Result(ok, line);
+      }
+    }
+    emulation.DestroyDevice(device);
+    emulation.ForgetDevice(device);
+  }
+  {
+    VulkanEtc2Emulation emulation;
+    emulation.RegisterDevice(device, physical, true, memory_properties, gdpa,
+                             nullptr, nullptr, 0, true);
+    for (const Queue& queue : queues) {
+      emulation.RegisterQueue(device, queue.queue, queue.family);
+    }
+    std::uint32_t eligible = 0;
+    std::uint32_t total = 0;
+    const bool ok =
+        EmulatedSet(emulation, queues[0], false, &eligible, &total, true);
+    Result(ok, "emulated uploads stored as BC without a GPU encoder (host "
+               "staging, CPU encode): " +
+                   std::to_string(total) +
+                   " uploads, images read back match the CPU encoder");
+    emulation.DestroyDevice(device);
+  }
+}
+
+bool OneBitOff(EtcFormat format, const std::uint8_t* source,
+               std::size_t source_bytes, std::uint32_t width,
+               std::uint32_t height, std::uint8_t* destination,
+               std::size_t destination_bytes) {
+  const bool ok = EncodeEtcImageToBc(format, source, source_bytes, width,
+                                     height, destination, destination_bytes);
+  if (ok && format == EtcFormat::kEacRg11Signed) {
+    destination[destination_bytes - 1] ^= 1;
+  }
+  return ok;
+}
+
+void DoubtedEncoderTests(PFN_vkGetDeviceProcAddr gdpa) {
+  std::shared_ptr<Etc2GpuEncoder> doubted =
+      Etc2GpuEncoder::Start(device, gdpa, OneBitOff);
+  if (doubted != nullptr) {
+    doubted->Wait();
+  }
+  std::unique_ptr<Etc2GpuDecoder> decoder = Etc2GpuDecoder::Create(
+      device, properties.limits, memory_properties, families.data(),
+      static_cast<std::uint32_t>(families.size()), gdpa, doubted);
+  if (doubted == nullptr || decoder == nullptr) {
+    Result(false, "an encoder with another reference could not be made");
+    return;
+  }
+  const bool offered = decoder->Encodes();
+  Spec spec;
+  spec.format = EtcFormat::kEtc2Rgb8;
+  spec.width = 64;
+  spec.height = 64;
+  spec.bc = true;
+  Options refused;
+  refused.expect = false;
+  Run("an encoder one bit away from its reference is refused on its first "
+      "upload, target untouched",
+      *decoder, queues[0], {spec}, refused);
+  Result(offered && doubted->Checked() && !decoder->Encodes(),
+         "after the failed check the decoder takes no more encodes");
+  spec.bc = false;
+  Run("and it still decodes", *decoder, queues[0], {spec});
+  decoder.reset();
+  doubted.reset();
+
+  VulkanEtc2Emulation emulation;
+  emulation.RegisterDevice(device, physical, true, memory_properties, gdpa,
+                           &properties.limits, families.data(),
+                           static_cast<std::uint32_t>(families.size()), true,
+                           OneBitOff);
+  for (const Queue& queue : queues) {
+    emulation.RegisterQueue(device, queue.queue, queue.family);
+  }
+  emulation.WaitForEncoder(device);
+  std::uint32_t eligible = 0;
+  std::uint32_t total = 0;
+  const bool ok =
+      EmulatedSet(emulation, queues[0], false, &eligible, &total, true);
+  Result(ok, "emulated uploads stored as BC with a GPU encoder that fails "
+             "its check: " +
+                 std::to_string(total) +
+                 " uploads, images read back match the CPU encoder");
+  emulation.DestroyDevice(device);
+  emulation.ForgetDevice(device);
 }
 
 void DecoderBenchmark(Etc2GpuDecoder& decoder, Queue& main) {
@@ -1451,9 +2301,18 @@ bool Setup() {
   vk.EnumeratePhysicalDevices(instance, &count, nullptr);
   std::vector<VkPhysicalDevice> devices(count);
   vk.EnumeratePhysicalDevices(instance, &count, devices.data());
+  const char* wanted = std::getenv("ETC2GPU_DEVICE");
   for (VkPhysicalDevice candidate : devices) {
     VkPhysicalDeviceProperties candidate_properties{};
     vk.GetPhysicalDeviceProperties(candidate, &candidate_properties);
+    if (wanted != nullptr && wanted[0] != 0) {
+      if (std::strstr(candidate_properties.deviceName, wanted) != nullptr) {
+        physical = candidate;
+        properties = candidate_properties;
+        break;
+      }
+      continue;
+    }
     if (physical == VK_NULL_HANDLE ||
         candidate_properties.deviceType ==
             VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
@@ -1510,11 +2369,17 @@ bool Setup() {
     info.pQueuePriorities = &priority;
     queue_infos.push_back(info);
   }
+  VkPhysicalDeviceFeatures supported{};
+  vk.GetPhysicalDeviceFeatures(physical, &supported);
+  VkPhysicalDeviceFeatures enabled{};
+  enabled.textureCompressionBC = supported.textureCompressionBC;
+  has_bc = supported.textureCompressionBC == VK_TRUE;
   VkDeviceCreateInfo device_info{};
   device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   device_info.queueCreateInfoCount =
       static_cast<std::uint32_t>(queue_infos.size());
   device_info.pQueueCreateInfos = queue_infos.data();
+  device_info.pEnabledFeatures = &enabled;
   if (vk.CreateDevice(physical, &device_info, nullptr, &device) !=
       VK_SUCCESS) {
     std::printf("vkCreateDevice failed\n");
@@ -1589,16 +2454,57 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  const auto encoder_start = std::chrono::steady_clock::now();
+  std::shared_ptr<Etc2GpuEncoder> built = Etc2GpuEncoder::Start(device, gdpa);
+  const double started = Seconds(encoder_start);
+  std::unique_ptr<Etc2GpuDecoder> encoder = Etc2GpuDecoder::Create(
+      device, limits, memory_properties, families.data(),
+      static_cast<std::uint32_t>(families.size()), gdpa, built);
+  const bool early = encoder != nullptr && encoder->Encodes();
+  if (built != nullptr) {
+    built->Wait();
+  }
+  Result(encoder != nullptr && encoder->Encodes(),
+         "BC encoder started in " + std::to_string(started * 1000) +
+             " ms, built " + std::to_string(Seconds(encoder_start) * 1000) +
+             " ms after the start" +
+             (early ? "" : ", the decoder took encodes only once it was built"));
+  std::unique_ptr<Etc2GpuDecoder> stress_encoder = Etc2GpuDecoder::Create(
+      device, tiny, memory_properties, families.data(),
+      static_cast<std::uint32_t>(families.size()), gdpa, built);
+  Result(stress_encoder != nullptr && stress_encoder->Encodes(),
+         "encoder with tiny limits created");
+  if (encoder == nullptr || stress_encoder == nullptr) {
+    return 1;
+  }
+
   DecoderTests(*decoder, *stress, queues[0], random_blocks);
   CopyTests(*decoder, *stress);
   EmulationTests(gdpa);
+  EncoderTests(*encoder, *stress_encoder, *decoder, queues[0], random_blocks);
+  Result(built->Checked() && encoder->Encodes(),
+         "the GPU encoder passed its check against the CPU encoder before "
+         "its first upload");
+  if (has_bc) {
+    StoredFidelity(*encoder, queues[0]);
+    StoredKinds(*encoder, queues[0]);
+    StoredEmulationTests(gdpa);
+    DoubtedEncoderTests(gdpa);
+  } else {
+    std::printf("     no BC formats on this device: stored images not "
+                "tested\n");
+  }
   if (benchmarks) {
     DecoderBenchmark(*decoder, queues[0]);
+    EncoderBenchmark(*encoder, queues[0]);
     RenderThreadBenchmarks(gdpa);
   }
 
   decoder.reset();
   stress.reset();
+  encoder.reset();
+  stress_encoder.reset();
+  built.reset();
   vk.DeviceWaitIdle(device);
   for (Queue& queue : queues) {
     vk.DestroyCommandPool(device, queue.pool, nullptr);
@@ -1606,7 +2512,7 @@ int main(int argc, char** argv) {
   vk.DestroyDevice(device, nullptr);
   vk.DestroyInstance(instance, nullptr);
   if (failures == 0) {
-    std::printf("all GPU decodes match the CPU decoder\n");
+    std::printf("all GPU decodes and encodes match the CPU\n");
     return 0;
   }
   std::printf("%d FAILED\n", failures);
