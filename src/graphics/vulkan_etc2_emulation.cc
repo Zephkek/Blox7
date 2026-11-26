@@ -1,5 +1,6 @@
 #include "blox7/graphics/vulkan_etc2_emulation.h"
 
+#include "blox7/graphics/etc2_bc_encoder.h"
 #include "blox7/graphics/texture_override.h"
 #include "blox7/graphics/vulkan_etc2_gpu_decoder.h"
 
@@ -25,34 +26,44 @@ bool LookupEmulatedEtc2Format(VkFormat format, Etc2EmulatedFormat* out) {
   Etc2EmulatedFormat mapped;
   switch (format) {
     case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK:
-      mapped = {VK_FORMAT_R8G8B8A8_UNORM, EtcFormat::kEtc2Rgb8};
+      mapped = {VK_FORMAT_R8G8B8A8_UNORM, EtcFormat::kEtc2Rgb8,
+                VK_FORMAT_BC7_UNORM_BLOCK};
       break;
     case VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK:
-      mapped = {VK_FORMAT_R8G8B8A8_SRGB, EtcFormat::kEtc2Rgb8};
+      mapped = {VK_FORMAT_R8G8B8A8_SRGB, EtcFormat::kEtc2Rgb8,
+                VK_FORMAT_BC7_SRGB_BLOCK};
       break;
     case VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK:
-      mapped = {VK_FORMAT_R8G8B8A8_UNORM, EtcFormat::kEtc2Rgb8A1};
+      mapped = {VK_FORMAT_R8G8B8A8_UNORM, EtcFormat::kEtc2Rgb8A1,
+                VK_FORMAT_BC7_UNORM_BLOCK};
       break;
     case VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK:
-      mapped = {VK_FORMAT_R8G8B8A8_SRGB, EtcFormat::kEtc2Rgb8A1};
+      mapped = {VK_FORMAT_R8G8B8A8_SRGB, EtcFormat::kEtc2Rgb8A1,
+                VK_FORMAT_BC7_SRGB_BLOCK};
       break;
     case VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK:
-      mapped = {VK_FORMAT_R8G8B8A8_UNORM, EtcFormat::kEtc2Rgba8};
+      mapped = {VK_FORMAT_R8G8B8A8_UNORM, EtcFormat::kEtc2Rgba8,
+                VK_FORMAT_BC7_UNORM_BLOCK};
       break;
     case VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK:
-      mapped = {VK_FORMAT_R8G8B8A8_SRGB, EtcFormat::kEtc2Rgba8};
+      mapped = {VK_FORMAT_R8G8B8A8_SRGB, EtcFormat::kEtc2Rgba8,
+                VK_FORMAT_BC7_SRGB_BLOCK};
       break;
     case VK_FORMAT_EAC_R11_UNORM_BLOCK:
-      mapped = {VK_FORMAT_R16_UNORM, EtcFormat::kEacR11};
+      mapped = {VK_FORMAT_R16_UNORM, EtcFormat::kEacR11,
+                VK_FORMAT_BC4_UNORM_BLOCK};
       break;
     case VK_FORMAT_EAC_R11_SNORM_BLOCK:
-      mapped = {VK_FORMAT_R16_SNORM, EtcFormat::kEacR11Signed};
+      mapped = {VK_FORMAT_R16_SNORM, EtcFormat::kEacR11Signed,
+                VK_FORMAT_BC4_SNORM_BLOCK};
       break;
     case VK_FORMAT_EAC_R11G11_UNORM_BLOCK:
-      mapped = {VK_FORMAT_R16G16_UNORM, EtcFormat::kEacRg11};
+      mapped = {VK_FORMAT_R16G16_UNORM, EtcFormat::kEacRg11,
+                VK_FORMAT_BC5_UNORM_BLOCK};
       break;
     case VK_FORMAT_EAC_R11G11_SNORM_BLOCK:
-      mapped = {VK_FORMAT_R16G16_SNORM, EtcFormat::kEacRg11Signed};
+      mapped = {VK_FORMAT_R16G16_SNORM, EtcFormat::kEacRg11Signed,
+                VK_FORMAT_BC5_SNORM_BLOCK};
       break;
     default:
       return false;
@@ -111,6 +122,15 @@ bool Etc2SupportAdvertised() {
   return advertised;
 }
 
+bool Etc2StoredAsBc(const char* value) {
+  return value != nullptr && std::strcmp(value, "bc") == 0;
+}
+
+bool Etc2StoredAsBc() {
+  static const bool bc = Etc2StoredAsBc(std::getenv("BLOX7_ETC2_STORAGE"));
+  return bc;
+}
+
 std::uint32_t SmallTextureUpscale(const char* value) {
   if (value == nullptr || value[0] < '0' || value[0] > '9') {
     return kDefaultSmallTextureUpscale;
@@ -148,6 +168,13 @@ bool ShouldLog(std::atomic<unsigned>* counter, unsigned limit) {
   return counter->fetch_add(1, std::memory_order_relaxed) < limit;
 }
 
+bool EncodeRows(const EtcDecodeJob& job, std::uint32_t first_block_row,
+                std::uint32_t block_row_count) {
+  return EncodeEtcImageToBcBlockRows(
+      job.format, job.source, job.source_bytes, job.width, job.height,
+      first_block_row, block_row_count, job.destination, job.destination_bytes);
+}
+
 unsigned DecodeWorkerCount() {
   static const unsigned count =
       std::min(8U, std::max(1U, std::thread::hardware_concurrency() / 2));
@@ -180,6 +207,7 @@ struct StagingPool {
 struct HostDevice {
   VkDevice device = VK_NULL_HANDLE;
   bool emulated = false;
+  bool bc = false;
   VkPhysicalDeviceMemoryProperties memory{};
   PFN_vkCreateImage create_image = nullptr;
   PFN_vkDestroyImage destroy_image = nullptr;
@@ -240,6 +268,7 @@ struct ImageRecord {
   std::uint32_t height = 0;
   std::shared_ptr<const RgbaImage> override;
   std::shared_ptr<const RgbaImage> base;
+  bool bc = false;
 };
 
 bool IsColorFormat(EtcFormat format) {
@@ -247,18 +276,18 @@ bool IsColorFormat(EtcFormat format) {
          format == EtcFormat::kEtc2Rgba8;
 }
 
-bool HostImageInfo(std::uint32_t upscale, const VkImageCreateInfo& info,
-                   VkImageCreateInfo* host, Etc2EmulatedFormat* format,
-                   std::uint32_t* scale) {
+bool HostImageInfo(std::uint32_t upscale, bool bc,
+                   const VkImageCreateInfo& info, VkImageCreateInfo* host,
+                   Etc2EmulatedFormat* format, std::uint32_t* scale) {
   if (!LookupEmulatedEtc2Format(info.format, format)) {
     return false;
   }
   *host = info;
-  host->format = format->host_format;
+  host->format = bc ? format->bc_format : format->host_format;
   host->flags &= ~static_cast<VkImageCreateFlags>(
       VK_IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT);
   *scale = 1;
-  if (upscale > 1 && IsColorFormat(format->etc_format) &&
+  if (!bc && upscale > 1 && IsColorFormat(format->etc_format) &&
       info.imageType == VK_IMAGE_TYPE_2D && info.arrayLayers == 1 &&
       info.extent.depth == 1 && info.extent.width <= kSmallTextureMaxExtent &&
       info.extent.height <= kSmallTextureMaxExtent) {
@@ -299,6 +328,7 @@ struct PendingUpload {
   std::uint32_t source_height = 0;
   std::uint32_t target_width = 0;
   std::uint32_t target_height = 0;
+  bool bc = false;
   bool full_mip = false;
   VkDeviceSize target_bytes = 0;
   std::uint8_t* target = nullptr;
@@ -684,7 +714,8 @@ bool PlanRegions(const ImageRecord& record, VkDevice device, VkBuffer source,
   const std::uint32_t scale = record.scale;
   for (std::uint32_t index = 0; index < count; ++index) {
     const Region& region = regions[index];
-    const VkDeviceSize alignment = gpu ? kEtc2GpuTargetAlignment : 4;
+    const VkDeviceSize alignment =
+        gpu || record.bc ? kEtc2GpuTargetAlignment : 4;
     *total = (*total + alignment - 1) / alignment * alignment;
     PendingUpload upload;
     if (!Etc2UploadByteCounts(record.format.etc_format, region.imageExtent,
@@ -694,6 +725,12 @@ bool PlanRegions(const ImageRecord& record, VkDevice device, VkBuffer source,
     }
     if (scale > 1 && region.imageSubresource.layerCount != 1) {
       return false;
+    }
+    upload.bc = record.bc;
+    if (record.bc) {
+      upload.decoded = upload.compressed /
+                       EtcBlockBytes(record.format.etc_format) *
+                       BcBlockBytes(record.format.etc_format);
     }
     upload.device = device;
     upload.source = source;
@@ -724,7 +761,7 @@ bool PlanRegions(const ImageRecord& record, VkDevice device, VkBuffer source,
                          (block_rows - 1) * upload.source_row_stride + packed_row;
     upload.scale = scale;
     upload.gpu = gpu && scale == 1 &&
-                 Etc2GpuDecodable(upload.format, upload.width);
+                 (upload.bc || Etc2GpuDecodable(upload.format, upload.width));
     upload.source_width = upload.width;
     upload.source_height = upload.height;
     upload.target_width = upload.width;
@@ -783,6 +820,8 @@ struct VulkanEtc2Emulation::State {
   std::mutex commands_mutex;
   std::mutex memory_mutex;
   std::unordered_map<VkPhysicalDevice, bool> physical_devices;
+  std::unordered_map<VkPhysicalDevice, bool> bc_devices;
+  std::unordered_map<VkDevice, std::shared_ptr<Etc2GpuEncoder>> encoders;
   std::vector<std::unique_ptr<HostDevice>> devices;
   std::unordered_map<VkImage, ImageRecord> images;
   std::unordered_map<VkBuffer, BufferBinding> buffers;
@@ -793,6 +832,7 @@ struct VulkanEtc2Emulation::State {
   TextureOverrides overrides = TextureOverrides::FromEnvironment();
   const std::uint32_t upscale =
       SmallTextureUpscale(std::getenv("BLOX7_SMALL_TEXTURE_UPSCALE"));
+  const bool bc = Etc2StoredAsBc() && upscale == 1 && !overrides.enabled();
 
   std::shared_ptr<const RgbaImage> FindOverride(const PendingUpload& upload,
                                                 const std::uint8_t* compressed,
@@ -964,6 +1004,7 @@ struct VulkanEtc2Emulation::State {
       item.width = upload.width;
       item.height = upload.height;
       item.layers = upload.layers;
+      item.bc = upload.bc;
       if (route.dev->gpu->Accepts(item)) {
         work.push_back(item);
         picked[index] = true;
@@ -974,15 +1015,17 @@ struct VulkanEtc2Emulation::State {
     }
     if (!route.dev->gpu->Decode(queue, route.family, work.data(),
                                 work.size())) {
-      LogFailure("GPU decode failed, decoding on the CPU");
+      LogFailure(route.dev->bc ? "GPU encode failed, encoding on the CPU"
+                               : "GPU decode failed, decoding on the CPU");
       return;
     }
     for (const Etc2GpuUpload& item : work) {
       if (ShouldLog(&g_gpu_decode_logs, 4)) {
         std::fprintf(stderr,
-                     "  [vulkan] ETC2 upload decoded on the GPU %ux%u "
+                     "  [vulkan] ETC2 upload %s on the GPU %ux%u "
                      "layers=%u\n",
-                     item.width, item.height, item.layers);
+                     item.bc ? "encoded to BC" : "decoded", item.width,
+                     item.height, item.layers);
       }
     }
     std::size_t kept = 0;
@@ -1006,7 +1049,12 @@ struct VulkanEtc2Emulation::State {
 
 VulkanEtc2Emulation::VulkanEtc2Emulation() : state_(new State) {}
 
-VulkanEtc2Emulation::~VulkanEtc2Emulation() { delete state_; }
+VulkanEtc2Emulation::~VulkanEtc2Emulation() {
+  for (auto& [device, encoder] : state_->encoders) {
+    Etc2GpuEncoder::KeepUntilExit(std::move(encoder));
+  }
+  delete state_;
+}
 
 bool VulkanEtc2Emulation::PhysicalDeviceNeedsEmulation(
     VkPhysicalDevice physical_device, PFN_vkGetPhysicalDeviceFeatures host) {
@@ -1026,7 +1074,19 @@ bool VulkanEtc2Emulation::PhysicalDeviceNeedsEmulation(
   const bool needed = features.textureCompressionETC2 != VK_TRUE;
   std::lock_guard<std::mutex> lock(state_->mutex);
   state_->physical_devices[physical_device] = needed;
+  state_->bc_devices[physical_device] =
+      needed && state_->bc && features.textureCompressionBC == VK_TRUE;
   return needed;
+}
+
+bool VulkanEtc2Emulation::PhysicalDeviceStoresBc(
+    VkPhysicalDevice physical_device, PFN_vkGetPhysicalDeviceFeatures host) {
+  if (!state_->bc || !PhysicalDeviceNeedsEmulation(physical_device, host)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  const auto found = state_->bc_devices.find(physical_device);
+  return found != state_->bc_devices.end() && found->second;
 }
 
 void VulkanEtc2Emulation::RegisterDevice(
@@ -1035,7 +1095,7 @@ void VulkanEtc2Emulation::RegisterDevice(
     PFN_vkGetDeviceProcAddr get_device_proc_addr,
     const VkPhysicalDeviceLimits* limits,
     const VkQueueFamilyProperties* queue_families,
-    std::uint32_t queue_family_count) {
+    std::uint32_t queue_family_count, bool bc) {
   static_cast<void>(physical_device);
   if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr) {
     return;
@@ -1044,6 +1104,7 @@ void VulkanEtc2Emulation::RegisterDevice(
   const auto get = get_device_proc_addr;
   dev->device = device;
   dev->emulated = emulated;
+  dev->bc = emulated && bc;
   dev->memory = memory;
   dev->create_image = DeviceProc<PFN_vkCreateImage>(get, device, "vkCreateImage");
   dev->destroy_image =
@@ -1097,19 +1158,39 @@ void VulkanEtc2Emulation::RegisterDevice(
       DeviceProc<PFN_vkGetBufferMemoryRequirements>(
           get, device, "vkGetBufferMemoryRequirements");
   if (emulated) {
-    std::fprintf(stderr,
-                 "  [vulkan] ETC2/EAC emulation enabled: compressed uploads "
-                 "decode to RGBA8/R16 host images\n");
+    std::fputs(dev->bc ? "  [vulkan] ETC2/EAC emulation enabled: compressed "
+                         "uploads are stored as BC7/BC4/BC5 host images\n"
+                       : "  [vulkan] ETC2/EAC emulation enabled: compressed "
+                         "uploads decode to RGBA8/R16 host images\n",
+               stderr);
   }
   if (emulated && limits != nullptr && queue_families != nullptr &&
       !state_->overrides.enabled()) {
+    std::shared_ptr<Etc2GpuEncoder> encoder;
+    if (dev->bc) {
+      std::lock_guard<std::mutex> lock(state_->mutex);
+      std::shared_ptr<Etc2GpuEncoder>& kept = state_->encoders[device];
+      if (kept == nullptr) {
+        kept = Etc2GpuEncoder::Start(device, get);
+      }
+      encoder = kept;
+    }
     dev->gpu = Etc2GpuDecoder::Create(device, *limits, memory, queue_families,
-                                      queue_family_count, get);
-    std::fputs(dev->gpu != nullptr
-                   ? "  [vulkan] ETC2/EAC uploads decode on the GPU\n"
-                   : "  [vulkan] ETC2/EAC uploads decode on the CPU: no "
-                     "compute decoder\n",
-               stderr);
+                                      queue_family_count, get, encoder);
+    if (dev->bc) {
+      std::fputs(dev->gpu != nullptr
+                     ? "  [vulkan] ETC2/EAC uploads are encoded to BC on the "
+                       "GPU\n"
+                     : "  [vulkan] ETC2/EAC uploads are encoded to BC on the "
+                       "CPU: no compute encoder\n",
+                 stderr);
+    } else {
+      std::fputs(dev->gpu != nullptr
+                     ? "  [vulkan] ETC2/EAC uploads decode on the GPU\n"
+                     : "  [vulkan] ETC2/EAC uploads decode on the CPU: no "
+                       "compute decoder\n",
+                 stderr);
+    }
   }
   std::lock_guard<std::shared_mutex> lock(state_->devices_mutex);
   state_->devices.erase(
@@ -1173,6 +1254,33 @@ void VulkanEtc2Emulation::DestroyDevice(VkDevice device) {
       state_->devices.end());
 }
 
+void VulkanEtc2Emulation::ForgetDevice(VkDevice device) {
+  std::shared_ptr<Etc2GpuEncoder> encoder;
+  {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    const auto found = state_->encoders.find(device);
+    if (found == state_->encoders.end()) {
+      return;
+    }
+    encoder = std::move(found->second);
+    state_->encoders.erase(found);
+  }
+}
+
+void VulkanEtc2Emulation::WaitForEncoder(VkDevice device) {
+  std::shared_ptr<Etc2GpuEncoder> encoder;
+  {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    const auto found = state_->encoders.find(device);
+    if (found != state_->encoders.end()) {
+      encoder = found->second;
+    }
+  }
+  if (encoder != nullptr) {
+    encoder->Wait();
+  }
+}
+
 VkResult VulkanEtc2Emulation::CreateImage(VkDevice device,
                                           const VkImageCreateInfo* create_info,
                                           const VkAllocationCallbacks* allocator,
@@ -1185,8 +1293,8 @@ VkResult VulkanEtc2Emulation::CreateImage(VkDevice device,
   VkImageCreateInfo host_info;
   std::uint32_t scale = 1;
   if (!dev->emulated || create_info == nullptr ||
-      !HostImageInfo(state_->upscale, *create_info, &host_info, &format,
-                     &scale)) {
+      !HostImageInfo(state_->upscale, dev->bc, *create_info, &host_info,
+                     &format, &scale)) {
     return dev->create_image(device, create_info, allocator, image);
   }
   const VkResult result = dev->create_image(device, &host_info, allocator, image);
@@ -1199,7 +1307,8 @@ VkResult VulkanEtc2Emulation::CreateImage(VkDevice device,
                                 create_info->extent.width,
                                 create_info->extent.height,
                                 nullptr,
-                                nullptr};
+                                nullptr,
+                                dev->bc};
     }
     if (ShouldLog(&g_image_logs, 4)) {
       std::fprintf(stderr,
@@ -1208,7 +1317,7 @@ VkResult VulkanEtc2Emulation::CreateImage(VkDevice device,
                    create_info->extent.width, create_info->extent.height,
                    create_info->mipLevels,
                    static_cast<int>(create_info->format),
-                   static_cast<int>(format.host_format));
+                   static_cast<int>(host_info.format));
     }
   }
   return result;
@@ -1239,8 +1348,12 @@ VkResult VulkanEtc2Emulation::CreateImageView(
       !LookupEmulatedEtc2Format(create_info->format, &format)) {
     return dev->create_image_view(device, create_info, allocator, view);
   }
+  ImageRecord record;
   VkImageViewCreateInfo host_info = *create_info;
-  host_info.format = format.host_format;
+  host_info.format =
+      state_->LookupImage(*dev, create_info->image, &record) && record.bc
+          ? format.bc_format
+          : format.host_format;
   if (format.etc_format == EtcFormat::kEtc2Rgb8) {
     VkComponentSwizzle* const swizzles[] = {
         &host_info.components.r, &host_info.components.g,
@@ -1268,8 +1381,8 @@ void VulkanEtc2Emulation::GetDeviceImageMemoryRequirements(
   VkImageCreateInfo host_image;
   std::uint32_t scale = 1;
   if (!dev->emulated || info == nullptr || info->pCreateInfo == nullptr ||
-      !HostImageInfo(state_->upscale, *info->pCreateInfo, &host_image, &format,
-                     &scale)) {
+      !HostImageInfo(state_->upscale, dev->bc, *info->pCreateInfo, &host_image,
+                     &format, &scale)) {
     dev->image_requirements(device, info, requirements);
     return;
   }
@@ -1289,8 +1402,8 @@ void VulkanEtc2Emulation::GetDeviceImageSparseMemoryRequirements(
   VkImageCreateInfo host_image;
   std::uint32_t scale = 1;
   if (!dev->emulated || info == nullptr || info->pCreateInfo == nullptr ||
-      !HostImageInfo(state_->upscale, *info->pCreateInfo, &host_image, &format,
-                     &scale)) {
+      !HostImageInfo(state_->upscale, dev->bc, *info->pCreateInfo, &host_image,
+                     &format, &scale)) {
     dev->image_sparse_requirements(device, info, count, requirements);
     return;
   }
@@ -1310,8 +1423,8 @@ void VulkanEtc2Emulation::GetDeviceImageSubresourceLayout(
   VkImageCreateInfo host_image;
   std::uint32_t scale = 1;
   if (!dev->emulated || info == nullptr || info->pCreateInfo == nullptr ||
-      !HostImageInfo(state_->upscale, *info->pCreateInfo, &host_image, &format,
-                     &scale)) {
+      !HostImageInfo(state_->upscale, dev->bc, *info->pCreateInfo, &host_image,
+                     &format, &scale)) {
     dev->image_subresource_layout(device, info, layout);
     return;
   }
@@ -1464,7 +1577,8 @@ void VulkanEtc2Emulation::CmdCopyBufferToImage(
   VkDeviceSize total = 0;
   Staging staging;
   const bool gpu = dev->gpu != nullptr && record.scale == 1 &&
-                   !state_->overrides.enabled();
+                   !state_->overrides.enabled() &&
+                   (!record.bc || dev->gpu->Encodes());
   if (!PlanRegions(record, device, source, destination, region_count, regions,
                    gpu, &rewritten, &uploads, &total)) {
     LogFailure("skipped an upload with an unsupported region");
@@ -1496,7 +1610,8 @@ void VulkanEtc2Emulation::CmdCopyBufferToImage2(
   VkDeviceSize total = 0;
   Staging staging;
   const bool gpu = dev->gpu != nullptr && record.scale == 1 &&
-                   !state_->overrides.enabled();
+                   !state_->overrides.enabled() &&
+                   (!record.bc || dev->gpu->Encodes());
   if (!PlanRegions(record, device, info->srcBuffer, info->dstImage,
                    info->regionCount, info->pRegions, gpu, &rewritten,
                    &uploads, &total)) {
@@ -1572,9 +1687,19 @@ bool VulkanEtc2Emulation::State::MixedCopy(const HostDevice& dev,
   const auto texel_bytes = [](VkFormat format) {
     return format == VK_FORMAT_R16_UNORM || format == VK_FORMAT_R16_SNORM ? 2 : 4;
   };
+  const auto block_kind = [](EtcFormat format) {
+    return IsColorFormat(format) ? 0 : static_cast<int>(BcBlockBytes(format));
+  };
   if (source_emulated && destination_emulated &&
-      texel_bytes(source_record.format.host_format) ==
-          texel_bytes(destination_record.format.host_format)) {
+      (source_record.bc || destination_record.bc)) {
+    if (source_record.bc == destination_record.bc &&
+        block_kind(source_record.format.etc_format) ==
+            block_kind(destination_record.format.etc_format)) {
+      return false;
+    }
+  } else if (source_emulated && destination_emulated &&
+             texel_bytes(source_record.format.host_format) ==
+                 texel_bytes(destination_record.format.host_format)) {
     return false;
   }
   LogFailure("skipped an image copy between an ETC2 image and another format");
@@ -1857,14 +1982,17 @@ void VulkanEtc2Emulation::PrepareSubmit(VkQueue queue,
       job.height = upload.height;
       job.destination = decoded + layer * decoded_layer;
       job.destination_bytes = decoded_layer;
+      if (upload.bc) {
+        job.rows = EncodeRows;
+      }
       jobs.push_back(job);
     }
     compressed_offset += copy.compressed;
     decoded_offset += copy.decoded;
     if (ShouldLog(&g_decode_logs, 4)) {
-      std::fprintf(stderr,
-                   "  [vulkan] ETC2 upload decoded %ux%u layers=%u\n",
-                   upload.width, upload.height, upload.layers);
+      std::fprintf(stderr, "  [vulkan] ETC2 upload %s %ux%u layers=%u\n",
+                   upload.bc ? "encoded to BC" : "decoded", upload.width,
+                   upload.height, upload.layers);
     }
   }
   for (const auto& [memory, mapping] : temporary) {

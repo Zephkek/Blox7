@@ -12,6 +12,7 @@ namespace blox7::graphics {
 struct Etc2EmulatedFormat {
   VkFormat host_format = VK_FORMAT_UNDEFINED;
   EtcFormat etc_format = EtcFormat::kEtc2Rgb8;
+  VkFormat bc_format = VK_FORMAT_UNDEFINED;
 };
 
 bool LookupEmulatedEtc2Format(VkFormat format, Etc2EmulatedFormat* out);
@@ -25,6 +26,9 @@ bool Etc2UploadByteCounts(EtcFormat format, const VkExtent3D& extent,
 
 bool Etc2SupportAdvertised(const char* value);
 bool Etc2SupportAdvertised();
+
+bool Etc2StoredAsBc(const char* value);
+bool Etc2StoredAsBc();
 
 inline constexpr std::uint32_t kSmallTextureMaxExtent = 64;
 inline constexpr std::uint32_t kDefaultSmallTextureUpscale = 1;
@@ -42,6 +46,8 @@ class VulkanEtc2Emulation final {
 
   bool PhysicalDeviceNeedsEmulation(VkPhysicalDevice physical_device,
                                     PFN_vkGetPhysicalDeviceFeatures host);
+  bool PhysicalDeviceStoresBc(VkPhysicalDevice physical_device,
+                              PFN_vkGetPhysicalDeviceFeatures host);
 
   void RegisterDevice(VkDevice device, VkPhysicalDevice physical_device,
                       bool emulated,
@@ -49,10 +55,12 @@ class VulkanEtc2Emulation final {
                       PFN_vkGetDeviceProcAddr get_device_proc_addr,
                       const VkPhysicalDeviceLimits* limits = nullptr,
                       const VkQueueFamilyProperties* queue_families = nullptr,
-                      std::uint32_t queue_family_count = 0);
+                      std::uint32_t queue_family_count = 0, bool bc = false);
   void RegisterQueue(VkDevice device, VkQueue queue,
                      std::uint32_t queue_family);
   void DestroyDevice(VkDevice device);
+  void ForgetDevice(VkDevice device);
+  void WaitForEncoder(VkDevice device);
 
   VkResult CreateImage(VkDevice device, const VkImageCreateInfo* create_info,
                        const VkAllocationCallbacks* allocator, VkImage* image);

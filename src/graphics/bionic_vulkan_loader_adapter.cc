@@ -1456,6 +1456,16 @@ bool Etc2EmulatedPhysicalDevice(VkPhysicalDevice physical_device) {
                            "vkGetPhysicalDeviceFeatures", nullptr));
 }
 
+VkFormat Etc2HostFormat(VkPhysicalDevice physical_device,
+                        const blox7::graphics::Etc2EmulatedFormat& mapped) {
+  return State().etc2.PhysicalDeviceStoresBc(
+             physical_device,
+             HostPhysicalDeviceProc<PFN_vkGetPhysicalDeviceFeatures>(
+                 "vkGetPhysicalDeviceFeatures", nullptr))
+             ? mapped.bc_format
+             : mapped.host_format;
+}
+
 bool EmulatedEtc2ImageSupported(VkImageType type, VkImageTiling tiling,
                                 VkImageUsageFlags usage,
                                 VkImageCreateFlags flags) {
@@ -1729,6 +1739,7 @@ void ReleaseKeptDevice() {
     return;
   }
   DestroyRetiredSwapchain(device);
+  State().etc2.ForgetDevice(device);
   if (const auto destroy = reinterpret_cast<PFN_vkDestroyDevice>(
           HostDeviceProc(device, "vkDestroyDevice"))) {
     destroy(device, nullptr);
@@ -2264,9 +2275,16 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
       physical_device, reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
                            HostInstanceProc(instance,
                                             "vkGetPhysicalDeviceFeatures")));
+  const bool etc2_bc =
+      etc2_emulated &&
+      State().etc2.PhysicalDeviceStoresBc(
+          physical_device,
+          reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
+              HostInstanceProc(instance, "vkGetPhysicalDeviceFeatures")));
   VkPhysicalDeviceFeatures host_enabled_features{};
   VkPhysicalDeviceFeatures2* requested_features2 = nullptr;
   VkBool32 requested_features2_etc2 = VK_FALSE;
+  VkBool32 requested_features2_bc = VK_FALSE;
   if (etc2_emulated) {
     enabled.root.features.textureCompressionETC2 = VK_FALSE;
     if (create_info->pEnabledFeatures != nullptr) {
@@ -2281,6 +2299,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
       requested_features2_etc2 =
           requested_features2->features.textureCompressionETC2;
       requested_features2->features.textureCompressionETC2 = VK_FALSE;
+      requested_features2_bc =
+          requested_features2->features.textureCompressionBC;
+      if (etc2_bc) {
+        requested_features2->features.textureCompressionBC = VK_TRUE;
+      }
+    } else if (etc2_bc) {
+      host_enabled_features.textureCompressionBC = VK_TRUE;
+      host_info.pEnabledFeatures = &host_enabled_features;
     }
   }
   enabled.root.pNext = &enabled.vulkan11;
@@ -2348,6 +2374,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
   if (requested_features2 != nullptr) {
     requested_features2->features.textureCompressionETC2 =
         requested_features2_etc2;
+    requested_features2->features.textureCompressionBC = requested_features2_bc;
   }
   if (result != VK_SUCCESS) {
     return result;
@@ -2387,8 +2414,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
       *device, physical_device, etc2_emulated, memory_properties,
       host_get_device_proc_addr,
       host_get_properties != nullptr ? &properties.limits : nullptr,
-      queue_families.data(),
-      static_cast<std::uint32_t>(queue_families.size()));
+      queue_families.data(), static_cast<std::uint32_t>(queue_families.size()),
+      etc2_bc);
   std::uint32_t graphics_family = UINT32_MAX;
   std::uint32_t graphics_count = 0;
   for (std::uint32_t index = 0; index < create_info->queueCreateInfoCount;
@@ -2476,6 +2503,7 @@ vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* allocator) {
   }
   if (!keep) {
     DestroyRetiredSwapchain(device);
+    State().etc2.ForgetDevice(device);
     if (host_destroy != nullptr) {
       host_destroy(device, allocator);
     }
@@ -3674,7 +3702,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties(
     host(physical_device, format, properties);
     return;
   }
-  host(physical_device, mapped.host_format, properties);
+  host(physical_device, Etc2HostFormat(physical_device, mapped), properties);
   properties->linearTilingFeatures = 0;
   properties->optimalTilingFeatures =
       blox7::graphics::EmulatedEtc2FormatFeatures(
@@ -3698,7 +3726,7 @@ VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceFormatProperties2(
     host(physical_device, format, properties);
     return;
   }
-  host(physical_device, mapped.host_format, properties);
+  host(physical_device, Etc2HostFormat(physical_device, mapped), properties);
   VkFormatProperties& base = properties->formatProperties;
   base.linearTilingFeatures = 0;
   base.optimalTilingFeatures =
@@ -3739,8 +3767,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties(
     }
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
   }
-  const VkResult result = host(physical_device, mapped.host_format, type,
-                               tiling, usage, flags, properties);
+  const VkResult result =
+      host(physical_device, Etc2HostFormat(physical_device, mapped), type,
+           tiling, usage, flags, properties);
   if (result == VK_SUCCESS && properties != nullptr) {
     properties->sampleCounts = VK_SAMPLE_COUNT_1_BIT;
   }
@@ -3771,7 +3800,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
     return VK_ERROR_FORMAT_NOT_SUPPORTED;
   }
   VkPhysicalDeviceImageFormatInfo2 host_info = *info;
-  host_info.format = mapped.host_format;
+  host_info.format = Etc2HostFormat(physical_device, mapped);
   const VkResult result = host(physical_device, &host_info, properties);
   if (result == VK_SUCCESS && properties != nullptr) {
     properties->imageFormatProperties.sampleCounts = VK_SAMPLE_COUNT_1_BIT;
