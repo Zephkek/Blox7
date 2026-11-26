@@ -526,44 +526,212 @@ int BcFitRamp(uint c0, uint c1, uint c2, uint c3, int n0, int n1, int n2, int n3
   return levels;
 }
 
-void BcLine(uint p0, uint p1, uint p2, uint p3, int line, int mask, int bits, int codec, BC_INOUT(uint, low),
-            BC_INOUT(uint, high), BC_INOUT(int, levels), BC_INOUT(uint, costs_low), BC_INOUT(uint, costs_high)) {
+uint BcChannels(int mask) {
+  return (BcIn(mask, 0) ? 0xffu : 0u) | (BcIn(mask, 1) ? 0xff00u : 0u) | (BcIn(mask, 2) ? 0xff0000u : 0u);
+}
+
+uint BcSnapPaint(uint color, int mask, int codec) {
+  if (codec == kBcByte) {
+    return color;
+  }
+  const uint ones = (uint(mask) & 1u) | ((uint(mask) & 2u) << 7u) | ((uint(mask) & 4u) << 14u) |
+                    ((uint(mask) & 8u) << 21u);
+  const int parity = codec == kBcUnique && bitCount(~color & ones) < bitCount(color & ones) ? 1 : 0;
+  uint snapped = color;
+  for (int c = 0; c < 4; ++c) {
+    if (BcIn(mask, c)) {
+      snapped = BcSet(snapped, c, BcSnap(BcGet(color, c), codec, parity));
+    }
+  }
+  return snapped;
+}
+
+uint BcFreshLines(uint p0, uint p1, uint p2, uint p3, int mask) {
+  const uint channels = BcChannels(mask);
+  const int i1 = ((p1 ^ p0) & channels) == 0u ? 0 : 1;
+  const int i2 = ((p2 ^ p0) & channels) == 0u ? 0 : (((p2 ^ p1) & channels) == 0u ? 1 : 2);
+  const int i3 = ((p3 ^ p0) & channels) == 0u
+                     ? 0
+                     : (((p3 ^ p1) & channels) == 0u ? 1 : (((p3 ^ p2) & channels) == 0u ? 2 : 3));
+  uint met = 0u;
+  uint fresh = 0u;
+  for (int line = 0; line < 10; ++line) {
+    const int a = BcOfInt(0, i1, i2, i3, kBcPairs[line * 2]);
+    const int b = BcOfInt(0, i1, i2, i3, kBcPairs[line * 2 + 1]);
+    const int code = line < 6 ? min(a, b) * 4 + max(a, b) : 16 + a;
+    if (!BcHas(met, code)) {
+      met |= 1u << uint(code);
+      fresh |= 1u << uint(line);
+    }
+  }
+  return fresh;
+}
+
+void BcSnapPaints(uint p0, uint p1, uint p2, uint p3, int mask, int codec, BC_INOUT(uint, s0), BC_INOUT(uint, s1),
+                  BC_INOUT(uint, s2), BC_INOUT(uint, s3)) {
+  for (int k = 0; k < 4; ++k) {
+    const uint snapped = BcSnapPaint(BcOf(p0, p1, p2, p3, k), mask, codec);
+    if (k == 0) {
+      s0 = snapped;
+    } else if (k == 1) {
+      s1 = snapped;
+    } else if (k == 2) {
+      s2 = snapped;
+    } else {
+      s3 = snapped;
+    }
+  }
+}
+
+void BcNearer(uint paint, uint shade, int mask, int level, BC_INOUT(int, best), BC_INOUT(int, pick)) {
+  int error = 0;
+  for (int c = 0; c < 3; ++c) {
+    if (BcIn(mask, c)) {
+      const int gap = BcGet(paint, c) - BcGet(shade, c);
+      error += gap * gap;
+    }
+  }
+  if (error < best) {
+    best = error;
+    pick = level;
+  }
+}
+
+void BcLine(uint p0, uint p1, uint p2, uint p3, uint s0, uint s1, uint s2, uint s3, int n0, int n1, int n2, int n3,
+            int line, int mask, int bits, int codec, BC_INOUT(uint, low), BC_INOUT(uint, high),
+            BC_INOUT(int, levels), BC_INOUT(uint, costs_low), BC_INOUT(uint, costs_high)) {
   const int a = kBcPairs[line * 2];
   const int b = kBcPairs[line * 2 + 1];
-  low = BcOf(p0, p1, p2, p3, a);
-  high = BcOf(p0, p1, p2, p3, b);
   if (a == b && (codec == kBcUnique || codec == kBcPlain)) {
+    low = BcOf(p0, p1, p2, p3, a);
+    high = low;
     BcSolid(low, mask, codec, -1, low, high);
-  } else {
+  } else if (codec == kBcShared) {
+    low = BcOf(p0, p1, p2, p3, a);
+    high = BcOf(p0, p1, p2, p3, b);
     BcSnapEnds(low, high, mask, codec, -1);
+  } else {
+    low = BcOf(s0, s1, s2, s3, a);
+    high = BcOf(s0, s1, s2, s3, b);
   }
-  const int steps = 1 << bits;
-  levels = 0;
-  costs_low = 0u;
-  costs_high = 0u;
-  for (int k = 0; k < 4; ++k) {
-    const uint paint = BcOf(p0, p1, p2, p3, k);
-    int best = 0xffff;
-    int pick = 0;
-    for (int level = 0; level < steps; ++level) {
-      const int blend = BcWeight(bits, level);
-      int error = 0;
-      for (int c = 0; c < 3; ++c) {
-        if (BcIn(mask, c)) {
-          const int gap = BcGet(paint, c) - BcLerp(BcGet(low, c), BcGet(high, c), blend);
-          error += gap * gap;
-        }
-      }
-      if (error < best) {
-        best = error;
-        pick = level;
+  const int steps = ((low ^ high) & BcChannels(mask)) == 0u ? 1 : 1 << bits;
+  int best0 = 0xffff;
+  int best1 = 0xffff;
+  int best2 = 0xffff;
+  int best3 = 0xffff;
+  int pick0 = 0;
+  int pick1 = 0;
+  int pick2 = 0;
+  int pick3 = 0;
+  for (int level = 0; level < steps; ++level) {
+    const int blend = BcWeight(bits, level);
+    uint shade = 0u;
+    for (int c = 0; c < 3; ++c) {
+      if (BcIn(mask, c)) {
+        shade = BcSet(shade, c, BcLerp(BcGet(low, c), BcGet(high, c), blend));
       }
     }
-    levels |= pick << (k * 4);
-    if (k < 2) {
-      costs_low |= uint(best) << uint(k * 16);
-    } else {
-      costs_high |= uint(best) << uint((k - 2) * 16);
+    if (n0 != 0) {
+      BcNearer(p0, shade, mask, level, best0, pick0);
+    }
+    if (n1 != 0) {
+      BcNearer(p1, shade, mask, level, best1, pick1);
+    }
+    if (n2 != 0) {
+      BcNearer(p2, shade, mask, level, best2, pick2);
+    }
+    if (n3 != 0) {
+      BcNearer(p3, shade, mask, level, best3, pick3);
+    }
+  }
+  levels = pick0 | (pick1 << 4) | (pick2 << 8) | (pick3 << 12);
+  costs_low = uint(n0 != 0 ? best0 : 0) | (uint(n1 != 0 ? best1 : 0) << 16);
+  costs_high = uint(n2 != 0 ? best2 : 0) | (uint(n3 != 0 ? best3 : 0) << 16);
+}
+
+void BcMins(uint paint, int red, int green, int blue, bool pairs, BC_INOUT(int, best0), BC_INOUT(int, best1),
+            BC_INOUT(int, best2)) {
+  const int gap0 = BcGet(paint, 0) - red;
+  const int gap1 = BcGet(paint, 1) - green;
+  const int gap2 = BcGet(paint, 2) - blue;
+  const int error0 = gap0 * gap0;
+  const int error1 = gap1 * gap1;
+  const int error2 = gap2 * gap2;
+  best0 = min(best0, pairs ? error1 + error2 : error0);
+  best1 = min(best1, pairs ? error0 + error2 : error1);
+  best2 = min(best2, pairs ? error0 + error1 : error2);
+}
+
+void BcPlaneLines(uint p0, uint p1, uint p2, uint p3, int n0, int n1, int n2, int n3, uint fresh, int bits,
+                  int codec, bool pairs, BC_INOUT(int, cost0), BC_INOUT(int, cost1), BC_INOUT(int, cost2),
+                  BC_INOUT(int, lines)) {
+  uint s0 = 0u;
+  uint s1 = 0u;
+  uint s2 = 0u;
+  uint s3 = 0u;
+  BcSnapPaints(p0, p1, p2, p3, 7, codec, s0, s1, s2, s3);
+  const int steps = 1 << bits;
+  cost0 = 0x7fffffff;
+  cost1 = 0x7fffffff;
+  cost2 = 0x7fffffff;
+  lines = 0;
+  for (int line = 0; line < 10; ++line) {
+    if (!BcHas(fresh, line)) {
+      continue;
+    }
+    const int a = kBcPairs[line * 2];
+    const int b = kBcPairs[line * 2 + 1];
+    uint low = BcOf(s0, s1, s2, s3, a);
+    uint high = BcOf(s0, s1, s2, s3, b);
+    if (a == b && codec == kBcPlain) {
+      low = BcOf(p0, p1, p2, p3, a);
+      high = low;
+      BcSolid(low, 7, codec, -1, low, high);
+    }
+    int first0 = 0xffff;
+    int first1 = 0xffff;
+    int first2 = 0xffff;
+    int second0 = 0xffff;
+    int second1 = 0xffff;
+    int second2 = 0xffff;
+    int third0 = 0xffff;
+    int third1 = 0xffff;
+    int third2 = 0xffff;
+    int fourth0 = 0xffff;
+    int fourth1 = 0xffff;
+    int fourth2 = 0xffff;
+    for (int level = 0; level < steps; ++level) {
+      const int blend = BcWeight(bits, level);
+      const int red = BcLerp(BcGet(low, 0), BcGet(high, 0), blend);
+      const int green = BcLerp(BcGet(low, 1), BcGet(high, 1), blend);
+      const int blue = BcLerp(BcGet(low, 2), BcGet(high, 2), blend);
+      if (n0 != 0) {
+        BcMins(p0, red, green, blue, pairs, first0, first1, first2);
+      }
+      if (n1 != 0) {
+        BcMins(p1, red, green, blue, pairs, second0, second1, second2);
+      }
+      if (n2 != 0) {
+        BcMins(p2, red, green, blue, pairs, third0, third1, third2);
+      }
+      if (n3 != 0) {
+        BcMins(p3, red, green, blue, pairs, fourth0, fourth1, fourth2);
+      }
+    }
+    const int total0 = n0 * first0 + n1 * second0 + n2 * third0 + n3 * fourth0;
+    const int total1 = n0 * first1 + n1 * second1 + n2 * third1 + n3 * fourth1;
+    const int total2 = n0 * first2 + n1 * second2 + n2 * third2 + n3 * fourth2;
+    if (total0 < cost0) {
+      cost0 = total0;
+      lines = (lines & ~15) | line;
+    }
+    if (total1 < cost1) {
+      cost1 = total1;
+      lines = (lines & ~(15 << 4)) | (line << 4);
+    }
+    if (total2 < cost2) {
+      cost2 = total2;
+      lines = (lines & ~(15 << 8)) | (line << 8);
     }
   }
 }
@@ -810,137 +978,187 @@ void BcEncodeColor(BC_IN_ARRAY(uint, px, 16), uint valid, BC_IN_ARRAY(uint, b, 8
     const int n1 = bitCount(m1);
     const int n2 = bitCount(m2);
     const int n3 = bitCount(m3);
+    const uint fresh = BcFreshLines(p0, p1, p2, p3, 7);
     int best = 0x7fffffff;
-    int rest_cost = 0;
-    uint rest_low = 0u;
-    uint rest_high = 0u;
-    int rest_levels = 0;
-    int near_levels = 0;
-    int far_levels = 0;
-    int lone_levels = 0;
-    for (int step = 0; step < 20; ++step) {
-      const int plane = step == 0 || step == 7 ? 0 : (step < 7 ? step - 1 : step - 2);
-      const int flavor = plane / 6;
-      const int channel = (plane >> 1) % 3;
-      const bool paired = step == 0 || step == 7;
-      const bool alone = !paired && (plane & 1) != 0;
-      if (!alone && best == 0) {
-        break;
-      }
-      int mask = 7;
-      int bits = step == 7 ? 3 : 2;
-      int codec = step == 7 ? kBcShared : kBcUnique;
-      if (!paired) {
-        mask = alone ? 1 << channel : 7 & ~(1 << channel);
-        bits = flavor != 0 && (flavor == 1) == alone ? 3 : 2;
-        codec = flavor == 0 ? (alone ? kBcByte : kBcPlain) : (alone ? kBcSix : kBcFive);
-      }
-      uint table_low[10];
-      uint table_high[10];
-      int one = 0;
-      int two = 0;
-      int cost = 0x7fffffff;
-      for (int line = 0; line < 10; ++line) {
-        uint line_low = 0u;
-        uint line_high = 0u;
-        int line_levels = 0;
-        uint costs_low = 0u;
-        uint costs_high = 0u;
-        BcLine(p0, p1, p2, p3, line, mask, bits, codec, line_low, line_high, line_levels, costs_low, costs_high);
-        table_low[line] = costs_low;
-        table_high[line] = costs_high;
-        const int total = BcLineCost(costs_low, costs_high, n0, n1, n2, n3);
-        if (!paired && total < cost) {
-          cost = total;
-          one = line;
-        }
-      }
-      int picked = 0;
-      for (int trial = 0; trial < (paired ? 64 : 0) && cost != 0; ++trial) {
-        const uint members = kBcShapes[trial];
-        const int i0 = bitCount(m0 & members);
-        const int i1 = bitCount(m1 & members);
-        const int i2 = bitCount(m2 & members);
-        const int i3 = bitCount(m3 & members);
-        int near_cost = 0x7fffffff;
-        int far_cost = 0x7fffffff;
-        int near_line = 0;
-        int far_line = 0;
+    int win_lines = 0;
+    int win_masks = 0;
+    int win_bits = 0;
+    int win_codecs = 0;
+    for (int stage = 0; stage < 5 && best != 0; ++stage) {
+      if (stage == 0 || stage == 2) {
+        const int bits = stage == 0 ? 2 : 3;
+        const int codec = stage == 0 ? kBcUnique : kBcShared;
+        uint s0 = 0u;
+        uint s1 = 0u;
+        uint s2 = 0u;
+        uint s3 = 0u;
+        BcSnapPaints(p0, p1, p2, p3, 7, codec, s0, s1, s2, s3);
+        uint table_low[10];
+        uint table_high[10];
         for (int line = 0; line < 10; ++line) {
-          const int outside = BcLineCost(table_low[line], table_high[line], n0 - i0, n1 - i1, n2 - i2, n3 - i3);
-          const int inside = BcLineCost(table_low[line], table_high[line], i0, i1, i2, i3);
-          if (outside < near_cost) {
-            near_cost = outside;
-            near_line = line;
+          if (!BcHas(fresh, line)) {
+            continue;
           }
-          if (inside < far_cost) {
-            far_cost = inside;
-            far_line = line;
+          uint line_low = 0u;
+          uint line_high = 0u;
+          int line_levels = 0;
+          uint costs_low = 0u;
+          uint costs_high = 0u;
+          BcLine(p0, p1, p2, p3, s0, s1, s2, s3, n0, n1, n2, n3, line, 7, bits, codec, line_low, line_high,
+                 line_levels, costs_low, costs_high);
+          table_low[line] = costs_low;
+          table_high[line] = costs_high;
+        }
+        int cost = 0x7fffffff;
+        int picked = 0;
+        int one = 0;
+        int two = 0;
+        for (int trial = 0; trial < 64 && cost != 0; ++trial) {
+          const uint members = kBcShapes[trial];
+          const int i0 = bitCount(m0 & members);
+          const int i1 = bitCount(m1 & members);
+          const int i2 = bitCount(m2 & members);
+          const int i3 = bitCount(m3 & members);
+          int near_cost = 0x7fffffff;
+          int far_cost = 0x7fffffff;
+          int near_line = 0;
+          int far_line = 0;
+          for (int line = 0; line < 10; ++line) {
+            if (!BcHas(fresh, line)) {
+              continue;
+            }
+            const int outside = BcLineCost(table_low[line], table_high[line], n0 - i0, n1 - i1, n2 - i2, n3 - i3);
+            const int inside = BcLineCost(table_low[line], table_high[line], i0, i1, i2, i3);
+            if (outside < near_cost) {
+              near_cost = outside;
+              near_line = line;
+            }
+            if (inside < far_cost) {
+              far_cost = inside;
+              far_line = line;
+            }
+          }
+          if (near_cost + far_cost < cost) {
+            cost = near_cost + far_cost;
+            picked = trial;
+            one = near_line;
+            two = far_line;
           }
         }
-        if (near_cost + far_cost < cost) {
-          cost = near_cost + far_cost;
-          picked = trial;
-          one = near_line;
-          two = far_line;
+        if (cost < best) {
+          best = cost;
+          mode = stage == 0 ? 3 : 1;
+          shape = picked;
+          lone = 3;
+          wide_lone = 0;
+          win_lines = one | (two << 4);
+          win_masks = 7 | (7 << 4);
+          win_bits = bits | (bits << 4);
+          win_codecs = codec | (codec << 4);
         }
+        continue;
       }
-      uint one_low = 0u;
-      uint one_high = 0u;
-      uint two_low = 0u;
-      uint two_high = 0u;
-      int one_levels = 0;
-      int two_levels = 0;
-      for (int side = 0; side < (paired ? 2 : 1); ++side) {
-        uint line_low = 0u;
-        uint line_high = 0u;
-        int line_levels = 0;
-        uint costs_low = 0u;
-        uint costs_high = 0u;
-        BcLine(p0, p1, p2, p3, side == 0 ? one : two, mask, bits, codec, line_low, line_high, line_levels, costs_low,
-               costs_high);
-        if (side == 0) {
-          one_low = line_low;
-          one_high = line_high;
-          one_levels = line_levels;
+      const int flavor = stage == 1 ? 0 : stage - 2;
+      const int rest_bits = flavor == 2 ? 3 : 2;
+      const int lone_bits = flavor == 1 ? 3 : 2;
+      const int rest_codec = flavor == 0 ? kBcPlain : kBcFive;
+      const int lone_codec = flavor == 0 ? kBcByte : kBcSix;
+      int rest0 = 0;
+      int rest1 = 0;
+      int rest2 = 0;
+      int rest_lines = 0;
+      int lone0 = 0;
+      int lone1 = 0;
+      int lone2 = 0;
+      int lone_lines = 0;
+      bool both = false;
+      for (int pass = 0; pass < 2; ++pass) {
+        if (pass == 1 && min(rest0, min(rest1, rest2)) >= best) {
+          break;
+        }
+        int pass0 = 0;
+        int pass1 = 0;
+        int pass2 = 0;
+        int pass_lines = 0;
+        BcPlaneLines(p0, p1, p2, p3, n0, n1, n2, n3, fresh, pass == 0 ? rest_bits : lone_bits,
+                     pass == 0 ? rest_codec : lone_codec, pass == 0, pass0, pass1, pass2, pass_lines);
+        if (pass == 0) {
+          rest0 = pass0;
+          rest1 = pass1;
+          rest2 = pass2;
+          rest_lines = pass_lines;
         } else {
-          two_low = line_low;
-          two_high = line_high;
-          two_levels = line_levels;
+          lone0 = pass0;
+          lone1 = pass1;
+          lone2 = pass2;
+          lone_lines = pass_lines;
+          both = true;
         }
       }
-      if (!paired && !alone) {
-        rest_cost = cost;
-        rest_low = one_low;
-        rest_high = one_high;
-        rest_levels = one_levels;
+      if (!both) {
         continue;
       }
-      if (!paired) {
-        cost += rest_cost;
+      for (int channel = 0; channel < 3 && best != 0; ++channel) {
+        const int cost = BcOfInt(rest0, rest1, rest2, 0, channel) + BcOfInt(lone0, lone1, lone2, 0, channel);
+        if (cost >= best) {
+          continue;
+        }
+        best = cost;
+        mode = flavor == 0 ? 5 : 4;
+        shape = 0;
+        lone = channel;
+        wide_lone = flavor == 1 ? 1 : 0;
+        win_lines = ((rest_lines >> (channel * 4)) & 15) | (((lone_lines >> (channel * 4)) & 15) << 4);
+        win_masks = (7 & ~(1 << channel)) | ((1 << channel) << 4);
+        win_bits = rest_bits | (lone_bits << 4);
+        win_codecs = rest_codec | (lone_codec << 4);
       }
-      if (cost >= best) {
-        continue;
-      }
-      best = cost;
-      mode = paired ? (step == 0 ? 3 : 1) : (flavor == 0 ? 5 : 4);
-      shape = picked;
-      lone = paired ? 3 : channel;
-      wide_lone = flavor == 1 ? 1 : 0;
-      if (paired) {
-        low = one_low;
-        high = one_high;
-        far_low = two_low;
-        far_high = two_high;
-        near_levels = one_levels;
-        far_levels = two_levels;
+    }
+    uint one_low = 0u;
+    uint one_high = 0u;
+    uint two_low = 0u;
+    uint two_high = 0u;
+    int one_levels = 0;
+    int two_levels = 0;
+    for (int side = 0; side < 2; ++side) {
+      const int side_mask = (win_masks >> (side * 4)) & 15;
+      const int side_bits = (win_bits >> (side * 4)) & 15;
+      const int side_codec = (win_codecs >> (side * 4)) & 15;
+      uint s0 = 0u;
+      uint s1 = 0u;
+      uint s2 = 0u;
+      uint s3 = 0u;
+      BcSnapPaints(p0, p1, p2, p3, side_mask, side_codec, s0, s1, s2, s3);
+      uint line_low = 0u;
+      uint line_high = 0u;
+      int line_levels = 0;
+      uint costs_low = 0u;
+      uint costs_high = 0u;
+      BcLine(p0, p1, p2, p3, s0, s1, s2, s3, n0, n1, n2, n3, (win_lines >> (side * 4)) & 15, side_mask, side_bits,
+             side_codec, line_low, line_high, line_levels, costs_low, costs_high);
+      if (side == 0) {
+        one_low = line_low;
+        one_high = line_high;
+        one_levels = line_levels;
       } else {
-        low = BcSet(rest_low, channel, BcGet(one_low, channel)) | 0xff000000u;
-        high = BcSet(rest_high, channel, BcGet(one_high, channel)) | 0xff000000u;
-        near_levels = rest_levels;
-        far_levels = rest_levels;
-        lone_levels = one_levels;
+        two_low = line_low;
+        two_high = line_high;
+        two_levels = line_levels;
       }
+    }
+    int near_levels = one_levels;
+    int far_levels = one_levels;
+    int lone_levels = 0;
+    if (mode == 1 || mode == 3) {
+      low = one_low;
+      high = one_high;
+      far_low = two_low;
+      far_high = two_high;
+      far_levels = two_levels;
+    } else {
+      low = BcSet(one_low, lone, BcGet(two_low, lone)) | 0xff000000u;
+      high = BcSet(one_high, lone, BcGet(two_high, lone)) | 0xff000000u;
+      lone_levels = two_levels;
     }
     const uint members = mode == 1 || mode == 3 ? kBcShapes[shape] : 0u;
     for (int i = 0; i < 16; ++i) {
