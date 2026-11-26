@@ -362,7 +362,7 @@ def build_bridges():
     etc_objects = []
     for cc in (os.path.join(bridge, 'gles_etc.cc'), os.path.join(root, 'src', 'graphics', 'etc2_decoder.cc')):
         obj = os.path.join(objdir, os.path.basename(cc) + '.o')
-        subprocess.check_call([CLANGXX, '--target=x86_64-linux-android28', '-std=c++17', '-O2', '-Wall', '-Wextra', '-fPIC', '-c',
+        subprocess.check_call([CLANGXX, '--target=x86_64-linux-android28', '-std=c++17', '-O3', '-Wall', '-Wextra', '-fPIC', '-c',
                                f'-I{root}/include', '-o', obj, cc])
         etc_objects.append(obj)
     for soname, sources in (('libGLESv2.so.2', ['gen/gles_bridge.c', 'gles_manual.c'] + etc_objects + ['-lc++_static',
