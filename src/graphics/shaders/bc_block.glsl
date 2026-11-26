@@ -856,6 +856,23 @@ void BcPack(int mode, int shape, int lone, int wide_lone, uint low, uint high, u
   block[3] = w3;
 }
 
+void BcPackSolid(uint low, uint high, uint valid, BC_INOUT_ARRAY(uint, block, 4)) {
+  uint spread = valid & 0xfffeu;
+  spread = (spread | (spread << 8)) & 0x00ff00ffu;
+  spread = (spread | (spread << 4)) & 0x0f0f0f0fu;
+  spread = (spread | (spread << 2)) & 0x33333333u;
+  spread = (spread | (spread << 1)) & 0x55555555u;
+  const bool level = (low & 0xffffffu) == (high & 0xffffffu);
+  const uint red = uint(BcGet(low, 0) >> 1) | (uint(BcGet(high, 0) >> 1) << 7);
+  const uint green = uint(BcGet(low, 1) >> 1) | (uint(BcGet(high, 1) >> 1) << 7);
+  const uint blue = uint(BcGet(low, 2) >> 1) | (uint(BcGet(high, 2) >> 1) << 7);
+  const uint alpha = uint(BcGet(low, 3)) | (uint(BcGet(high, 3)) << 8);
+  block[0] = 32u | (red << 8) | (green << 22);
+  block[1] = (green >> 10) | (blue << 4) | (alpha << 18);
+  block[2] = (alpha >> 14) | (level ? 0u : (spread << 1) | ((valid & 1u) << 2));
+  block[3] = 0u;
+}
+
 int BcEtcKind(BC_IN_ARRAY(uint, b, 8), bool punchthrough) {
   const bool individual = !punchthrough && (b[3] & 2u) == 0u;
   bool paint = false;
@@ -910,7 +927,7 @@ void BcEncodeColor(BC_IN_ARRAY(uint, px, 16), uint valid, BC_IN_ARRAY(uint, b, 8
     }
   }
   const int kind = BcEtcKind(b, punchthrough);
-  const bool mixed = solid || !opaque;
+  const bool mixed = !opaque;
   int shape = (b[3] & 1u) != 0u ? 13 : 0;
   if (kind == kBcPlanar) {
     int across = 0;
@@ -932,13 +949,18 @@ void BcEncodeColor(BC_IN_ARRAY(uint, px, 16), uint valid, BC_IN_ARRAY(uint, b, 8
   uint levels_high = 0u;
   uint lone_low = 0u;
   uint lone_high = 0u;
-  bool done = false;
+  bool done = solid;
+  if (solid) {
+    for (int part = 0; part < 2; ++part) {
+      BcSolid(seed, part == 0 ? 7 : 8, part == 0 ? kBcPlain : kBcByte, -1, low, high);
+    }
+  }
   const uint m0 = ~high_plane & ~low_plane & valid;
   const uint m1 = ~high_plane & low_plane & valid;
   const uint m2 = high_plane & ~low_plane & valid;
   const uint m3 = high_plane & low_plane & valid;
 
-  if (!mixed && kind == kBcHalves) {
+  if (!solid && !mixed && kind == kBcHalves) {
     done = true;
     const uint members = kBcShapes[shape];
     for (int subset = 0; subset < 2; ++subset) {
@@ -968,7 +990,7 @@ void BcEncodeColor(BC_IN_ARRAY(uint, px, 16), uint valid, BC_IN_ARRAY(uint, b, 8
     }
   }
 
-  if (!mixed && kind == kBcPaint) {
+  if (!solid && !mixed && kind == kBcPaint) {
     done = true;
     const uint p0 = m0 != 0u ? px[findLSB(m0)] : seed;
     const uint p1 = m1 != 0u ? px[findLSB(m1)] : seed;
@@ -1232,8 +1254,12 @@ void BcEncodeColor(BC_IN_ARRAY(uint, px, 16), uint valid, BC_IN_ARRAY(uint, b, 8
       high |= 0xff000000u;
     }
   }
-  BcPack(mode, shape, lone, wide_lone, low, high, far_low, far_high, levels_low, levels_high, lone_low, lone_high,
-         block);
+  if (solid) {
+    BcPackSolid(low, high, valid, block);
+  } else {
+    BcPack(mode, shape, lone, wide_lone, low, high, far_low, far_high, levels_low, levels_high, lone_low, lone_high,
+           block);
+  }
 }
 
 void BcEncodeScalar(BC_IN_ARRAY(int, values, 16), uint valid, bool is_signed, BC_INOUT_ARRAY(uint, block, 2)) {
