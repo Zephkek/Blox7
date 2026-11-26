@@ -255,7 +255,11 @@ static void vkdump_queue(VkQueue queue, uint32_t family) {
   if (queue == VK_NULL_HANDLE) return;
   lock(&g_vkdump_lock);
   int found = 0;
-  for (int i = 0; i < VKDUMP_SLOTS; i++) found |= g_vkdump_queues[i].queue == queue;
+  for (int i = 0; i < VKDUMP_SLOTS; i++) {
+    if (g_vkdump_queues[i].queue != queue) continue;
+    g_vkdump_queues[i].family = family;
+    found = 1;
+  }
   if (!found) {
     g_vkdump_queues[next].queue = queue;
     g_vkdump_queues[next].family = family;
