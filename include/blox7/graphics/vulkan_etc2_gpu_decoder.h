@@ -26,6 +26,7 @@ struct Etc2GpuUpload {
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   std::uint32_t layers = 1;
+  bool bc = false;
 };
 
 struct Etc2GpuCopy {
@@ -35,18 +36,39 @@ struct Etc2GpuCopy {
   VkDeviceSize target_offset = 0;
 };
 
+class Etc2GpuEncoder final {
+ public:
+  static std::shared_ptr<Etc2GpuEncoder> Start(
+      VkDevice device, PFN_vkGetDeviceProcAddr get_device_proc_addr);
+  static void KeepUntilExit(std::shared_ptr<Etc2GpuEncoder> encoder);
+  ~Etc2GpuEncoder();
+  Etc2GpuEncoder(const Etc2GpuEncoder&) = delete;
+  Etc2GpuEncoder& operator=(const Etc2GpuEncoder&) = delete;
+
+  VkPipeline Pipeline() const;
+  void Wait();
+
+  struct State;
+
+ private:
+  explicit Etc2GpuEncoder(State* state);
+  State* state_;
+};
+
 class Etc2GpuDecoder final {
  public:
   static std::unique_ptr<Etc2GpuDecoder> Create(
       VkDevice device, const VkPhysicalDeviceLimits& limits,
       const VkPhysicalDeviceMemoryProperties& memory,
       const VkQueueFamilyProperties* families, std::uint32_t family_count,
-      PFN_vkGetDeviceProcAddr get_device_proc_addr);
+      PFN_vkGetDeviceProcAddr get_device_proc_addr,
+      std::shared_ptr<Etc2GpuEncoder> encoder = nullptr);
   ~Etc2GpuDecoder();
   Etc2GpuDecoder(const Etc2GpuDecoder&) = delete;
   Etc2GpuDecoder& operator=(const Etc2GpuDecoder&) = delete;
 
   bool DecodesOn(std::uint32_t family) const;
+  bool Encodes() const;
   bool CopiesOn(std::uint32_t family) const;
   bool Accepts(const Etc2GpuUpload& upload) const;
   bool Decode(VkQueue queue, std::uint32_t family,

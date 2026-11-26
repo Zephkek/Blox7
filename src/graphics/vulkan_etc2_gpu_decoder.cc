@@ -1,10 +1,17 @@
 #include "blox7/graphics/vulkan_etc2_gpu_decoder.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <thread>
+#include <utility>
 #include <vector>
 
+#include "blox7/graphics/etc2_bc_encoder.h"
+#include "gen/etc2_bc_encode_shader.h"
 #include "gen/etc2_decode_shader.h"
 
 namespace blox7::graphics {
@@ -164,12 +171,173 @@ void Barrier(const Functions& vk, VkCommandBuffer command,
                         nullptr, 0, nullptr);
 }
 
+bool CreateLayouts(const Functions& vk, VkDevice device,
+                   VkDescriptorSetLayout* set_layout,
+                   VkPipelineLayout* pipeline_layout) {
+  VkDescriptorSetLayoutBinding bindings[2] = {};
+  for (std::uint32_t index = 0; index < 2; ++index) {
+    bindings[index].binding = index;
+    bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[index].descriptorCount = 1;
+    bindings[index].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  }
+  VkDescriptorSetLayoutCreateInfo set_info{};
+  set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  set_info.bindingCount = 2;
+  set_info.pBindings = bindings;
+  VkDescriptorSetLayout created_set = VK_NULL_HANDLE;
+  if (vk.CreateDescriptorSetLayout(device, &set_info, nullptr, &created_set) !=
+      VK_SUCCESS) {
+    return false;
+  }
+  *set_layout = created_set;
+
+  const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Job)};
+  VkPipelineLayoutCreateInfo layout_info{};
+  layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  layout_info.setLayoutCount = 1;
+  layout_info.pSetLayouts = set_layout;
+  layout_info.pushConstantRangeCount = 1;
+  layout_info.pPushConstantRanges = &range;
+  VkPipelineLayout created_layout = VK_NULL_HANDLE;
+  if (vk.CreatePipelineLayout(device, &layout_info, nullptr, &created_layout) !=
+      VK_SUCCESS) {
+    return false;
+  }
+  *pipeline_layout = created_layout;
+  return true;
+}
+
+VkPipeline CreateShader(const Functions& vk, VkDevice device,
+                        VkPipelineLayout pipeline_layout,
+                        const std::uint32_t* code, std::size_t bytes) {
+  VkShaderModuleCreateInfo module_info{};
+  module_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  module_info.codeSize = bytes;
+  module_info.pCode = code;
+  VkShaderModule module = VK_NULL_HANDLE;
+  if (vk.CreateShaderModule(device, &module_info, nullptr, &module) !=
+      VK_SUCCESS) {
+    return VK_NULL_HANDLE;
+  }
+  VkComputePipelineCreateInfo pipeline_info{};
+  pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+  pipeline_info.stage.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+  pipeline_info.stage.module = module;
+  pipeline_info.stage.pName = "main";
+  pipeline_info.layout = pipeline_layout;
+  VkPipeline created = VK_NULL_HANDLE;
+  const VkResult result = vk.CreateComputePipelines(
+      device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &created);
+  vk.DestroyShaderModule(device, module, nullptr);
+  return result == VK_SUCCESS ? created : VK_NULL_HANDLE;
+}
+
+bool LoadFunctions(VkDevice device,
+                   PFN_vkGetDeviceProcAddr get_device_proc_addr,
+                   Functions* vk) {
+  bool loaded = true;
+#define BLOX7_ETC2_GPU_LOAD(name)                \
+  vk->name = reinterpret_cast<PFN_vk##name>(     \
+      get_device_proc_addr(device, "vk" #name)); \
+  loaded = loaded && vk->name != nullptr;
+  BLOX7_ETC2_GPU_FUNCTIONS(BLOX7_ETC2_GPU_LOAD)
+#undef BLOX7_ETC2_GPU_LOAD
+  return loaded;
+}
+
 }  // namespace
+
+struct Etc2GpuEncoder::State {
+  VkDevice device = VK_NULL_HANDLE;
+  Functions vk;
+  VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+  VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+  std::atomic<VkPipeline> pipeline{VK_NULL_HANDLE};
+  std::thread builder;
+};
+
+std::shared_ptr<Etc2GpuEncoder> Etc2GpuEncoder::Start(
+    VkDevice device, PFN_vkGetDeviceProcAddr get_device_proc_addr) {
+  auto state = std::make_unique<State>();
+  state->device = device;
+  if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr ||
+      !LoadFunctions(device, get_device_proc_addr, &state->vk)) {
+    return nullptr;
+  }
+  State* shared = state.get();
+  std::shared_ptr<Etc2GpuEncoder> encoder(new Etc2GpuEncoder(state.release()));
+  shared->builder = std::thread([shared] {
+    const auto start = std::chrono::steady_clock::now();
+    VkPipeline built = VK_NULL_HANDLE;
+    if (CreateLayouts(shared->vk, shared->device, &shared->set_layout,
+                      &shared->pipeline_layout)) {
+      built = CreateShader(shared->vk, shared->device, shared->pipeline_layout,
+                           kEtc2BcEncodeShader, sizeof(kEtc2BcEncodeShader));
+    }
+    shared->pipeline.store(built, std::memory_order_release);
+    const double seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
+            .count();
+    std::fprintf(stderr,
+                 built != VK_NULL_HANDLE
+                     ? "  [vulkan] BC encoder built in %.0f ms\n"
+                     : "  [vulkan] BC encoder could not be built (%.0f ms), "
+                       "uploads stay on the CPU encoder\n",
+                 seconds * 1000);
+  });
+  return encoder;
+}
+
+void Etc2GpuEncoder::KeepUntilExit(std::shared_ptr<Etc2GpuEncoder> encoder) {
+  if (encoder == nullptr) {
+    return;
+  }
+  static std::mutex mutex;
+  static std::vector<std::shared_ptr<Etc2GpuEncoder>>* const kept =
+      new std::vector<std::shared_ptr<Etc2GpuEncoder>>;
+  std::lock_guard<std::mutex> lock(mutex);
+  kept->push_back(std::move(encoder));
+}
+
+Etc2GpuEncoder::Etc2GpuEncoder(State* state) : state_(state) {}
+
+Etc2GpuEncoder::~Etc2GpuEncoder() {
+  Wait();
+  const VkPipeline built = state_->pipeline.load(std::memory_order_acquire);
+  if (built != VK_NULL_HANDLE) {
+    state_->vk.DestroyPipeline(state_->device, built, nullptr);
+  }
+  if (state_->pipeline_layout != VK_NULL_HANDLE) {
+    state_->vk.DestroyPipelineLayout(state_->device, state_->pipeline_layout,
+                                     nullptr);
+  }
+  if (state_->set_layout != VK_NULL_HANDLE) {
+    state_->vk.DestroyDescriptorSetLayout(state_->device, state_->set_layout,
+                                          nullptr);
+  }
+  delete state_;
+}
+
+VkPipeline Etc2GpuEncoder::Pipeline() const {
+  return state_->pipeline.load(std::memory_order_acquire);
+}
+
+void Etc2GpuEncoder::Wait() {
+  if (state_->builder.joinable()) {
+    state_->builder.join();
+  }
+}
 
 struct Etc2GpuDecoder::State {
   ~State();
 
   bool CreatePipeline();
+  VkPipeline Encoder() const {
+    return encoder != nullptr ? encoder->Pipeline() : VK_NULL_HANDLE;
+  }
   bool Plan(const Etc2GpuUpload& upload, std::vector<Band>* out) const;
   Slot* Acquire(std::uint32_t family);
   bool CreateSlot(std::uint32_t family, Slot* slot);
@@ -201,6 +369,7 @@ struct Etc2GpuDecoder::State {
   VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
   VkPipeline pipeline = VK_NULL_HANDLE;
+  std::shared_ptr<Etc2GpuEncoder> encoder;
   std::mutex mutex;
   std::vector<std::vector<std::unique_ptr<Slot>>> slots;
   std::uint64_t serial = 0;
@@ -231,71 +400,20 @@ Etc2GpuDecoder::State::~State() {
 }
 
 bool Etc2GpuDecoder::State::CreatePipeline() {
-  VkDescriptorSetLayoutBinding bindings[2] = {};
-  for (std::uint32_t index = 0; index < 2; ++index) {
-    bindings[index].binding = index;
-    bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[index].descriptorCount = 1;
-    bindings[index].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-  }
-  VkDescriptorSetLayoutCreateInfo set_info{};
-  set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  set_info.bindingCount = 2;
-  set_info.pBindings = bindings;
-  VkDescriptorSetLayout created_set = VK_NULL_HANDLE;
-  if (vk.CreateDescriptorSetLayout(device, &set_info, nullptr, &created_set) !=
-      VK_SUCCESS) {
+  if (!CreateLayouts(vk, device, &set_layout, &pipeline_layout)) {
     return false;
   }
-  set_layout = created_set;
-
-  const VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Job)};
-  VkPipelineLayoutCreateInfo layout_info{};
-  layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  layout_info.setLayoutCount = 1;
-  layout_info.pSetLayouts = &set_layout;
-  layout_info.pushConstantRangeCount = 1;
-  layout_info.pPushConstantRanges = &range;
-  VkPipelineLayout created_layout = VK_NULL_HANDLE;
-  if (vk.CreatePipelineLayout(device, &layout_info, nullptr, &created_layout) !=
-      VK_SUCCESS) {
-    return false;
-  }
-  pipeline_layout = created_layout;
-
-  VkShaderModuleCreateInfo module_info{};
-  module_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  module_info.codeSize = sizeof(kEtc2DecodeShader);
-  module_info.pCode = kEtc2DecodeShader;
-  VkShaderModule module = VK_NULL_HANDLE;
-  if (vk.CreateShaderModule(device, &module_info, nullptr, &module) !=
-      VK_SUCCESS) {
-    return false;
-  }
-  VkComputePipelineCreateInfo pipeline_info{};
-  pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-  pipeline_info.stage.sType =
-      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-  pipeline_info.stage.module = module;
-  pipeline_info.stage.pName = "main";
-  pipeline_info.layout = pipeline_layout;
-  VkPipeline created = VK_NULL_HANDLE;
-  const VkResult result = vk.CreateComputePipelines(
-      device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &created);
-  vk.DestroyShaderModule(device, module, nullptr);
-  if (result != VK_SUCCESS) {
-    return false;
-  }
-  pipeline = created;
-  return true;
+  pipeline = CreateShader(vk, device, pipeline_layout, kEtc2DecodeShader,
+                          sizeof(kEtc2DecodeShader));
+  return pipeline != VK_NULL_HANDLE;
 }
 
 bool Etc2GpuDecoder::State::Plan(const Etc2GpuUpload& upload,
                                  std::vector<Band>* out) const {
   if (upload.source == VK_NULL_HANDLE || upload.target == VK_NULL_HANDLE ||
-      upload.height == 0 || upload.layers == 0 ||
-      !Etc2GpuDecodable(upload.format, upload.width) ||
+      upload.width == 0 || upload.height == 0 || upload.layers == 0 ||
+      (upload.bc ? Encoder() == VK_NULL_HANDLE
+                 : !Etc2GpuDecodable(upload.format, upload.width)) ||
       upload.target_offset % 4 != 0) {
     return false;
   }
@@ -314,9 +432,12 @@ bool Etc2GpuDecoder::State::Plan(const Etc2GpuUpload& upload,
       blocks_wide > VkDeviceSize{max_groups[0]} * kGroupSize) {
     return false;
   }
-  const VkDeviceSize texel_bytes = EtcDecodedTexelBytes(upload.format);
-  const VkDeviceSize target_row = VkDeviceSize{upload.width} * texel_bytes;
-  const VkDeviceSize target_layer = target_row * upload.height;
+  const VkDeviceSize target_row =
+      upload.bc ? blocks_wide * BcBlockBytes(upload.format)
+                : VkDeviceSize{upload.width} *
+                      EtcDecodedTexelBytes(upload.format) * 4;
+  const VkDeviceSize target_layer =
+      upload.bc ? target_row * block_rows : target_row / 4 * upload.height;
   const VkDeviceSize source_budget = std::min(max_range, pass_bytes);
   const VkDeviceSize target_budget = max_range - target_slack;
   const VkDeviceSize max_rows = VkDeviceSize{max_groups[1]} * kGroupSize;
@@ -336,16 +457,15 @@ bool Etc2GpuDecoder::State::Plan(const Etc2GpuUpload& upload,
     }
     return true;
   }
-  if (packed_row > source_budget || target_row * 4 > target_budget) {
+  if (packed_row > source_budget || target_row > target_budget) {
     return false;
   }
   if (out == nullptr) {
     return true;
   }
-  const VkDeviceSize rows =
-      std::min({block_rows, max_rows,
-                (source_budget - packed_row) / row_stride + 1,
-                target_budget / (target_row * 4)});
+  const VkDeviceSize rows = std::min(
+      {block_rows, max_rows, (source_budget - packed_row) / row_stride + 1,
+       target_budget / target_row});
   for (std::uint32_t layer = 0; layer < upload.layers; ++layer) {
     for (VkDeviceSize row = 0; row < block_rows; row += rows) {
       const VkDeviceSize count = std::min(rows, block_rows - row);
@@ -358,10 +478,12 @@ bool Etc2GpuDecoder::State::Plan(const Etc2GpuUpload& upload,
           upload.source_offset + layer * layer_stride + row * row_stride;
       band.source_bytes = (count - 1) * row_stride + packed_row;
       band.target_offset =
-          upload.target_offset + layer * target_layer + row * 4 * target_row;
+          upload.target_offset + layer * target_layer + row * target_row;
       band.target_bytes =
-          std::min(VkDeviceSize{upload.height} - row * 4, count * 4) *
-          target_row;
+          upload.bc
+              ? count * target_row
+              : std::min(VkDeviceSize{upload.height} - row * 4, count * 4) *
+                    (target_row / 4);
       out->push_back(band);
     }
   }
@@ -685,12 +807,21 @@ bool Etc2GpuDecoder::State::SubmitDecodes(VkQueue queue, Slot* slot,
   Barrier(vk, slot->command, VK_PIPELINE_STAGE_TRANSFER_BIT,
           VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
           VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-  vk.CmdBindPipeline(slot->command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  VkPipeline bound = VK_NULL_HANDLE;
   for (std::size_t index = 0; index < count; ++index) {
     const Band& band = first[index];
     const Etc2GpuUpload& upload = *band.upload;
+    const VkPipeline wanted = upload.bc ? Encoder() : pipeline;
+    if (wanted != bound) {
+      vk.CmdBindPipeline(slot->command, VK_PIPELINE_BIND_POINT_COMPUTE, wanted);
+      bound = wanted;
+    }
     const VkDeviceSize target_row =
-        VkDeviceSize{upload.width} * EtcDecodedTexelBytes(upload.format);
+        upload.bc
+            ? VkDeviceSize{(upload.width + 3) / 4} * BcBlockBytes(upload.format)
+            : VkDeviceSize{upload.width} * EtcDecodedTexelBytes(upload.format);
+    const VkDeviceSize target_rows =
+        upload.bc ? (upload.height + 3) / 4 : upload.height;
     Job job;
     job.format = ShaderFormat(upload.format);
     job.width = upload.width;
@@ -708,7 +839,7 @@ bool Etc2GpuDecoder::State::SubmitDecodes(VkQueue queue, Slot* slot,
       job.source_layer_words =
           static_cast<std::uint32_t>(upload.source_layer_stride / 4);
       job.target_layer_words =
-          static_cast<std::uint32_t>(target_row * upload.height / 4);
+          static_cast<std::uint32_t>(target_row * target_rows / 4);
     }
     vk.CmdBindDescriptorSets(slot->command, VK_PIPELINE_BIND_POINT_COMPUTE,
                              pipeline_layout, 0, 1, &sets[index], 0, nullptr);
@@ -772,7 +903,8 @@ std::unique_ptr<Etc2GpuDecoder> Etc2GpuDecoder::Create(
     VkDevice device, const VkPhysicalDeviceLimits& limits,
     const VkPhysicalDeviceMemoryProperties& memory,
     const VkQueueFamilyProperties* families, std::uint32_t family_count,
-    PFN_vkGetDeviceProcAddr get_device_proc_addr) {
+    PFN_vkGetDeviceProcAddr get_device_proc_addr,
+    std::shared_ptr<Etc2GpuEncoder> encoder) {
   const VkDeviceSize alignment =
       std::max<VkDeviceSize>(limits.minStorageBufferOffsetAlignment, 1);
   if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr ||
@@ -786,14 +918,7 @@ std::unique_ptr<Etc2GpuDecoder> Etc2GpuDecoder::Create(
   }
   auto state = std::make_unique<State>();
   state->device = device;
-  bool loaded = true;
-#define BLOX7_ETC2_GPU_LOAD(name)                  \
-  state->vk.name = reinterpret_cast<PFN_vk##name>( \
-      get_device_proc_addr(device, "vk" #name));   \
-  loaded = loaded && state->vk.name != nullptr;
-  BLOX7_ETC2_GPU_FUNCTIONS(BLOX7_ETC2_GPU_LOAD)
-#undef BLOX7_ETC2_GPU_LOAD
-  if (!loaded) {
+  if (!LoadFunctions(device, get_device_proc_addr, &state->vk)) {
     return nullptr;
   }
   state->memory = memory;
@@ -821,6 +946,7 @@ std::unique_ptr<Etc2GpuDecoder> Etc2GpuDecoder::Create(
   if (!any || !state->CreatePipeline()) {
     return nullptr;
   }
+  state->encoder = std::move(encoder);
   return std::unique_ptr<Etc2GpuDecoder>(new Etc2GpuDecoder(state.release()));
 }
 
@@ -830,6 +956,10 @@ Etc2GpuDecoder::~Etc2GpuDecoder() { delete state_; }
 
 bool Etc2GpuDecoder::DecodesOn(std::uint32_t family) const {
   return family < state_->compute.size() && state_->compute[family];
+}
+
+bool Etc2GpuDecoder::Encodes() const {
+  return state_->Encoder() != VK_NULL_HANDLE;
 }
 
 bool Etc2GpuDecoder::CopiesOn(std::uint32_t family) const {
