@@ -1,0 +1,118 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Blocks {
+  uint words[];
+} blocks;
+
+layout(std430, set = 0, binding = 1) writeonly buffer Stored {
+  uint words[];
+} stored;
+
+layout(push_constant) uniform Job {
+  uint format;
+  uint width;
+  uint height;
+  uint blocks_wide;
+  uint blocks_high;
+  uint source_word;
+  uint source_row_words;
+  uint source_layer_words;
+  uint target_word;
+  uint target_row_words;
+  uint target_layer_words;
+} job;
+
+#include "etc2_blocks.glsl"
+
+#define BC_TABLE(type, name, count) const type name[count] = type[count](
+#define BC_TABLE_END );
+#define BC_IN_ARRAY(type, name, count) in type name[count]
+#define BC_INOUT_ARRAY(type, name, count) inout type name[count]
+#define BC_INOUT(type, name) inout type name
+#include "bc_block.glsl"
+
+int Eac11(uint b[8], int texel, bool is_signed) {
+  const int multiplier = int(b[1] >> 4);
+  const int modifier = EacModifier(b, texel);
+  const int scaled = multiplier != 0 ? modifier * multiplier * 8 : modifier;
+  if (!is_signed) {
+    return clamp(int(b[0]) * 8 + 4 + scaled, 0, 2047);
+  }
+  const int base = max(-127, int(b[0]) - ((b[0] & 128u) != 0u ? 256 : 0));
+  return clamp(base * 8 + scaled, -1023, 1023);
+}
+
+void main() {
+  const uint bx = gl_GlobalInvocationID.x;
+  const uint by = gl_GlobalInvocationID.y;
+  const uint layer = gl_GlobalInvocationID.z;
+  if (bx >= job.blocks_wide || by >= job.blocks_high) {
+    return;
+  }
+  const bool wide = job.format == kRgba8 || job.format == kRg11 || job.format == kRg11Signed;
+  const uint block_words = wide ? 4u : 2u;
+  const uint source = job.source_word + layer * job.source_layer_words +
+                      by * job.source_row_words + bx * block_words;
+  uint first[8];
+  uint second[8];
+  Bytes(blocks.words[source], blocks.words[source + 1u], first);
+  if (wide) {
+    Bytes(blocks.words[source + 2u], blocks.words[source + 3u], second);
+  } else {
+    second = first;
+  }
+  uint valid = 0u;
+  for (uint y = 0u; y < 4u; ++y) {
+    for (uint x = 0u; x < 4u; ++x) {
+      if (bx * 4u + x < job.width && by * 4u + y < job.height) {
+        valid |= 1u << (y * 4u + x);
+      }
+    }
+  }
+  const bool single = job.format == kR11 || job.format == kR11Signed;
+  const uint target = job.target_word + layer * job.target_layer_words +
+                      by * job.target_row_words + bx * (single ? 2u : 4u);
+
+  if (job.format == kRgb8 || job.format == kRgb8A1 || job.format == kRgba8) {
+    uint rgba[16];
+    DecodeRgb(second, job.format == kRgb8A1, rgba);
+    uint px[16];
+    for (int x = 0; x < 4; ++x) {
+      for (int y = 0; y < 4; ++y) {
+        const int texel = x * 4 + y;
+        uint value = rgba[texel];
+        if (job.format == kRgba8) {
+          const int alpha = clamp(int(first[0]) + EacModifier(first, texel) * int(first[1] >> 4), 0, 255);
+          value = (value & 0x00ffffffu) | (uint(alpha) << 24);
+        }
+        px[y * 4 + x] = value;
+      }
+    }
+    uint block[4];
+    BcEncodeColor(px, valid, second, job.format == kRgb8A1, block);
+    for (uint word = 0u; word < 4u; ++word) {
+      stored.words[target + word] = block[word];
+    }
+    return;
+  }
+
+  const bool is_signed = job.format == kR11Signed || job.format == kRg11Signed;
+  for (uint channel = 0u; channel < (single ? 1u : 2u); ++channel) {
+    int values[16];
+    for (int x = 0; x < 4; ++x) {
+      for (int y = 0; y < 4; ++y) {
+        if (channel == 0u) {
+          values[y * 4 + x] = Eac11(first, x * 4 + y, is_signed);
+        } else {
+          values[y * 4 + x] = Eac11(second, x * 4 + y, is_signed);
+        }
+      }
+    }
+    uint block[2];
+    BcEncodeScalar(values, valid, is_signed, block);
+    stored.words[target + channel * 2u] = block[0];
+    stored.words[target + channel * 2u + 1u] = block[1];
+  }
+}
