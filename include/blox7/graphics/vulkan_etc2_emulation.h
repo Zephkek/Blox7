@@ -5,6 +5,7 @@
 
 #include <cstdint>
 
+#include "blox7/graphics/etc2_bc_encoder.h"
 #include "blox7/graphics/etc2_decoder.h"
 
 namespace blox7::graphics {
@@ -55,7 +56,8 @@ class VulkanEtc2Emulation final {
                       PFN_vkGetDeviceProcAddr get_device_proc_addr,
                       const VkPhysicalDeviceLimits* limits = nullptr,
                       const VkQueueFamilyProperties* queue_families = nullptr,
-                      std::uint32_t queue_family_count = 0, bool bc = false);
+                      std::uint32_t queue_family_count = 0, bool bc = false,
+                      EtcToBcEncoder bc_reference = EncodeEtcImageToBc);
   void RegisterQueue(VkDevice device, VkQueue queue,
                      std::uint32_t queue_family);
   void DestroyDevice(VkDevice device);

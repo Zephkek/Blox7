@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -235,6 +236,44 @@ VkPipeline CreateShader(const Functions& vk, VkDevice device,
   return result == VK_SUCCESS ? created : VK_NULL_HANDLE;
 }
 
+bool IsEac(EtcFormat format) {
+  return format == EtcFormat::kEacR11 || format == EtcFormat::kEacR11Signed ||
+         format == EtcFormat::kEacRg11 || format == EtcFormat::kEacRg11Signed;
+}
+
+void MakeOneColor(EtcFormat format, std::uint8_t* block) {
+  const std::size_t bytes = EtcBlockBytes(format);
+  if (IsEac(format)) {
+    for (std::size_t channel = 0; channel < bytes; channel += 8) {
+      std::memset(block + channel + 2, 0, 6);
+    }
+    return;
+  }
+  if (format == EtcFormat::kEtc2Rgba8) {
+    block[0] = 255;
+    block[1] &= 0x0f;
+  }
+  std::uint8_t* color = block + bytes - 8;
+  color[0] &= 0xf8;
+  color[1] &= 0xf8;
+  color[2] &= 0xf8;
+  color[3] = static_cast<std::uint8_t>((color[3] & 0xe0) |
+                                       ((color[3] >> 3) & 0x1c) | 2);
+  std::memset(color + 4, 0, 4);
+}
+
+void FillCheckBlocks(EtcFormat format, std::uint8_t* blocks, std::size_t count,
+                     std::uint32_t* seed) {
+  const std::size_t bytes = EtcBlockBytes(format);
+  for (std::size_t index = 0; index < count * bytes; ++index) {
+    *seed = *seed * 1664525u + 1013904223u;
+    blocks[index] = static_cast<std::uint8_t>(*seed >> 24);
+  }
+  for (std::size_t index = 0; index < count; index += 4) {
+    MakeOneColor(format, blocks + index * bytes);
+  }
+}
+
 bool LoadFunctions(VkDevice device,
                    PFN_vkGetDeviceProcAddr get_device_proc_addr,
                    Functions* vk) {
@@ -256,14 +295,19 @@ struct Etc2GpuEncoder::State {
   VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
   VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
   std::atomic<VkPipeline> pipeline{VK_NULL_HANDLE};
+  std::atomic<int> verdict{0};
+  EtcToBcEncoder reference = nullptr;
   std::thread builder;
 };
 
 std::shared_ptr<Etc2GpuEncoder> Etc2GpuEncoder::Start(
-    VkDevice device, PFN_vkGetDeviceProcAddr get_device_proc_addr) {
+    VkDevice device, PFN_vkGetDeviceProcAddr get_device_proc_addr,
+    EtcToBcEncoder reference) {
   auto state = std::make_unique<State>();
   state->device = device;
+  state->reference = reference;
   if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr ||
+      reference == nullptr ||
       !LoadFunctions(device, get_device_proc_addr, &state->vk)) {
     return nullptr;
   }
@@ -322,7 +366,19 @@ Etc2GpuEncoder::~Etc2GpuEncoder() {
 }
 
 VkPipeline Etc2GpuEncoder::Pipeline() const {
-  return state_->pipeline.load(std::memory_order_acquire);
+  return state_->verdict.load(std::memory_order_acquire) < 0
+             ? VK_NULL_HANDLE
+             : state_->pipeline.load(std::memory_order_acquire);
+}
+
+EtcToBcEncoder Etc2GpuEncoder::Reference() const { return state_->reference; }
+
+bool Etc2GpuEncoder::Checked() const {
+  return state_->verdict.load(std::memory_order_acquire) != 0;
+}
+
+void Etc2GpuEncoder::Judge(bool agrees) {
+  state_->verdict.store(agrees ? 1 : -1, std::memory_order_release);
 }
 
 void Etc2GpuEncoder::Wait() {
@@ -351,6 +407,9 @@ struct Etc2GpuDecoder::State {
   bool Finish(VkQueue queue, Slot* slot);
   bool SubmitDecodes(VkQueue queue, Slot* slot, const Band* first,
                      std::size_t count);
+  bool SubmitBands(VkQueue queue, std::uint32_t family,
+                   std::vector<Slot*>* submitted);
+  bool CheckEncoder(VkQueue queue, std::uint32_t family);
   bool SubmitCopies(VkQueue queue, Slot* slot, const Piece* first,
                     std::size_t count, bool after_compute);
   void Drain(const std::vector<Slot*>& submitted);
@@ -899,6 +958,129 @@ void Etc2GpuDecoder::State::Drain(const std::vector<Slot*>& submitted) {
   }
 }
 
+bool Etc2GpuDecoder::State::SubmitBands(VkQueue queue, std::uint32_t family,
+                                        std::vector<Slot*>* submitted) {
+  for (std::size_t first = 0; first < bands.size();) {
+    VkDeviceSize used = 0;
+    std::size_t last = first;
+    for (; last < bands.size(); ++last) {
+      Band& band = bands[last];
+      const VkDeviceSize offset = AlignUp(used, blocks_alignment);
+      if (last > first && offset + band.source_bytes > pass_bytes) {
+        break;
+      }
+      band.blocks_offset = offset;
+      used = offset + band.source_bytes;
+    }
+    Slot* slot = Acquire(family);
+    if (slot == nullptr || !ReserveBlocks(slot, used, last - first) ||
+        !SubmitDecodes(queue, slot, &bands[first], last - first)) {
+      Drain(*submitted);
+      return false;
+    }
+    submitted->push_back(slot);
+    first = last;
+  }
+  return true;
+}
+
+bool Etc2GpuDecoder::State::CheckEncoder(VkQueue queue, std::uint32_t family) {
+  constexpr EtcFormat kFormats[] = {
+      EtcFormat::kEtc2Rgb8,     EtcFormat::kEtc2Rgb8A1,   EtcFormat::kEtc2Rgba8,
+      EtcFormat::kEacR11,       EtcFormat::kEacR11Signed, EtcFormat::kEacRg11,
+      EtcFormat::kEacRg11Signed};
+  constexpr std::uint32_t kWidth = 62;
+  constexpr std::uint32_t kHeight = 30;
+  constexpr std::size_t kBlocksWide = (kWidth + 3) / 4;
+  constexpr std::size_t kBlocks = kBlocksWide * ((kHeight + 3) / 4);
+  std::size_t source_bytes = 0;
+  std::size_t target_bytes = 0;
+  for (const EtcFormat format : kFormats) {
+    source_bytes += kBlocks * EtcBlockBytes(format);
+    target_bytes += kBlocks * BcBlockBytes(format);
+  }
+  std::vector<std::uint8_t> blocks(source_bytes);
+  std::vector<std::uint8_t> expected(target_bytes);
+  std::vector<std::uint8_t> stored(target_bytes);
+  std::vector<Etc2GpuUpload> uploads;
+  std::size_t source_offset = 0;
+  std::size_t target_offset = 0;
+  std::uint32_t seed = 1;
+  bool ran = true;
+  for (const EtcFormat format : kFormats) {
+    const std::size_t etc_bytes = EtcBlockBytes(format);
+    const std::size_t bc_bytes = BcBlockBytes(format);
+    FillCheckBlocks(format, blocks.data() + source_offset, kBlocks, &seed);
+    ran = ran && encoder->Reference()(format, blocks.data() + source_offset,
+                                      kBlocks * etc_bytes, kWidth, kHeight,
+                                      expected.data() + target_offset,
+                                      kBlocks * bc_bytes);
+    Etc2GpuUpload upload;
+    upload.format = format;
+    upload.source_offset = source_offset;
+    upload.source_row_stride = kBlocksWide * etc_bytes;
+    upload.source_layer_stride = kBlocks * etc_bytes;
+    upload.target_offset = target_offset;
+    upload.width = kWidth;
+    upload.height = kHeight;
+    upload.bc = true;
+    uploads.push_back(upload);
+    source_offset += kBlocks * etc_bytes;
+    target_offset += kBlocks * bc_bytes;
+  }
+  VkBuffer source = VK_NULL_HANDLE;
+  VkBuffer target = VK_NULL_HANDLE;
+  VkDeviceMemory source_memory = VK_NULL_HANDLE;
+  VkDeviceMemory target_memory = VK_NULL_HANDLE;
+  std::uint8_t* source_data = nullptr;
+  std::uint8_t* target_data = nullptr;
+  ran = ran &&
+        AllocateBuffer(source_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true,
+                       &source, &source_memory, &source_data) &&
+        AllocateBuffer(target_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true,
+                       &target, &target_memory, &target_data);
+  if (ran) {
+    std::memcpy(source_data, blocks.data(), source_bytes);
+  }
+  bands.clear();
+  for (Etc2GpuUpload& upload : uploads) {
+    upload.source = source;
+    upload.target = target;
+    ran = ran && Plan(upload, &bands);
+  }
+  std::vector<Slot*> submitted;
+  ran = ran && SubmitBands(queue, family, &submitted);
+  Drain(submitted);
+  for (const Slot* slot : submitted) {
+    ran = ran && !slot->pending;
+  }
+  if (ran) {
+    std::memcpy(stored.data(), target_data, target_bytes);
+  }
+  const bool agrees = ran && stored == expected;
+  if (source != VK_NULL_HANDLE) {
+    vk.DestroyBuffer(device, source, nullptr);
+    vk.FreeMemory(device, source_memory, nullptr);
+  }
+  if (target != VK_NULL_HANDLE) {
+    vk.DestroyBuffer(device, target, nullptr);
+    vk.FreeMemory(device, target_memory, nullptr);
+  }
+  if (agrees) {
+    std::fprintf(stderr,
+                 "  [vulkan] BC encoder checked: the GPU gives the same %zu "
+                 "blocks as the CPU encoder\n",
+                 kBlocks * std::size(kFormats));
+  } else {
+    std::fputs(ran ? "  [vulkan] BC encoder gives other blocks on this GPU "
+                     "than the CPU encoder, uploads stay on the CPU encoder\n"
+                   : "  [vulkan] BC encoder could not be checked, uploads "
+                     "stay on the CPU encoder\n",
+               stderr);
+  }
+  return agrees;
+}
+
 std::unique_ptr<Etc2GpuDecoder> Etc2GpuDecoder::Create(
     VkDevice device, const VkPhysicalDeviceLimits& limits,
     const VkPhysicalDeviceMemoryProperties& memory,
@@ -980,6 +1162,11 @@ bool Etc2GpuDecoder::Decode(VkQueue queue, std::uint32_t family,
   }
   State& state = *state_;
   std::lock_guard<std::mutex> lock(state.mutex);
+  if (state.Encoder() != VK_NULL_HANDLE && !state.encoder->Checked() &&
+      std::any_of(uploads, uploads + count,
+                  [](const Etc2GpuUpload& upload) { return upload.bc; })) {
+    state.encoder->Judge(state.CheckEncoder(queue, family));
+  }
   state.bands.clear();
   for (std::size_t index = 0; index < count; ++index) {
     if (!state.Plan(uploads[index], &state.bands)) {
@@ -987,28 +1174,7 @@ bool Etc2GpuDecoder::Decode(VkQueue queue, std::uint32_t family,
     }
   }
   std::vector<Slot*> submitted;
-  for (std::size_t first = 0; first < state.bands.size();) {
-    VkDeviceSize used = 0;
-    std::size_t last = first;
-    for (; last < state.bands.size(); ++last) {
-      Band& band = state.bands[last];
-      const VkDeviceSize offset = AlignUp(used, state.blocks_alignment);
-      if (last > first && offset + band.source_bytes > state.pass_bytes) {
-        break;
-      }
-      band.blocks_offset = offset;
-      used = offset + band.source_bytes;
-    }
-    Slot* slot = state.Acquire(family);
-    if (slot == nullptr || !state.ReserveBlocks(slot, used, last - first) ||
-        !state.SubmitDecodes(queue, slot, &state.bands[first], last - first)) {
-      state.Drain(submitted);
-      return false;
-    }
-    submitted.push_back(slot);
-    first = last;
-  }
-  return true;
+  return state.SubmitBands(queue, family, &submitted);
 }
 
 bool Etc2GpuDecoder::Copy(VkQueue queue, std::uint32_t family,

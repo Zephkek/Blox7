@@ -1095,7 +1095,7 @@ void VulkanEtc2Emulation::RegisterDevice(
     PFN_vkGetDeviceProcAddr get_device_proc_addr,
     const VkPhysicalDeviceLimits* limits,
     const VkQueueFamilyProperties* queue_families,
-    std::uint32_t queue_family_count, bool bc) {
+    std::uint32_t queue_family_count, bool bc, EtcToBcEncoder bc_reference) {
   static_cast<void>(physical_device);
   if (device == VK_NULL_HANDLE || get_device_proc_addr == nullptr) {
     return;
@@ -1171,7 +1171,7 @@ void VulkanEtc2Emulation::RegisterDevice(
       std::lock_guard<std::mutex> lock(state_->mutex);
       std::shared_ptr<Etc2GpuEncoder>& kept = state_->encoders[device];
       if (kept == nullptr) {
-        kept = Etc2GpuEncoder::Start(device, get);
+        kept = Etc2GpuEncoder::Start(device, get, bc_reference);
       }
       encoder = kept;
     }

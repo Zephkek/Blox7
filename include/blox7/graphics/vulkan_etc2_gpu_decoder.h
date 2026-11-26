@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "blox7/graphics/etc2_bc_encoder.h"
 #include "blox7/graphics/etc2_decoder.h"
 
 namespace blox7::graphics {
@@ -39,13 +40,17 @@ struct Etc2GpuCopy {
 class Etc2GpuEncoder final {
  public:
   static std::shared_ptr<Etc2GpuEncoder> Start(
-      VkDevice device, PFN_vkGetDeviceProcAddr get_device_proc_addr);
+      VkDevice device, PFN_vkGetDeviceProcAddr get_device_proc_addr,
+      EtcToBcEncoder reference = EncodeEtcImageToBc);
   static void KeepUntilExit(std::shared_ptr<Etc2GpuEncoder> encoder);
   ~Etc2GpuEncoder();
   Etc2GpuEncoder(const Etc2GpuEncoder&) = delete;
   Etc2GpuEncoder& operator=(const Etc2GpuEncoder&) = delete;
 
   VkPipeline Pipeline() const;
+  EtcToBcEncoder Reference() const;
+  bool Checked() const;
+  void Judge(bool agrees);
   void Wait();
 
   struct State;

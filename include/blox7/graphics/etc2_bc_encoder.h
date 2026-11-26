@@ -15,6 +15,11 @@ bool EncodeEtcImageToBc(EtcFormat format, const std::uint8_t* source,
                         std::uint32_t height, std::uint8_t* destination,
                         std::size_t destination_bytes);
 
+using EtcToBcEncoder = bool (*)(EtcFormat format, const std::uint8_t* source,
+                                std::size_t source_bytes, std::uint32_t width,
+                                std::uint32_t height, std::uint8_t* destination,
+                                std::size_t destination_bytes);
+
 bool EncodeEtcImageToBcBlockRows(EtcFormat format, const std::uint8_t* source,
                                  std::size_t source_bytes, std::uint32_t width,
                                  std::uint32_t height,
