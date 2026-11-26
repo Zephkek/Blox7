@@ -188,6 +188,9 @@ BRIDGE_EXPORT bool SDL_GL_MakeCurrent(SDL_Window* window, SDL_GLContext context)
 #ifdef BLOX7_FRAME_DUMP
 #include "../test/frame_dump.h"
 #endif
+#ifdef BLOX7_GL_LOSE_CONTEXT
+#include "../test/gl_lose_context.h"
+#endif
 
 BRIDGE_EXPORT bool SDL_GL_SwapWindow(SDL_Window* window) {
   static bool (BRIDGE_MS *swap)(SDL_Window*);
@@ -195,7 +198,13 @@ BRIDGE_EXPORT bool SDL_GL_SwapWindow(SDL_Window* window) {
 #ifdef BLOX7_FRAME_DUMP
   frame_dump(window, lookup_gl);
 #endif
+#ifdef BLOX7_GL_LOSE_CONTEXT
+  losec_before_swap(lookup_gl);
+#endif
   const bool ok = swap(window);
+#ifdef BLOX7_GL_LOSE_CONTEXT
+  losec_after_swap(ok, lookup_gl);
+#endif
   if (__builtin_expect(!ok, 0)) gles_end_if_context_lost("the swap");
   __w32_frame_beat();
   return ok;
