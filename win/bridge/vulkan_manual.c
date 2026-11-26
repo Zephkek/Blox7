@@ -215,6 +215,9 @@ VkResult vkb_m_vkCreateInstance(const VkInstanceCreateInfo* info, const VkAlloca
 #ifdef BLOX7_VK_FRAME_DUMP
 static void vkdump_device(VkPhysicalDevice physical, VkDevice device);
 #endif
+#ifdef BLOX7_VK_LOSE_DEVICE
+static void losed_created(VkDevice device);
+#endif
 
 VkResult vkb_m_vkCreateDevice(VkPhysicalDevice physical_device, const VkDeviceCreateInfo* info,
                               const VkAllocationCallbacks* allocator, VkDevice* device) {
@@ -226,6 +229,9 @@ VkResult vkb_m_vkCreateDevice(VkPhysicalDevice physical_device, const VkDeviceCr
   free_chain(&c);
 #ifdef BLOX7_VK_FRAME_DUMP
   if (result == VK_SUCCESS && device) vkdump_device(physical_device, *device);
+#endif
+#ifdef BLOX7_VK_LOSE_DEVICE
+  if (result == VK_SUCCESS && device) losed_created(*device);
 #endif
   return result;
 }
@@ -285,6 +291,9 @@ static void vkb_set(const struct vkb_command* c, void* fn, int device_lookup) {
 #ifdef BLOX7_VK_LOSE_SURFACE
 #include "../test/vk_lose_surface.h"
 #endif
+#ifdef BLOX7_VK_LOSE_DEVICE
+#include "../test/vk_lose_device.h"
+#endif
 
 static PFN_vkVoidFunction answer(const char* name, void* fn, int device_lookup) {
   const struct vkb_command* c = (const struct vkb_command*)bsearch(name, vkb_commands, vkb_command_count,
@@ -304,7 +313,7 @@ static PFN_vkVoidFunction answer(const char* name, void* fn, int device_lookup) 
     return NULL;
   }
   vkb_set(c, fn, device_lookup);
-#if defined(BLOX7_VK_FRAME_DUMP) || defined(BLOX7_VK_LOSE_SURFACE)
+#if defined(BLOX7_VK_FRAME_DUMP) || defined(BLOX7_VK_LOSE_SURFACE) || defined(BLOX7_VK_LOSE_DEVICE)
   const int device_wrapper = device_lookup && c->device_wrapper;
   PFN_vkVoidFunction wrapper = (PFN_vkVoidFunction)(device_wrapper ? c->device_wrapper : c->wrapper);
 #ifdef BLOX7_VK_FRAME_DUMP
@@ -314,6 +323,10 @@ static PFN_vkVoidFunction answer(const char* name, void* fn, int device_lookup) 
 #ifdef BLOX7_VK_LOSE_SURFACE
   const PFN_vkVoidFunction lost = lose_answer(name, (void*)wrapper, device_wrapper);
   if (lost) wrapper = lost;
+#endif
+#ifdef BLOX7_VK_LOSE_DEVICE
+  const PFN_vkVoidFunction gone = losed_answer(name, (void*)wrapper, device_wrapper);
+  if (gone) wrapper = gone;
 #endif
   return wrapper;
 #else
