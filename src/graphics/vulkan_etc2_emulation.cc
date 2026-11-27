@@ -122,13 +122,40 @@ bool Etc2SupportAdvertised() {
   return advertised;
 }
 
-bool Etc2StoredAsBc(const char* value) {
-  return value != nullptr && std::strcmp(value, "bc") == 0;
+Etc2Storage Etc2StorageMode(const char* value) {
+  if (value != nullptr && std::strcmp(value, "bc") == 0) {
+    return Etc2Storage::kBc;
+  }
+  if (value != nullptr && std::strcmp(value, "auto") == 0) {
+    return Etc2Storage::kAutomatic;
+  }
+  return Etc2Storage::kDecoded;
 }
 
-bool Etc2StoredAsBc() {
-  static const bool bc = Etc2StoredAsBc(std::getenv("BLOX7_ETC2_STORAGE"));
-  return bc;
+Etc2Storage Etc2StorageMode() {
+  static const Etc2Storage storage =
+      Etc2StorageMode(std::getenv("BLOX7_ETC2_STORAGE"));
+  return storage;
+}
+
+VkDeviceSize LargestDeviceLocalHeap(
+    const VkPhysicalDeviceMemoryProperties& memory) {
+  VkDeviceSize largest = 0;
+  for (std::uint32_t index = 0;
+       index < memory.memoryHeapCount && index < VK_MAX_MEMORY_HEAPS; ++index) {
+    if ((memory.memoryHeaps[index].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) !=
+        0) {
+      largest = std::max(largest, memory.memoryHeaps[index].size);
+    }
+  }
+  return largest;
+}
+
+bool Etc2AutomaticStoresBc(const VkPhysicalDeviceProperties& properties,
+                           const VkPhysicalDeviceMemoryProperties& memory) {
+  const VkDeviceSize heap = LargestDeviceLocalHeap(memory);
+  return properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+         heap != 0 && heap <= kEtc2AutomaticBcMaxHeap;
 }
 
 std::uint32_t SmallTextureUpscale(const char* value) {
@@ -820,6 +847,7 @@ struct VulkanEtc2Emulation::State {
   std::mutex commands_mutex;
   std::mutex memory_mutex;
   std::unordered_map<VkPhysicalDevice, bool> physical_devices;
+  std::unordered_map<VkPhysicalDevice, bool> bc_capable;
   std::unordered_map<VkPhysicalDevice, bool> bc_devices;
   std::unordered_map<VkDevice, std::shared_ptr<Etc2GpuEncoder>> encoders;
   std::vector<std::unique_ptr<HostDevice>> devices;
@@ -832,7 +860,9 @@ struct VulkanEtc2Emulation::State {
   TextureOverrides overrides = TextureOverrides::FromEnvironment();
   const std::uint32_t upscale =
       SmallTextureUpscale(std::getenv("BLOX7_SMALL_TEXTURE_UPSCALE"));
-  const bool bc = Etc2StoredAsBc() && upscale == 1 && !overrides.enabled();
+  const Etc2Storage storage = upscale == 1 && !overrides.enabled()
+                                  ? Etc2StorageMode()
+                                  : Etc2Storage::kDecoded;
 
   std::shared_ptr<const RgbaImage> FindOverride(const PendingUpload& upload,
                                                 const std::uint8_t* compressed,
@@ -1074,19 +1104,61 @@ bool VulkanEtc2Emulation::PhysicalDeviceNeedsEmulation(
   const bool needed = features.textureCompressionETC2 != VK_TRUE;
   std::lock_guard<std::mutex> lock(state_->mutex);
   state_->physical_devices[physical_device] = needed;
-  state_->bc_devices[physical_device] =
-      needed && state_->bc && features.textureCompressionBC == VK_TRUE;
+  state_->bc_capable[physical_device] =
+      needed && features.textureCompressionBC == VK_TRUE;
   return needed;
 }
 
 bool VulkanEtc2Emulation::PhysicalDeviceStoresBc(
-    VkPhysicalDevice physical_device, PFN_vkGetPhysicalDeviceFeatures host) {
-  if (!state_->bc || !PhysicalDeviceNeedsEmulation(physical_device, host)) {
+    VkPhysicalDevice physical_device, PFN_vkGetPhysicalDeviceFeatures host,
+    PFN_vkGetPhysicalDeviceProperties properties,
+    PFN_vkGetPhysicalDeviceMemoryProperties memory) {
+  if (state_->storage == Etc2Storage::kDecoded ||
+      !PhysicalDeviceNeedsEmulation(physical_device, host)) {
     return false;
   }
+  bool bc = false;
+  {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    const auto decided = state_->bc_devices.find(physical_device);
+    if (decided != state_->bc_devices.end()) {
+      return decided->second;
+    }
+    bc = state_->bc_capable[physical_device];
+  }
+  const bool automatic = state_->storage == Etc2Storage::kAutomatic && bc;
+  VkPhysicalDeviceProperties device_properties{};
+  VkPhysicalDeviceMemoryProperties device_memory{};
+  if (automatic) {
+    if (properties != nullptr) {
+      properties(physical_device, &device_properties);
+    }
+    if (memory != nullptr) {
+      memory(physical_device, &device_memory);
+    }
+    bc = Etc2AutomaticStoresBc(device_properties, device_memory);
+  }
   std::lock_guard<std::mutex> lock(state_->mutex);
-  const auto found = state_->bc_devices.find(physical_device);
-  return found != state_->bc_devices.end() && found->second;
+  const auto [decided, inserted] =
+      state_->bc_devices.emplace(physical_device, bc);
+  if (inserted && automatic) {
+    const char* outcome = bc ? "ETC2 is stored as BC" : "ETC2 is decoded";
+    if (device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+      std::fprintf(stderr,
+                   "  [vulkan] Textures on automatic: %s is a discrete GPU "
+                   "with %llu MB, %s\n",
+                   device_properties.deviceName,
+                   static_cast<unsigned long long>(
+                       LargestDeviceLocalHeap(device_memory) >> 20),
+                   outcome);
+    } else {
+      std::fprintf(stderr,
+                   "  [vulkan] Textures on automatic: %s is not a discrete "
+                   "GPU, %s\n",
+                   device_properties.deviceName, outcome);
+    }
+  }
+  return decided->second;
 }
 
 void VulkanEtc2Emulation::RegisterDevice(

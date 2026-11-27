@@ -1461,7 +1461,11 @@ VkFormat Etc2HostFormat(VkPhysicalDevice physical_device,
   return State().etc2.PhysicalDeviceStoresBc(
              physical_device,
              HostPhysicalDeviceProc<PFN_vkGetPhysicalDeviceFeatures>(
-                 "vkGetPhysicalDeviceFeatures", nullptr))
+                 "vkGetPhysicalDeviceFeatures", nullptr),
+             HostPhysicalDeviceProc<PFN_vkGetPhysicalDeviceProperties>(
+                 "vkGetPhysicalDeviceProperties", nullptr),
+             HostPhysicalDeviceProc<PFN_vkGetPhysicalDeviceMemoryProperties>(
+                 "vkGetPhysicalDeviceMemoryProperties", nullptr))
              ? mapped.bc_format
              : mapped.host_format;
 }
@@ -2280,7 +2284,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
       State().etc2.PhysicalDeviceStoresBc(
           physical_device,
           reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
-              HostInstanceProc(instance, "vkGetPhysicalDeviceFeatures")));
+              HostInstanceProc(instance, "vkGetPhysicalDeviceFeatures")),
+          host_get_properties,
+          reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+              HostInstanceProc(instance,
+                               "vkGetPhysicalDeviceMemoryProperties")));
   VkPhysicalDeviceFeatures host_enabled_features{};
   VkPhysicalDeviceFeatures2* requested_features2 = nullptr;
   VkBool32 requested_features2_etc2 = VK_FALSE;

@@ -28,8 +28,16 @@ bool Etc2UploadByteCounts(EtcFormat format, const VkExtent3D& extent,
 bool Etc2SupportAdvertised(const char* value);
 bool Etc2SupportAdvertised();
 
-bool Etc2StoredAsBc(const char* value);
-bool Etc2StoredAsBc();
+enum class Etc2Storage { kDecoded, kBc, kAutomatic };
+
+Etc2Storage Etc2StorageMode(const char* value);
+Etc2Storage Etc2StorageMode();
+
+inline constexpr VkDeviceSize kEtc2AutomaticBcMaxHeap = VkDeviceSize{1536} << 20;
+VkDeviceSize LargestDeviceLocalHeap(
+    const VkPhysicalDeviceMemoryProperties& memory);
+bool Etc2AutomaticStoresBc(const VkPhysicalDeviceProperties& properties,
+                           const VkPhysicalDeviceMemoryProperties& memory);
 
 inline constexpr std::uint32_t kSmallTextureMaxExtent = 64;
 inline constexpr std::uint32_t kDefaultSmallTextureUpscale = 1;
@@ -47,8 +55,10 @@ class VulkanEtc2Emulation final {
 
   bool PhysicalDeviceNeedsEmulation(VkPhysicalDevice physical_device,
                                     PFN_vkGetPhysicalDeviceFeatures host);
-  bool PhysicalDeviceStoresBc(VkPhysicalDevice physical_device,
-                              PFN_vkGetPhysicalDeviceFeatures host);
+  bool PhysicalDeviceStoresBc(
+      VkPhysicalDevice physical_device, PFN_vkGetPhysicalDeviceFeatures host,
+      PFN_vkGetPhysicalDeviceProperties properties,
+      PFN_vkGetPhysicalDeviceMemoryProperties memory);
 
   void RegisterDevice(VkDevice device, VkPhysicalDevice physical_device,
                       bool emulated,
