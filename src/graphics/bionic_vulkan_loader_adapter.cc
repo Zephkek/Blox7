@@ -2731,6 +2731,31 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
       host_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
   }
+  if (host_info.compositeAlpha == VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_caps = nullptr;
+    {
+      AdapterState& state = State();
+      std::lock_guard<std::mutex> lock(state.mutex);
+      host_caps = state.host_surface_capabilities;
+    }
+    const VkPhysicalDevice physical_device =
+        HostDispatchForDevice(device).physical_device;
+    VkSurfaceCapabilitiesKHR capabilities{};
+    if (host_caps != nullptr && physical_device != VK_NULL_HANDLE &&
+        host_caps(physical_device, create_info->surface, &capabilities) ==
+            VK_SUCCESS) {
+      const VkCompositeAlphaFlagsKHR supported =
+          capabilities.supportedCompositeAlpha;
+      if ((supported & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) == 0 &&
+          supported != 0) {
+        host_info.compositeAlpha =
+            (supported & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) != 0
+                ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                : static_cast<VkCompositeAlphaFlagBitsKHR>(supported &
+                                                           (~supported + 1));
+      }
+    }
+  }
   SurfaceFullScreenExclusiveInfo composited{
       VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT, host_info.pNext,
       kFullScreenExclusiveDisallowed};
@@ -3298,6 +3323,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
   }
   const VkResult result = NoteSurfaceResult(
       surface, host_capabilities(physical_device, surface, capabilities));
+  if (result == VK_SUCCESS) {
+    capabilities->supportedCompositeAlpha |= VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+  }
   if (result != VK_SUCCESS ||
       (capabilities->currentExtent.width != UINT32_MAX &&
        capabilities->currentExtent.height != UINT32_MAX)) {
@@ -3469,11 +3497,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
     std::lock_guard<std::mutex> lock(state.mutex);
     host_query = state.host_surface_capabilities2;
   }
-  return host_query != nullptr
-             ? NoteSurfaceResult(SurfaceOf(surface_info),
-                                 host_query(physical_device, surface_info,
-                                            capabilities))
-             : VK_ERROR_INITIALIZATION_FAILED;
+  if (host_query == nullptr) {
+    return VK_ERROR_INITIALIZATION_FAILED;
+  }
+  const VkResult result = NoteSurfaceResult(
+      SurfaceOf(surface_info),
+      host_query(physical_device, surface_info, capabilities));
+  if (result == VK_SUCCESS && capabilities != nullptr) {
+    capabilities->surfaceCapabilities.supportedCompositeAlpha |=
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+  }
+  return result;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkGetSwapchainImagesKHR(
