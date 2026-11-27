@@ -820,18 +820,40 @@ void gles_get_tex_level_parameterfv(void (BRIDGE_MS* real)(GLenum, GLint, GLenum
   if (format) *params = pname == GL_TEXTURE_COMPRESSED ? 1.0f : (GLfloat)format;
 }
 
+struct debug_target {
+  GLDEBUGPROC proc;
+  const void* user;
+  struct debug_target* next;
+};
+
 static GLDEBUGPROC g_debug_proc;
 static const void* g_debug_user;
+static struct debug_target* g_debug_targets;
 static void (BRIDGE_MS* g_real_debug_callback)(void*, const void*);
 static void (BRIDGE_MS* g_real_debug_callback_khr)(void*, const void*);
 
 static BRIDGE_MS void debug_trampoline(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
                                        const GLchar* message, const void* user) {
-  (void)user;
-  const GLDEBUGPROC proc = g_debug_proc;
-  if (!proc) return;
+  const struct debug_target* target = user;
+  if (!target) return;
   bridge_attach();
-  proc(source, type, id, severity, length, message, g_debug_user);
+  target->proc(source, type, id, severity, length, message, target->user);
+}
+
+static const struct debug_target* debug_target_for(GLDEBUGPROC proc, const void* user) {
+  static volatile int lock;
+  while (__atomic_exchange_n(&lock, 1, __ATOMIC_ACQUIRE)) {
+  }
+  struct debug_target* target = g_debug_targets;
+  while (target && (target->proc != proc || target->user != user)) target = target->next;
+  if (!target && (target = malloc(sizeof *target)) != NULL) {
+    target->proc = proc;
+    target->user = user;
+    target->next = g_debug_targets;
+    g_debug_targets = target;
+  }
+  __atomic_store_n(&lock, 0, __ATOMIC_RELEASE);
+  return target;
 }
 
 void gles_bridge_resolve_manual(void* (*lookup)(const char*)) {
@@ -848,9 +870,10 @@ void gles_bridge_resolve_manual(void* (*lookup)(const char*)) {
 static void set_debug_callback(void (BRIDGE_MS* real)(void*, const void*), GLDEBUGPROC callback, const void* user) {
   if (!real) real = g_real_debug_callback ? g_real_debug_callback : g_real_debug_callback_khr;
   if (!real) return;
-  g_debug_proc = callback;
+  const struct debug_target* target = callback ? debug_target_for(callback, user) : NULL;
+  g_debug_proc = target ? callback : NULL;
   g_debug_user = user;
-  real(callback ? (void*)debug_trampoline : NULL, NULL);
+  real(target ? (void*)debug_trampoline : NULL, target);
 }
 
 BRIDGE_EXPORT void GL_APIENTRY glDebugMessageCallback(GLDEBUGPROC callback, const void* user) {
