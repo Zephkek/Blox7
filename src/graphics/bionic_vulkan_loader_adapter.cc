@@ -1296,7 +1296,6 @@ struct EnabledDeviceFeatures {
   VkPhysicalDeviceFeatures2 root{};
   VkPhysicalDeviceVulkan11Features vulkan11{};
   VkPhysicalDeviceVulkan12Features vulkan12{};
-  bool placebo_required = false;
 
   EnabledDeviceFeatures() {
     root.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -1347,22 +1346,7 @@ EnabledDeviceFeatures InspectEnabledFeatures(
   }
   enabled.vulkan12.timelineSemaphore = timeline;
   enabled.vulkan12.hostQueryReset = host_query_reset;
-  enabled.placebo_required = timeline && host_query_reset;
   return enabled;
-}
-
-bool HasRequiredFeatureStructs(const VkDeviceCreateInfo& create_info) {
-  return FindFeature(create_info.pNext,
-                     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) !=
-             nullptr ||
-         FindFeature(
-             create_info.pNext,
-             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) !=
-             nullptr ||
-         FindFeature(
-             create_info.pNext,
-             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES) !=
-             nullptr;
 }
 
 bool ShouldLogNegativeVulkanResult(VkResult result, std::uint64_t* occurrence) {
@@ -2423,35 +2407,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
   enabled.root.pNext = &enabled.vulkan11;
   enabled.vulkan11.pNext = &enabled.vulkan12;
   enabled.vulkan12.pNext = nullptr;
-  VkPhysicalDeviceVulkan12Features injected{};
-  injected.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-  bool injected_required_features = false;
-  if (properties.apiVersion >= VK_API_VERSION_1_2 &&
-      !enabled.placebo_required && !HasRequiredFeatureStructs(*create_info)) {
-    VkPhysicalDeviceFeatures2 supported{};
-    supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    VkPhysicalDeviceVulkan12Features supported_vulkan12{};
-    supported_vulkan12.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    supported.pNext = &supported_vulkan12;
-    const auto host_get_features2 =
-        reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
-            HostInstanceProc(instance, "vkGetPhysicalDeviceFeatures2"));
-    if (host_get_features2 != nullptr) {
-      host_get_features2(physical_device, &supported);
-      if (supported_vulkan12.timelineSemaphore == VK_TRUE &&
-          supported_vulkan12.hostQueryReset == VK_TRUE) {
-        injected.timelineSemaphore = VK_TRUE;
-        injected.hostQueryReset = VK_TRUE;
-        injected.pNext = const_cast<void*>(host_info.pNext);
-        host_info.pNext = &injected;
-        enabled.vulkan12.timelineSemaphore = VK_TRUE;
-        enabled.vulkan12.hostQueryReset = VK_TRUE;
-        enabled.placebo_required = true;
-        injected_required_features = true;
-      }
-    }
-  }
 
   std::string key;
   if (KeepVulkanObjects() && allocator == nullptr) {
@@ -2557,10 +2512,6 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
     std::fprintf(stderr,
                  "  [vulkan] same-surface text compositor unavailable for "
                  "this VkDevice\n");
-  } else if (injected_required_features) {
-    std::fprintf(stderr,
-                 "  [vulkan] enabled Vulkan 1.2 timeline/host-query features "
-                 "for libplacebo interop\n");
   }
   return result;
 }
