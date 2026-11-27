@@ -266,6 +266,8 @@ struct AdapterState {
   std::unordered_map<VkDevice, std::string> device_keys;
   std::unordered_map<VkDevice, std::int64_t> device_allocations;
   std::unordered_map<VkSwapchainKHR, VkSurfaceKHR> swapchain_surfaces;
+  std::unordered_map<VkSwapchainKHR, VkImageUsageFlags> swapchain_added_usage;
+  std::atomic<std::size_t> swapchain_added_usage_count{0};
   std::unordered_map<VkSwapchainKHR, std::vector<std::uint32_t>>
       hidden_images;
   std::atomic<std::size_t> hidden_image_count{0};
@@ -1860,6 +1862,8 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.device_keys.clear();
   state.device_allocations.clear();
   state.swapchain_surfaces.clear();
+  state.swapchain_added_usage.clear();
+  state.swapchain_added_usage_count.store(0, std::memory_order_release);
   state.lost_surfaces.clear();
   state.lost_devices.clear();
   state.hidden_images.clear();
@@ -2810,6 +2814,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
     state.swapchain_surfaces[*swapchain] = create_info->surface;
+    const VkImageUsageFlags added =
+        host_info.imageUsage & ~create_info->imageUsage;
+    const auto known = state.swapchain_added_usage.find(*swapchain);
+    if (added != 0) {
+      if (known == state.swapchain_added_usage.end()) {
+        state.swapchain_added_usage_count.fetch_add(1,
+                                                    std::memory_order_release);
+      }
+      state.swapchain_added_usage[*swapchain] = added;
+    } else if (known != state.swapchain_added_usage.end()) {
+      state.swapchain_added_usage.erase(known);
+      state.swapchain_added_usage_count.fetch_sub(1, std::memory_order_release);
+    }
   }
   const auto host_get_images = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(
       HostDeviceProc(device, "vkGetSwapchainImagesKHR"));
@@ -2854,6 +2871,11 @@ vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
         found != state.swapchain_surfaces.end()) {
       surface = found->second;
       state.swapchain_surfaces.erase(found);
+    }
+    if (const auto added = state.swapchain_added_usage.find(swapchain);
+        added != state.swapchain_added_usage.end()) {
+      state.swapchain_added_usage.erase(added);
+      state.swapchain_added_usage_count.fetch_sub(1, std::memory_order_release);
     }
   }
   if (KeepVulkanObjects() && allocator == nullptr &&
@@ -3933,7 +3955,27 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceImageFormatProperties2(
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(
     VkDevice device, const VkImageCreateInfo* create_info,
     const VkAllocationCallbacks* allocator, VkImage* image) {
-  return State().etc2.CreateImage(device, create_info, allocator, image);
+  AdapterState& state = State();
+  if (create_info != nullptr &&
+      state.swapchain_added_usage_count.load(std::memory_order_acquire) != 0) {
+    const auto* bound = reinterpret_cast<const VkImageSwapchainCreateInfoKHR*>(
+        FindFeature(create_info->pNext,
+                    VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR));
+    VkImageUsageFlags added = 0;
+    if (bound != nullptr && bound->swapchain != VK_NULL_HANDLE) {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      if (const auto found = state.swapchain_added_usage.find(bound->swapchain);
+          found != state.swapchain_added_usage.end()) {
+        added = found->second;
+      }
+    }
+    if (added != 0) {
+      VkImageCreateInfo host_info = *create_info;
+      host_info.usage |= added;
+      return state.etc2.CreateImage(device, &host_info, allocator, image);
+    }
+  }
+  return state.etc2.CreateImage(device, create_info, allocator, image);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkDestroyImage(
