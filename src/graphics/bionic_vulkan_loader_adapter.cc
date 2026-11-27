@@ -2341,7 +2341,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
                     });
     if (queue_families[family].queueCount <= used || flagged ||
         (requested != host_queues.end() &&
-         requested->pQueuePriorities == nullptr)) {
+         (requested->pQueuePriorities == nullptr ||
+          requested->queueCount == 0))) {
       continue;
     }
     spare_family = family;
