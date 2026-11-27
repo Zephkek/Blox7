@@ -70,6 +70,7 @@
 #include "runtime/roblox_app_lifecycle.h"
 #include "runtime/roblox_capability_resolver.h"
 #include "runtime/roblox_platform_web_symbols.h"
+#include "runtime/roblox_start_input.h"
 #include "runtime/roblox_experience_composition.h"
 #include "runtime/roblox_game_session_native_adapter.h"
 #include "runtime/roblox_window_input_runtime.h"
@@ -1832,6 +1833,11 @@ extern "C" void blox7_before_soinfo_constructors(const char* realpath,
   if (realpath == nullptr || std::strstr(realpath, "libroblox.so") == nullptr ||
       base == 0) {
     return;
+  }
+
+  if (!IsEnabled("BLOX7_TOUCH_ENABLED_INTERNAL")) {
+    blox7::runtime::StartGamesOnMouse(
+        base, CurrentRuntimePaths().cache_root() / "input/start-input");
   }
 
   g_libroblox_base = base;

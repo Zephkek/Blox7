@@ -16,6 +16,7 @@ add_library(blox7_input_runtime STATIC
   ${BLOX7_INPUT_ROOT}/src/runtime/roblox_input_native_adapter.cc
   ${BLOX7_INPUT_ROOT}/src/runtime/roblox_input_router.cc
   ${BLOX7_INPUT_ROOT}/src/runtime/roblox_native_text_box_info_reader.cc
+  ${BLOX7_INPUT_ROOT}/src/runtime/roblox_start_input.cc
   ${BLOX7_INPUT_ROOT}/src/runtime/roblox_text_display_state.cc
   ${BLOX7_INPUT_ROOT}/src/runtime/roblox_text_editor.cc
   ${BLOX7_INPUT_ROOT}/src/runtime/roblox_text_font_resolver.cc
