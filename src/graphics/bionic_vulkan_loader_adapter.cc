@@ -1755,6 +1755,9 @@ std::string DeviceKey(VkPhysicalDevice physical_device,
       *unknown = static_cast<const VkBaseInStructure*>(queue.pNext)->sType;
       return {};
     }
+    if (queue.pQueuePriorities == nullptr) {
+      return {};
+    }
     AppendKey(&key, &queue.flags, sizeof queue.flags);
     AppendKey(&key, &queue.queueFamilyIndex, sizeof queue.queueFamilyIndex);
     AppendKey(&key, &queue.queueCount, sizeof queue.queueCount);
@@ -2342,8 +2345,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
                      });
     const std::uint32_t used =
         requested != host_queues.end() ? requested->queueCount : 0;
-    if (queue_families[family].queueCount <= used ||
-        (requested != host_queues.end() && requested->flags != 0)) {
+    const bool flagged =
+        std::any_of(host_queues.begin(), host_queues.end(),
+                    [family](const VkDeviceQueueCreateInfo& queue) {
+                      return queue.queueFamilyIndex == family &&
+                             queue.flags != 0;
+                    });
+    if (queue_families[family].queueCount <= used || flagged ||
+        (requested != host_queues.end() &&
+         requested->pQueuePriorities == nullptr)) {
       continue;
     }
     spare_family = family;
