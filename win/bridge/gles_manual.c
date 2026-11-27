@@ -200,6 +200,21 @@ void gles_tex_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLsizei, GLs
   tex_note((GLenum)internal, (unsigned long long)w * (unsigned long long)h * tex_pixel_bytes(format, type), start);
 }
 
+void gles_tex_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum,
+                                               const void*),
+                       GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLsizei d, GLint border,
+                       GLenum format, GLenum type, const void* pixels) {
+  if (g_etc_live && !g_tex_nested) etc_set(bound_texture(target), 0);
+  real(target, level, internal, w, h, d, border, format, type, pixels);
+}
+
+void gles_copy_tex_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint),
+                            GLenum target, GLint level, GLenum internal, GLint x, GLint y, GLsizei w, GLsizei h,
+                            GLint border) {
+  if (g_etc_live) etc_set(bound_texture(target), 0);
+  real(target, level, internal, x, y, w, h, border);
+}
+
 void gles_tex_sub_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void*),
                            GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type,
                            const void* pixels) {
@@ -403,6 +418,7 @@ void gles_compressed_tex_image_2d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, 
       return;
     }
   }
+  if (!storage && g_etc_live) etc_set(bound_texture(target), 0);
   real(target, level, internal, w, h, border, size, data);
   if (start) tex_note(internal, (unsigned long long)size, start);
 }
@@ -456,6 +472,7 @@ void gles_compressed_tex_image_3d(void (BRIDGE_MS* real)(GLenum, GLint, GLenum, 
       return;
     }
   }
+  if (!storage && g_etc_live) etc_set(bound_texture(target), 0);
   real(target, level, internal, w, h, d, border, size, data);
   if (start) tex_note(internal | 0x20000u, (unsigned long long)size, start);
 }

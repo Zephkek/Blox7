@@ -105,8 +105,9 @@ BRIDGE_EXPORT void glCompressedTexSubImage2D(GLenum a0, GLint a1, GLint a2, GLin
   gles_compressed_tex_sub_image_2d(p_glCompressedTexSubImage2D, a0, a1, a2, a3, a4, a5, a6, a7, a8);
 }
 static void (BRIDGE_MS *p_glCopyTexImage2D)(GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint);
+void gles_copy_tex_image_2d(void (BRIDGE_MS *)(GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint), GLenum a0, GLint a1, GLenum a2, GLint a3, GLint a4, GLsizei a5, GLsizei a6, GLint a7);
 BRIDGE_EXPORT void glCopyTexImage2D(GLenum a0, GLint a1, GLenum a2, GLint a3, GLint a4, GLsizei a5, GLsizei a6, GLint a7) {
-  p_glCopyTexImage2D(a0, a1, a2, a3, a4, a5, a6, a7);
+  gles_copy_tex_image_2d(p_glCopyTexImage2D, a0, a1, a2, a3, a4, a5, a6, a7);
 }
 static void (BRIDGE_MS *p_glCopyTexSubImage2D)(GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei);
 BRIDGE_EXPORT void glCopyTexSubImage2D(GLenum a0, GLint a1, GLint a2, GLint a3, GLint a4, GLint a5, GLsizei a6, GLsizei a7) {
@@ -603,8 +604,9 @@ BRIDGE_EXPORT void glDrawRangeElements(GLenum a0, GLuint a1, GLuint a2, GLsizei 
   p_glDrawRangeElements(a0, a1, a2, a3, a4, a5);
 }
 static void (BRIDGE_MS *p_glTexImage3D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *);
+void gles_tex_image_3d(void (BRIDGE_MS *)(GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *), GLenum a0, GLint a1, GLint a2, GLsizei a3, GLsizei a4, GLsizei a5, GLint a6, GLenum a7, GLenum a8, const void * a9);
 BRIDGE_EXPORT void glTexImage3D(GLenum a0, GLint a1, GLint a2, GLsizei a3, GLsizei a4, GLsizei a5, GLint a6, GLenum a7, GLenum a8, const void * a9) {
-  p_glTexImage3D(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+  gles_tex_image_3d(p_glTexImage3D, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
 static void (BRIDGE_MS *p_glTexSubImage3D)(GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void *);
 void gles_tex_sub_image_3d(void (BRIDGE_MS *)(GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void *), GLenum a0, GLint a1, GLint a2, GLint a3, GLint a4, GLsizei a5, GLsizei a6, GLsizei a7, GLenum a8, GLenum a9, const void * a10);
