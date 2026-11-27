@@ -789,37 +789,36 @@ void page_general(const D2D1_RECT_F& page) {
   const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18;
   float y = page.top + kMargin;
   const bool usable = g.stage != Stage::Unsupported;
+  const bool installed = !g.version.empty();
 
-  group(rect(x, y, w, 96), L"Roblox Studio");
+  const float studio = installed ? 96 : 74;
+  group(rect(x, y, w, studio), L"Roblox Studio");
   text(L"Installed:", g.fonts.body, rect(ix, y + 20, 64, 15), kSecondary);
-  text(g.version.empty() ? L"Not installed yet" : g.version, g.fonts.body, rect(ix + 64, y + 20, iw - 64 - 92, 15), kText);
+  text(installed ? g.version : L"Not installed yet", g.fonts.body, rect(ix + 64, y + 20, iw - 64 - 92, 15), kText);
   push_button(kCheckButton, rect(ix + iw - 85, y + 16, 85, kButtonHeight), g.newer.empty() ? L"Check now" : L"Update now",
-              usable && !g.working && !g.version.empty(), [] {
+              usable && !g.working && installed, [] {
                 studio_forgive(&g.paths);
                 g.asked = !g.newer.empty();
                 g.updates = g.asked ? L"" : L"Checking...";
                 start_job(Job::Check, true);
               });
-  checkbox(kUpdatesBox, ix, y + 46, iw, g.pending_updates, L"Get new versions of Roblox Studio as they come out", [] {
+  if (installed) {
+    text(L"Updates:", g.fonts.body, rect(ix, y + 46, 64, 15), kSecondary);
+    text(updates_line(), g.fonts.body, rect(ix + 64, y + 46, iw - 64, 15), kText);
+  }
+  checkbox(kUpdatesBox, ix, y + (installed ? 68 : 46), iw, g.pending_updates, L"Get new versions of Roblox Studio as they come out", [] {
     g.pending_updates = !g.pending_updates;
     mark_dirty();
   });
-  text(g.version.empty() ? L"An open Studio is never replaced, the new version starts next time."
-                         : L"Updates: " + updates_line(),
-       g.fonts.body, rect(ix, y + 70, iw, 15), kSecondary);
-  y += 96 + kMargin;
+  y += studio + kMargin;
 
-  group(rect(x, y, w, 66), L"Browser");
+  group(rect(x, y, w, 44), L"Browser");
   checkbox(kLinksBox, ix, y + 16, iw, g.pending_links, L"Open Roblox Studio links from roblox.com with Studio7", [] {
     g.pending_links = !g.pending_links;
     mark_dirty();
   });
-  text(L"Edit buttons on the website and signing in through a browser use these.", g.fonts.body, rect(ix, y + 40, iw, 15), kSecondary);
-  y += 66 + kMargin;
 
-  group(rect(x, y, w, 52), L"Remove");
-  text(L"Places, plugins and Studio's own settings stay.", g.fonts.body, rect(ix, y + 24, iw - 96, 15), kSecondary);
-  push_button(kRemoveButton, rect(ix + iw - 85, y + 20, 85, kButtonHeight), L"Remove...",
+  push_button(kRemoveButton, rect(x, page.bottom - kMargin - kButtonHeight, kButtonWidth, kButtonHeight), L"Remove...",
               !g.working && g.stage != Stage::Starting && g.stage != Stage::Running, remove_all);
 }
 
@@ -912,10 +911,7 @@ void page_mods(const D2D1_RECT_F& page) {
   file_row(y + 16, MOD_ICON);
   y += 44 + kMargin;
 
-  group(rect(x, y, w, 72), L"Mods folder");
-  text(L"Pictures, fonts and sounds in it replace Studio's own. It's laid out like Studio's folder, starting at content.",
-       g.fonts.paragraph, rect(ix, y + 16, iw, 30), kSecondary);
-  link(kModsLink, ix, y + 48, L"Open the mods folder", open_mods_folder);
+  link(kModsLink, x, y, L"Open the mods folder", open_mods_folder);
 }
 
 void page_about(const D2D1_RECT_F& page) {
