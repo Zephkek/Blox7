@@ -836,7 +836,9 @@ Settings load_settings(const Paths& paths) {
   if (const auto gpu = ini.find("gpu"); gpu != ini.end()) s.gpu = widen(gpu->second);
   if (const auto vulkan = ini.find("vulkan_on_modded_driver"); vulkan != ini.end()) s.vulkan_on_modded_driver = vulkan->second == "on";
   if (const auto angle = ini.find("angle"); angle != ini.end()) s.angle = angle->second == "on";
-  if (const auto textures = ini.find("textures"); textures != ini.end()) s.compressed_textures = textures->second == "compressed";
+  if (const auto textures = ini.find("textures");
+      textures != ini.end() && (textures->second == "compressed" || textures->second == "uncompressed"))
+    s.textures = widen(textures->second);
   if (const auto links = ini.find("join_links"); links != ini.end()) s.join_links = !links->second.empty();
   if (const auto scale = ini.find("render_scale"); scale != ini.end() && !scale->second.empty())
     s.render_scale = std::clamp(atoi(scale->second.c_str()), 50, 100);
@@ -962,7 +964,7 @@ std::wstring save_settings(const Paths& paths, const Settings& s) {
   ini["gpu"] = narrow(s.gpu);
   ini["vulkan_on_modded_driver"] = s.vulkan_on_modded_driver ? "on" : "";
   ini["angle"] = s.angle ? "on" : "";
-  ini["textures"] = s.compressed_textures ? "compressed" : "";
+  ini["textures"] = s.textures == L"auto" ? "" : narrow(s.textures);
   ini["refresh_rate"] = s.refresh_rate > 0 ? std::to_string(s.refresh_rate) : "";
   ini["render_scale"] = s.render_scale < 100 ? std::to_string(s.render_scale) : "";
   ini["profile"] = profile;
@@ -1028,7 +1030,7 @@ void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
     SetEnvironmentVariableW(L"BLOX7_GRAPHICS_BACKEND", L"opengl");
   }
   if (s.angle && (s.backend == L"opengl" || s.backend == L"gles")) SetEnvironmentVariableW(L"BLOX7_ANGLE", L"on");
-  if (s.compressed_textures) SetEnvironmentVariableW(L"BLOX7_ETC2_STORAGE", L"bc");
+  if (s.textures != L"uncompressed") SetEnvironmentVariableW(L"BLOX7_ETC2_STORAGE", s.textures == L"compressed" ? L"bc" : L"auto");
   apply_owned_flags(paths, s);
   apply_quality(paths, s);
   SetEnvironmentVariableW(L"BLOX7_VULKAN_DEVICE", s.gpu.empty() ? nullptr : s.gpu.c_str());
