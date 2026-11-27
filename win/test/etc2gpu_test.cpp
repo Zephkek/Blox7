@@ -5,8 +5,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -27,16 +29,20 @@ using blox7::graphics::BcBlockBytes;
 using blox7::graphics::DecodeEtcImage;
 using blox7::graphics::EncodeEtcImageToBc;
 using blox7::graphics::DecodeEtcJobs;
+using blox7::graphics::Etc2AutomaticStoresBc;
 using blox7::graphics::Etc2EmulatedFormat;
 using blox7::graphics::Etc2GpuCopy;
 using blox7::graphics::Etc2GpuDecodable;
 using blox7::graphics::Etc2GpuDecoder;
 using blox7::graphics::Etc2GpuEncoder;
 using blox7::graphics::Etc2GpuUpload;
+using blox7::graphics::Etc2Storage;
+using blox7::graphics::Etc2StorageMode;
 using blox7::graphics::EtcBlockBytes;
 using blox7::graphics::EtcDecodedTexelBytes;
 using blox7::graphics::EtcDecodeJob;
 using blox7::graphics::EtcFormat;
+using blox7::graphics::LargestDeviceLocalHeap;
 using blox7::graphics::LookupEmulatedEtc2Format;
 using blox7::graphics::VulkanEtc2Emulation;
 
@@ -2092,6 +2098,76 @@ void DoubtedEncoderTests(PFN_vkGetDeviceProcAddr gdpa) {
   emulation.ForgetDevice(device);
 }
 
+struct StorageCase {
+  const char* what;
+  VkPhysicalDeviceType type;
+  std::vector<std::pair<std::uint64_t, VkMemoryHeapFlags>> heaps;
+  bool bc;
+};
+
+void StorageModeTests() {
+  Result(Etc2StorageMode(nullptr) == Etc2Storage::kDecoded &&
+             Etc2StorageMode("") == Etc2Storage::kDecoded &&
+             Etc2StorageMode("decoded") == Etc2Storage::kDecoded &&
+             Etc2StorageMode("BC") == Etc2Storage::kDecoded &&
+             Etc2StorageMode("bc") == Etc2Storage::kBc &&
+             Etc2StorageMode("auto") == Etc2Storage::kAutomatic,
+         "BLOX7_ETC2_STORAGE: unset, empty, decoded and BC decode, bc stores "
+         "BC, auto decides per GPU");
+  constexpr VkMemoryHeapFlags kLocal = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+  constexpr VkPhysicalDeviceType kDiscrete =
+      VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+  const StorageCase cases[] = {
+      {"discrete, 1024 MB and a 214 MB window", kDiscrete,
+       {{1024, kLocal}, {16384, 0}, {214, kLocal}}, true},
+      {"discrete, 512 MB", kDiscrete, {{512, kLocal}, {8192, 0}}, true},
+      {"discrete, 768 MB and a 256 MB window", kDiscrete,
+       {{768, kLocal}, {8192, 0}, {256, kLocal}}, true},
+      {"discrete, 1536 MB", kDiscrete, {{1536, kLocal}, {8192, 0}}, true},
+      {"discrete, 1537 MB", kDiscrete, {{1537, kLocal}, {8192, 0}}, false},
+      {"discrete, 1792 MB and a 256 MB window", kDiscrete,
+       {{1792, kLocal}, {8192, 0}, {256, kLocal}}, false},
+      {"discrete, 2048 MB", kDiscrete, {{2048, kLocal}, {8192, 0}}, false},
+      {"discrete, 16303 MB and a 214 MB window", kDiscrete,
+       {{16303, kLocal}, {32768, 0}, {214, kLocal}}, false},
+      {"discrete, no device-local heap", kDiscrete, {{8192, 0}}, false},
+      {"integrated, 512 MB carve-out", VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+       {{512, kLocal}, {8192, 0}}, false},
+      {"integrated, 32768 MB shared", VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+       {{32768, kLocal}}, false},
+      {"virtual, 1024 MB", VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU,
+       {{1024, kLocal}}, false},
+      {"CPU, 1024 MB", VK_PHYSICAL_DEVICE_TYPE_CPU, {{1024, kLocal}}, false},
+  };
+  bool all = true;
+  for (const StorageCase& test : cases) {
+    VkPhysicalDeviceProperties device_properties{};
+    device_properties.deviceType = test.type;
+    VkPhysicalDeviceMemoryProperties memory{};
+    for (const auto& [mib, flags] : test.heaps) {
+      memory.memoryHeaps[memory.memoryHeapCount++] = {VkDeviceSize{mib} << 20,
+                                                      flags};
+    }
+    const bool bc = Etc2AutomaticStoresBc(device_properties, memory);
+    if (bc != test.bc) {
+      std::printf("    %s: %s, expected %s\n", test.what,
+                  bc ? "BC" : "decoded", test.bc ? "BC" : "decoded");
+      all = false;
+    }
+  }
+  Result(all, "automatic storage picks BC only on a discrete GPU with 1536 "
+              "MB or less of its own memory: " +
+                  std::to_string(std::size(cases)) + " cases");
+  std::printf("     automatic storage on this GPU: %s (%llu MB, %s)\n",
+              Etc2AutomaticStoresBc(properties, memory_properties) ? "BC"
+                                                                   : "decoded",
+              static_cast<unsigned long long>(
+                  LargestDeviceLocalHeap(memory_properties) >> 20),
+              properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+                  ? "discrete"
+                  : "not discrete");
+}
+
 void DecoderBenchmark(Etc2GpuDecoder& decoder, Queue& main) {
   const std::uint32_t kCount = 64;
   const std::uint32_t kSize = 1024;
@@ -2480,6 +2556,7 @@ int main(int argc, char** argv) {
 
   DecoderTests(*decoder, *stress, queues[0], random_blocks);
   CopyTests(*decoder, *stress);
+  StorageModeTests();
   EmulationTests(gdpa);
   EncoderTests(*encoder, *stress_encoder, *decoder, queues[0], random_blocks);
   Result(built->Checked() && encoder->Encodes(),
