@@ -1496,6 +1496,18 @@ void NotePhysicalDevices(VkInstance instance, const VkPhysicalDevice* devices,
   }
 }
 
+void NotePhysicalDeviceGroups(VkInstance instance,
+                              const VkPhysicalDeviceGroupProperties* groups,
+                              std::uint32_t count) {
+  if (groups == nullptr) {
+    return;
+  }
+  for (std::uint32_t i = 0; i < count; ++i) {
+    NotePhysicalDevices(instance, groups[i].physicalDevices,
+                        groups[i].physicalDeviceCount);
+  }
+}
+
 VkInstance InstanceForPhysicalDeviceLocked(AdapterState& state,
                                            VkPhysicalDevice physical_device) {
   const auto found = state.physical_device_instances.find(physical_device);
@@ -3718,7 +3730,11 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
     return VK_ERROR_INITIALIZATION_FAILED;
   }
   if (!DevicePicked() || group_count == nullptr) {
-    return host(instance, group_count, groups);
+    const VkResult result = host(instance, group_count, groups);
+    if (result >= VK_SUCCESS && group_count != nullptr) {
+      NotePhysicalDeviceGroups(instance, groups, *group_count);
+    }
+    return result;
   }
   std::uint32_t total = 0;
   VkResult result = host(instance, &total, nullptr);
@@ -3756,6 +3772,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumeratePhysicalDeviceGroups(
     groups[index].subsetAllocation = visible[index].subsetAllocation;
   }
   *group_count = copied;
+  NotePhysicalDeviceGroups(instance, groups, copied);
   return copied < visible.size() ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
