@@ -594,8 +594,8 @@ bool VulkanTextOverlayCompositor::RegisterSwapchain(VkDevice device, VkSwapchain
     return false;
   }
   if ((create_info.imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0 ||
-      (create_info.flags &
-       (VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_KHR | VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR)) != 0) {
+      (create_info.flags & (VK_SWAPCHAIN_CREATE_DEFERRED_MEMORY_ALLOCATION_BIT_KHR | VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR |
+                            VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR)) != 0) {
     std::fprintf(stderr, "  [post-fx] the swapchain's images can't be drawn into up front, effects off\n");
     return false;
   }
