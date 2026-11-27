@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -244,7 +245,7 @@ struct AdapterState {
   PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR host_surface_capabilities2 =
       nullptr;
   VkInstance latest_instance = VK_NULL_HANDLE;
-  bool surface_capabilities2 = false;
+  std::unordered_set<VkInstance> full_screen_exclusive_instances;
   size_t active_instance_count = 0;
   VkInstance kept_instance = VK_NULL_HANDLE;
   std::string kept_instance_key;
@@ -1471,6 +1472,7 @@ ObservedHostQueuePresent(VkQueue queue, const VkPresentInfoKHR* present_info) {
 }
 
 void ForgetInstanceLocked(AdapterState& state, VkInstance instance) {
+  state.full_screen_exclusive_instances.erase(instance);
   for (auto it = state.physical_device_instances.begin();
        it != state.physical_device_instances.end();) {
     it = it->second == instance ? state.physical_device_instances.erase(it)
@@ -1880,7 +1882,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.host_surface_capabilities = nullptr;
   state.host_surface_present_modes = nullptr;
   state.latest_instance = VK_NULL_HANDLE;
-  state.surface_capabilities2 = false;
+  state.full_screen_exclusive_instances.clear();
   state.note_present.store(nullptr, std::memory_order_release);
   state.note_host_present_begin.store(nullptr, std::memory_order_release);
   state.note_host_present_end.store(nullptr, std::memory_order_release);
@@ -1932,15 +1934,17 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
                  status.message().c_str());
     return VK_ERROR_EXTENSION_NOT_PRESENT;
   }
-  bool surface_capabilities2 = false;
+  const auto enabled = [&translated](const char* name) {
+    return std::find(translated.begin(), translated.end(), name) !=
+           translated.end();
+  };
   VkResult listed = VK_SUCCESS;
-  surface_capabilities2 =
+  const bool surface_capabilities2 =
+      enabled(VK_KHR_SURFACE_EXTENSION_NAME) &&
       ListsExtension(AndroidVisibleExtensions(nullptr, &listed),
                      VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
   if (surface_capabilities2 &&
-      std::find(translated.begin(), translated.end(),
-                VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) ==
-          translated.end()) {
+      !enabled(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)) {
     translated.emplace_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
   }
   std::vector<const char*> translated_names;
@@ -1970,6 +1974,10 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
     host_application_info.apiVersion = VK_API_VERSION_1_2;
     host_info.pApplicationInfo = &host_application_info;
   }
+  const bool full_screen_exclusive =
+      surface_capabilities2 &&
+      (host_application_info.apiVersion >= VK_API_VERSION_1_1 ||
+       enabled(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME));
   const std::string key = KeepVulkanObjects() && allocator == nullptr
                               ? InstanceKey(host_info)
                               : std::string();
@@ -1984,7 +1992,9 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
         state.instance_keys[*instance] = key;
         ++state.active_instance_count;
         state.latest_instance = *instance;
-        state.surface_capabilities2 = surface_capabilities2;
+        if (full_screen_exclusive) {
+          state.full_screen_exclusive_instances.insert(*instance);
+        }
         std::fprintf(stderr, "  [vulkan] host VkInstance reused\n");
         return VK_SUCCESS;
       }
@@ -2003,7 +2013,9 @@ vkCreateInstance(const VkInstanceCreateInfo* create_info,
     std::lock_guard<std::mutex> lock(state.mutex);
     ++state.active_instance_count;
     state.latest_instance = *instance;
-    state.surface_capabilities2 = surface_capabilities2;
+    if (full_screen_exclusive) {
+      state.full_screen_exclusive_instances.insert(*instance);
+    }
     state.instance_keys[*instance] = key;
     state.host_get_device_proc_addr.store(
         reinterpret_cast<PFN_vkGetDeviceProcAddr>(
@@ -2272,21 +2284,26 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(
 
   VkDeviceCreateInfo host_info = *create_info;
   bool full_screen_exclusive = false;
-  bool surface_capabilities2 = false;
+  bool exclusive_instance = false;
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
-    surface_capabilities2 = state.surface_capabilities2;
+    exclusive_instance =
+        state.full_screen_exclusive_instances.count(instance) != 0;
   }
   std::vector<const char*> host_extensions(
       create_info->ppEnabledExtensionNames,
       create_info->ppEnabledExtensionNames + create_info->enabledExtensionCount);
-  full_screen_exclusive =
-      std::any_of(host_extensions.begin(), host_extensions.end(),
-                  [](const char* name) {
-                    return std::strcmp(name, kFullScreenExclusiveExtension) == 0;
-                  });
-  if (!full_screen_exclusive && surface_capabilities2 &&
+  const auto wants = [&host_extensions](const char* extension) {
+    return std::any_of(host_extensions.begin(), host_extensions.end(),
+                       [extension](const char* name) {
+                         return std::strcmp(name, extension) == 0;
+                       });
+  };
+  full_screen_exclusive = wants(kFullScreenExclusiveExtension);
+  if (!full_screen_exclusive && exclusive_instance &&
+      wants(VK_KHR_SWAPCHAIN_EXTENSION_NAME) &&
+      properties.apiVersion >= VK_API_VERSION_1_1 &&
       HostDeviceExtension(instance, physical_device,
                           kFullScreenExclusiveExtension)) {
     host_extensions.push_back(kFullScreenExclusiveExtension);
