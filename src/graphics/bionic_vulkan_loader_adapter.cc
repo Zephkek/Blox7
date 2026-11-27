@@ -227,6 +227,15 @@ struct AdapterState {
     VkCommandPool command_pool = VK_NULL_HANDLE;
   };
 
+  struct SurfaceQueries {
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR capabilities = nullptr;
+    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR present_modes = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR support = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceFormatsKHR formats = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceFormats2KHR formats2 = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR capabilities2 = nullptr;
+  };
+
   std::mutex mutex;
   blox7::graphics::SdlVulkanWsi host_wsi;
   blox7::graphics::AndroidVulkanWsiAdapter android_wsi;
@@ -235,15 +244,6 @@ struct AdapterState {
   std::vector<DeviceDispatch> device_dispatches;
   std::vector<QueueBinding> queue_bindings;
   std::vector<CommandBufferBinding> command_buffer_bindings;
-  PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_surface_capabilities =
-      nullptr;
-  PFN_vkGetPhysicalDeviceSurfacePresentModesKHR host_surface_present_modes =
-      nullptr;
-  PFN_vkGetPhysicalDeviceSurfaceSupportKHR host_surface_support = nullptr;
-  PFN_vkGetPhysicalDeviceSurfaceFormatsKHR host_surface_formats = nullptr;
-  PFN_vkGetPhysicalDeviceSurfaceFormats2KHR host_surface_formats2 = nullptr;
-  PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR host_surface_capabilities2 =
-      nullptr;
   VkInstance latest_instance = VK_NULL_HANDLE;
   std::unordered_set<VkInstance> full_screen_exclusive_instances;
   size_t active_instance_count = 0;
@@ -263,6 +263,7 @@ struct AdapterState {
   std::uint64_t lost_device_times_ns[4] = {};
   std::unordered_map<VkInstance, std::string> instance_keys;
   std::unordered_map<VkPhysicalDevice, VkInstance> physical_device_instances;
+  std::unordered_map<VkInstance, SurfaceQueries> surface_queries;
   std::unordered_map<VkDevice, std::string> device_keys;
   std::unordered_map<VkDevice, std::int64_t> device_allocations;
   std::unordered_map<VkSwapchainKHR, VkSurfaceKHR> swapchain_surfaces;
@@ -1459,6 +1460,7 @@ ObservedHostQueuePresent(VkQueue queue, const VkPresentInfoKHR* present_info) {
 
 void ForgetInstanceLocked(AdapterState& state, VkInstance instance) {
   state.full_screen_exclusive_instances.erase(instance);
+  state.surface_queries.erase(instance);
   for (auto it = state.physical_device_instances.begin();
        it != state.physical_device_instances.end();) {
     it = it->second == instance ? state.physical_device_instances.erase(it)
@@ -1511,6 +1513,48 @@ Function HostPhysicalDeviceProc(const char* name, const char* alias) {
     proc = HostInstanceProc(instance, alias);
   }
   return reinterpret_cast<Function>(proc);
+}
+
+AdapterState::SurfaceQueries SurfaceQueriesFor(
+    VkPhysicalDevice physical_device) {
+  AdapterState& state = State();
+  VkInstance instance = VK_NULL_HANDLE;
+  {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    instance = InstanceForPhysicalDeviceLocked(state, physical_device);
+    const auto found = state.surface_queries.find(instance);
+    if (found != state.surface_queries.end()) {
+      return found->second;
+    }
+  }
+  AdapterState::SurfaceQueries queries;
+  if (instance == VK_NULL_HANDLE) {
+    return queries;
+  }
+  queries.capabilities =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(
+          HostInstanceProc(instance,
+                           "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"));
+  queries.present_modes =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>(
+          HostInstanceProc(instance,
+                           "vkGetPhysicalDeviceSurfacePresentModesKHR"));
+  queries.support = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(
+      HostInstanceProc(instance, "vkGetPhysicalDeviceSurfaceSupportKHR"));
+  queries.formats = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(
+      HostInstanceProc(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR"));
+  queries.formats2 =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceFormats2KHR>(
+          HostInstanceProc(instance, "vkGetPhysicalDeviceSurfaceFormats2KHR"));
+  queries.capabilities2 =
+      reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR>(
+          HostInstanceProc(instance,
+                           "vkGetPhysicalDeviceSurfaceCapabilities2KHR"));
+  std::lock_guard<std::mutex> lock(state.mutex);
+  if (InstanceForPhysicalDeviceLocked(state, physical_device) == instance) {
+    state.surface_queries.emplace(instance, queries);
+  }
+  return queries;
 }
 
 bool Etc2EmulatedPhysicalDevice(VkPhysicalDevice physical_device) {
@@ -1870,8 +1914,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.hidden_image_count.store(0, std::memory_order_release);
   state.shown_surface = VK_NULL_HANDLE;
   InvalidateFastDispatchCaches();
-  state.host_surface_capabilities = nullptr;
-  state.host_surface_present_modes = nullptr;
+  state.surface_queries.clear();
   state.latest_instance = VK_NULL_HANDLE;
   state.full_screen_exclusive_instances.clear();
   state.note_present.store(nullptr, std::memory_order_release);
@@ -2169,45 +2212,18 @@ vkGetInstanceProcAddr(VkInstance instance, const char* name) {
                ? adapter
                : HostInstanceProc(VK_NULL_HANDLE, name);
   }
-  if (name != nullptr &&
-      std::strcmp(name, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") == 0) {
-    const PFN_vkVoidFunction host = HostInstanceProc(instance, name);
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    state.host_surface_capabilities =
-        reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(host);
-    return host != nullptr ? reinterpret_cast<PFN_vkVoidFunction>(
-                                 vkGetPhysicalDeviceSurfaceCapabilitiesKHR)
-                           : nullptr;
+#define BLOX7_SURFACE_QUERY(function)                           \
+  if (name != nullptr && std::strcmp(name, #function) == 0) {   \
+    return HostInstanceProc(instance, name) != nullptr          \
+               ? reinterpret_cast<PFN_vkVoidFunction>(function) \
+               : nullptr;                                       \
   }
-  if (name != nullptr &&
-      std::strcmp(name, "vkGetPhysicalDeviceSurfacePresentModesKHR") == 0) {
-    const PFN_vkVoidFunction host = HostInstanceProc(instance, name);
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    state.host_surface_present_modes =
-        reinterpret_cast<PFN_vkGetPhysicalDeviceSurfacePresentModesKHR>(host);
-    return host != nullptr ? reinterpret_cast<PFN_vkVoidFunction>(
-                                 vkGetPhysicalDeviceSurfacePresentModesKHR)
-                           : nullptr;
-  }
-#define BLOX7_SURFACE_QUERY(function, field)                                \
-  if (name != nullptr && std::strcmp(name, #function) == 0) {               \
-    const PFN_vkVoidFunction host = HostInstanceProc(instance, name);       \
-    AdapterState& state = State();                                          \
-    std::lock_guard<std::mutex> lock(state.mutex);                          \
-    state.field = reinterpret_cast<PFN_##function>(host);                   \
-    return host != nullptr ? reinterpret_cast<PFN_vkVoidFunction>(function) \
-                           : nullptr;                                       \
-  }
-  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceSupportKHR,
-                      host_surface_support)
-  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceFormatsKHR,
-                      host_surface_formats)
-  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceFormats2KHR,
-                      host_surface_formats2)
-  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceCapabilities2KHR,
-                      host_surface_capabilities2)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfacePresentModesKHR)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceSupportKHR)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceFormatsKHR)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceFormats2KHR)
+  BLOX7_SURFACE_QUERY(vkGetPhysicalDeviceSurfaceCapabilities2KHR)
 #undef BLOX7_SURFACE_QUERY
   if (const PFN_vkVoidFunction adapter = AdapterProc(name);
       adapter != nullptr) {
@@ -2643,16 +2659,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
   auto image_count_policy = present_policy;
   if (present_policy != blox7::graphics::PresentModePolicy::kHostDefault) {
     bool mode_selected = false;
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_caps = nullptr;
-    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR host_modes_query = nullptr;
-    {
-      AdapterState& state = State();
-      std::lock_guard<std::mutex> lock(state.mutex);
-      host_caps = state.host_surface_capabilities;
-      host_modes_query = state.host_surface_present_modes;
-    }
     const VkPhysicalDevice physical_device =
         HostDispatchForDevice(device).physical_device;
+    const AdapterState::SurfaceQueries queries =
+        SurfaceQueriesFor(physical_device);
+    const auto host_caps = queries.capabilities;
+    const auto host_modes_query = queries.present_modes;
     if (host_modes_query != nullptr && physical_device != VK_NULL_HANDLE) {
       std::uint32_t host_count = 0;
       if (host_modes_query(physical_device, create_info->surface, &host_count,
@@ -2720,14 +2732,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
   // the post pass copies the frame out of the swapchain image first
   if (const char* post_fx = std::getenv("BLOX7_POST_FX");
       post_fx != nullptr && post_fx[0] != '\0') {
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_caps = nullptr;
-    {
-      AdapterState& state = State();
-      std::lock_guard<std::mutex> lock(state.mutex);
-      host_caps = state.host_surface_capabilities;
-    }
     const VkPhysicalDevice physical_device =
         HostDispatchForDevice(device).physical_device;
+    const auto host_caps = SurfaceQueriesFor(physical_device).capabilities;
     VkSurfaceCapabilitiesKHR capabilities{};
     if (host_caps != nullptr && physical_device != VK_NULL_HANDLE &&
         host_caps(physical_device, create_info->surface, &capabilities) ==
@@ -2737,14 +2744,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
     }
   }
   if (host_info.compositeAlpha == VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_caps = nullptr;
-    {
-      AdapterState& state = State();
-      std::lock_guard<std::mutex> lock(state.mutex);
-      host_caps = state.host_surface_capabilities;
-    }
     const VkPhysicalDevice physical_device =
         HostDispatchForDevice(device).physical_device;
+    const auto host_caps = SurfaceQueriesFor(physical_device).capabilities;
     VkSurfaceCapabilitiesKHR capabilities{};
     if (host_caps != nullptr && physical_device != VK_NULL_HANDLE &&
         host_caps(physical_device, create_info->surface, &capabilities) ==
@@ -3335,12 +3337,8 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
     }
   }
   WaitWhileWindowHoldsPresents();
-  PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR host_capabilities = nullptr;
-  {
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    host_capabilities = state.host_surface_capabilities;
-  }
+  const auto host_capabilities =
+      SurfaceQueriesFor(physical_device).capabilities;
   if (host_capabilities == nullptr || capabilities == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -3394,12 +3392,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfacePresentModesKHR(
   if (present_mode_count == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  PFN_vkGetPhysicalDeviceSurfacePresentModesKHR host_query = nullptr;
-  {
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    host_query = state.host_surface_present_modes;
-  }
+  const auto host_query = SurfaceQueriesFor(physical_device).present_modes;
   if (host_query == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
@@ -3450,12 +3443,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceSupportKHR(
                                      surface, supported, &captured)) {
     return captured;
   }
-  PFN_vkGetPhysicalDeviceSurfaceSupportKHR host_query = nullptr;
-  {
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    host_query = state.host_surface_support;
-  }
+  const auto host_query = SurfaceQueriesFor(physical_device).support;
   return host_query != nullptr
              ? NoteSurfaceResult(surface,
                                  host_query(physical_device, queue_family_index,
@@ -3471,12 +3459,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormatsKHR(
                                      &captured)) {
     return captured;
   }
-  PFN_vkGetPhysicalDeviceSurfaceFormatsKHR host_query = nullptr;
-  {
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    host_query = state.host_surface_formats;
-  }
+  const auto host_query = SurfaceQueriesFor(physical_device).formats;
   return host_query != nullptr
              ? NoteSurfaceResult(surface, host_query(physical_device, surface,
                                                      format_count, formats))
@@ -3492,12 +3475,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceFormats2KHR(
                                       &captured)) {
     return captured;
   }
-  PFN_vkGetPhysicalDeviceSurfaceFormats2KHR host_query = nullptr;
-  {
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    host_query = state.host_surface_formats2;
-  }
+  const auto host_query = SurfaceQueriesFor(physical_device).formats2;
   return host_query != nullptr
              ? NoteSurfaceResult(SurfaceOf(surface_info),
                                  host_query(physical_device, surface_info,
@@ -3514,12 +3492,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceSurfaceCapabilities2KHR(
                                            &captured)) {
     return captured;
   }
-  PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR host_query = nullptr;
-  {
-    AdapterState& state = State();
-    std::lock_guard<std::mutex> lock(state.mutex);
-    host_query = state.host_surface_capabilities2;
-  }
+  const auto host_query = SurfaceQueriesFor(physical_device).capabilities2;
   if (host_query == nullptr) {
     return VK_ERROR_INITIALIZATION_FAILED;
   }
