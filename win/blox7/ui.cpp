@@ -242,8 +242,7 @@ struct App {
   int flag_selected = -1;
   int flag_scroll = 0;
   D2D1_RECT_F flag_list_area{};
-  std::wstring shader_status;
-  bool shader_error = false;
+  std::wstring shader_error;
   std::wstring mod_error[4];
   HANDLE single = nullptr;
 
@@ -1046,20 +1045,12 @@ float combo_row(const std::wstring& label, float x, float y, float label_width, 
   return y + kButtonHeight;
 }
 
-std::wstring quality_note(const std::wstring& quality) {
-  if (quality == L"performance") return L"Graphics level 1 plus Blox7's memory savers.";
-  if (quality == L"balanced") return L"The middle of Roblox's slider, memory savers still on.";
-  if (quality == L"high") return L"Level 17, full texture budgets, no forced low-end LOD.";
-  if (quality == L"superhq") return L"Level 21, 4x MSAA and full-resolution textures.";
-  return L"Roblox's own graphics slider decides, like on a phone.";
-}
-
 void page_graphics(const D2D1_RECT_F& page) {
   const float x = page.left + kMargin, w = page.right - page.left - kMargin * 2, ix = x + 9, iw = w - 18;
   float y = page.top + kMargin;
   const bool vulkan = uses_vulkan(g.pending.backend);
   const bool held_back = vulkan_held_back(g.pending);
-  group(rect(x, y, w, 72), L"Renderer");
+  group(rect(x, y, w, 50), L"Renderer");
   const wchar_t* vulkan_label = !g.vulkan_driver ? L"Vulkan (no Vulkan driver found)"
                                 : modded_windows7_driver(g.pending.gpu) ? L"Vulkan (modded Windows 7 driver, may not draw)"
                                 : L"Vulkan (recommended, fastest)";
@@ -1071,15 +1062,10 @@ void page_graphics(const D2D1_RECT_F& page) {
               g.pending.angle = i == 2;
               mark_dirty();
             });
-  const wchar_t* renderer_note = renderer == 2   ? L"OpenGL ES through Direct3D 11, for GPUs without OpenGL ES 3.0."
-                                 : renderer == 1 ? L"For drivers that trip over Vulkan; switches to ANGLE when needed."
-                                 : !g.vulkan_driver ? L"No Vulkan driver here, so Roblox runs OpenGL ES."
-                                                    : L"The graphics driver's Vulkan, the fastest way to run Roblox.";
-  text(renderer_note, g.fonts.body, rect(ix, y + 46, iw, 15), kSecondary);
-  y += 72 + kMargin;
+  y += 50 + kMargin;
 
   static const std::vector<std::wstring> qualities = {L"auto", L"performance", L"balanced", L"high", L"superhq"};
-  group(rect(x, y, w, 96), L"Quality");
+  group(rect(x, y, w, 76), L"Quality");
   combo_row(L"Preset:", ix, y + 16, 64, 200, kQuality, {L"Roblox decides", L"Performance", L"Balanced", L"High", L"Super HQ"},
             index_of(qualities, g.pending.quality), true, [](size_t i) {
               g.pending.quality = qualities[i];
@@ -1099,8 +1085,7 @@ void page_graphics(const D2D1_RECT_F& page) {
     text(L"3D at " + std::to_wstring(size.cx) + L" x " + std::to_wstring(size.cy), g.fonts.body,
          rect(ix + 194, y + 46, iw - 194, 15), kSecondary);
   }
-  text(quality_note(g.pending.quality), g.fonts.body, rect(ix, y + 72, iw, 15), kSecondary);
-  y += 96 + kMargin;
+  y += 76 + kMargin;
 
   std::vector<std::wstring> labels{L"Automatic"};
   size_t selected = g.pending.gpu.empty() ? 0 : g.gpus.size() + 1;
@@ -1115,8 +1100,6 @@ void page_graphics(const D2D1_RECT_F& page) {
     selected = 0;
   } else if (selected > g.gpus.size()) {
     note = L"The card picked earlier is gone, so Roblox picks one.";
-  } else if (!vulkan && selected > 0 && g.os.build >= 17134) {
-    note = L"Saved as Blox7's card in Windows' graphics settings.";
   }
   group(rect(x, y, w, note.empty() ? 50 : 72), L"Graphics card");
   combo_row(L"Use:", ix, y + 16, 64, iw - 64, kGpu, labels, selected, choice, [](size_t i) {
@@ -1139,7 +1122,7 @@ void page_display(const D2D1_RECT_F& page) {
   std::vector<std::wstring> labels;
   for (const auto& size : sizes) labels.push_back(std::to_wstring(size.first) + L" x " + std::to_wstring(size.second));
 
-  group(rect(x, y, w, 122), L"Window");
+  group(rect(x, y, w, 104), L"Window");
   combo_row(L"Size:", ix, y + 16, 92, 190, kWindowSize, labels,
             static_cast<size_t>(std::find(sizes.begin(), sizes.end(), current) - sizes.begin()), true, [sizes](size_t i) {
               g.pending.width = sizes[i].first;
@@ -1165,20 +1148,9 @@ void page_display(const D2D1_RECT_F& page) {
     g.pending.fullscreen = !g.pending.fullscreen;
     mark_dirty();
   });
-  const int scale = g.pending.ui_scale > 0 ? g.pending.ui_scale : windows_scale;
-  const int drawn_w = g.pending.fullscreen ? g.screen_w : g.pending.width;
-  const int drawn_h = g.pending.fullscreen ? g.screen_h : g.pending.height;
-  std::wstring note = g.pending.fullscreen ? L"Fullscreen draws all " + std::to_wstring(drawn_w) + L" x " + std::to_wstring(drawn_h) +
-                                                 L" pixels"
-                                           : std::wstring(L"Roblox draws this many pixels");
-  if (scale == 100) note += L" and reports the same size.";
-  else note += L" and reports " + std::to_wstring(std::lround(drawn_w * 100.0 / scale)) + L" x " +
-               std::to_wstring(std::lround(drawn_h * 100.0 / scale)) + L".";
-  text(note, g.fonts.body, rect(ix, y + 102, iw, 15), kSecondary);
-  y += 122 + kMargin;
+  y += 104 + kMargin;
 
-  const float fullscreen = g.pending.refresh_rate > 0 ? 72 : 50;
-  group(rect(x, y, w, fullscreen), L"Fullscreen");
+  group(rect(x, y, w, 50), L"Fullscreen");
   std::vector<int> rates{0};
   for (const int hz : g.rates) rates.push_back(hz);
   if (std::find(rates.begin(), rates.end(), g.pending.refresh_rate) == rates.end()) rates.push_back(g.pending.refresh_rate);
@@ -1191,9 +1163,7 @@ void page_display(const D2D1_RECT_F& page) {
               g.pending.refresh_rate = rates[i];
               mark_dirty();
             });
-  if (g.pending.refresh_rate > 0)
-    text(L"Fullscreen switches the screen to this rate while Roblox runs.", g.fonts.body, rect(ix, y + 46, iw, 15), kSecondary);
-  y += fullscreen + kMargin;
+  y += 50 + kMargin;
 
   group(rect(x, y, w, 44), L"Browser");
   checkbox(kJoinLinks, ix, y + 16, iw, g.pending.join_links, L"Join games from roblox.com in Blox7", [] {
@@ -1226,7 +1196,7 @@ void page_performance(const D2D1_RECT_F& page) {
   std::vector<std::wstring> labels;
   for (const std::wstring& value : values) labels.push_back(frame_label(value));
 
-  group(rect(x, y, w, 102), L"Frame rate");
+  group(rect(x, y, w, 80), L"Frame rate");
   combo_row(L"Limit:", ix, y + 16, 64, 160, kFrameRate, labels, index_of(values, g.pending.frame_rate_limit), true,
             [values](size_t i) {
               g.pending.frame_rate_limit = values[i];
@@ -1238,39 +1208,27 @@ void page_performance(const D2D1_RECT_F& page) {
               g.pending.vsync = syncs[i];
               mark_dirty();
             });
-  const std::wstring& vsync = g.pending.vsync;
-  text(vsync == L"on"    ? L"VSync on: no tearing, a little more latency."
-       : vsync == L"off" ? L"VSync off: lowest latency, the picture can tear."
-                         : L"Automatic follows the frame rate limit.",
-       g.fonts.body, rect(ix, y + 76, iw, 15), kSecondary);
-  y += 102 + kMargin;
+  y += 80 + kMargin;
 
   static const std::vector<std::wstring> workers = {L"auto", L"throughput", L"latency"};
-  const std::wstring& mode = g.pending.worker_mode;
-  group(rect(x, y, w, 96), L"Processor");
-  combo_row(L"Workers:", ix, y + 16, 64, 160, kWorkers, {L"Roblox decides", L"Throughput", L"Latency"}, index_of(workers, mode),
-            true, [](size_t i) {
+  group(rect(x, y, w, 74), L"Processor");
+  combo_row(L"Workers:", ix, y + 16, 64, 160, kWorkers, {L"Roblox decides", L"Throughput", L"Latency"},
+            index_of(workers, g.pending.worker_mode), true, [](size_t i) {
               g.pending.worker_mode = workers[i];
               mark_dirty();
             });
-  text(mode == L"auto"      ? L"Roblox sizes its own thread pools, like on a phone."
-       : mode == L"latency" ? L"Roblox's own pools, with physics work batched up."
-                            : L"Every CPU core works for Roblox. Best in busy servers.",
-       g.fonts.body, rect(ix, y + 46, iw, 15), kSecondary);
-  checkbox(kThreadedRendering, ix, y + 68, iw, g.pending.threaded_rendering, L"Multithreaded rendering", [] {
+  checkbox(kThreadedRendering, ix, y + 46, iw, g.pending.threaded_rendering, L"Multithreaded rendering", [] {
     g.pending.threaded_rendering = !g.pending.threaded_rendering;
     mark_dirty();
   });
-  y += 96 + kMargin;
+  y += 74 + kMargin;
 
   if (!g.os.windows7()) return;
-  group(rect(x, y, w, 64), L"Screen sharing");
+  group(rect(x, y, w, 44), L"Screen sharing");
   checkbox(kAeroOff, ix, y + 16, iw, g.pending.aero_off, L"Turn off Aero while Roblox runs", [] {
     g.pending.aero_off = !g.pending.aero_off;
     mark_dirty();
   });
-  text(L"Discord and browsers can share the screen without making Roblox stutter.", g.fonts.body, rect(ix, y + 40, iw, 15),
-       kSecondary);
 }
 
 void add_flag() {
@@ -1573,9 +1531,7 @@ void browse_shader() {
   dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER;
   if (!run_file_dialog(dialog, false)) return;
   g.pending.shader = file;
-  const std::wstring error = compile_shader(g.paths, file);
-  g.shader_error = !error.empty();
-  g.shader_status = error.empty() ? L"Compiled. It replaces the built-in effects and gets the slider values." : error;
+  g.shader_error = compile_shader(g.paths, file);
   mark_dirty();
 }
 
@@ -1622,7 +1578,7 @@ void page_effects(const D2D1_RECT_F& page) {
   if (!vulkan) text(L"Effects need the Vulkan renderer (Graphics tab).", g.fonts.body, rect(ix, ry + 2, iw, 15), kSecondary);
   y += look + kMargin;
 
-  group(rect(x, y, w, 72), L"Custom shader");
+  group(rect(x, y, w, g.shader_error.empty() ? 50 : 72), L"Custom shader");
   const D2D1_RECT_F box = rect(ix, y + 16, iw - kButtonWidth * 2 - kGap * 2, kButtonHeight);
   fill_rect(box, ink(vulkan ? kWhite : 0xF4F4F4));
   stroke_rect(box, 0xABADB3);
@@ -1635,14 +1591,10 @@ void page_effects(const D2D1_RECT_F& page) {
   push_button(kRemoveShader, rect(box.right + kGap * 2 + kButtonWidth, y + 16, kButtonWidth, kButtonHeight), L"Remove",
               vulkan && !g.pending.shader.empty(), [] {
                 g.pending.shader.clear();
-                g.shader_status.clear();
-                g.shader_error = false;
+                g.shader_error.clear();
                 mark_dirty();
               });
-  const std::wstring status = !g.shader_status.empty() ? g.shader_status
-                              : g.pending.shader.empty() ? L"Your own .frag shader can replace the built-in effects."
-                                                         : L"It replaces the built-in effects and gets the slider values.";
-  text(status, g.fonts.body, rect(ix, y + 46, iw, 15), g.shader_error ? kError : kSecondary);
+  if (!g.shader_error.empty()) text(g.shader_error, g.fonts.body, rect(ix, y + 46, iw, 15), kError);
 }
 
 std::wstring encoder_label() {
@@ -1862,10 +1814,7 @@ void page_mods(const D2D1_RECT_F& page) {
   file_row(y + 44, 3);
   y += 72 + kMargin;
 
-  group(rect(x, y, w, 72), L"Mods folder");
-  text(L"Pictures and fonts in it replace Roblox's own. It's laid out like Bloxstrap's Modifications folder.", g.fonts.paragraph,
-       rect(ix, y + 16, iw, 30), kSecondary);
-  link(kModsLink, ix, y + 48, L"Open the mods folder", open_mods_folder);
+  link(kModsLink, x, y, L"Open the mods folder", open_mods_folder);
 }
 
 void draw_tabs(const D2D1_RECT_F& strip) {
@@ -2470,8 +2419,7 @@ void open_settings(Tab tab) {
   g.flag_selected = -1;
   g.flag_scroll = 0;
   g.flag_message.clear();
-  g.shader_status.clear();
-  g.shader_error = false;
+  g.shader_error.clear();
   for (std::wstring& error : g.mod_error) error.clear();
   g.name_text.clear();
   g.value_text.clear();
