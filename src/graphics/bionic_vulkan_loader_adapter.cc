@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -264,6 +265,7 @@ struct AdapterState {
   std::unordered_map<VkInstance, std::string> instance_keys;
   std::unordered_map<VkPhysicalDevice, VkInstance> physical_device_instances;
   std::unordered_map<VkInstance, SurfaceQueries> surface_queries;
+  std::unordered_map<VkDevice, std::shared_ptr<std::mutex>> device_wait_locks;
   std::unordered_map<VkDevice, std::string> device_keys;
   std::unordered_map<VkDevice, std::int64_t> device_allocations;
   std::unordered_map<VkSwapchainKHR, VkSurfaceKHR> swapchain_surfaces;
@@ -986,6 +988,7 @@ void RemoveHostDeviceDispatch(VkDevice device) {
             return dispatch.device == device;
           }),
       state.device_dispatches.end());
+  state.device_wait_locks.erase(device);
   InvalidateFastDispatchCaches();
 }
 
@@ -1915,6 +1918,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   state.shown_surface = VK_NULL_HANDLE;
   InvalidateFastDispatchCaches();
   state.surface_queries.clear();
+  state.device_wait_locks.clear();
   state.latest_instance = VK_NULL_HANDLE;
   state.full_screen_exclusive_instances.clear();
   state.note_present.store(nullptr, std::memory_order_release);
@@ -3291,14 +3295,32 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
 
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
   VulkanCallObservation observation("vkDeviceWaitIdle");
-  const PFN_vkDeviceWaitIdle host_wait =
-      HostDispatchForDevice(device).device_wait_idle;
+  const AdapterState::DeviceDispatch& dispatch = HostDispatchForDevice(device);
+  const PFN_vkDeviceWaitIdle host_wait = dispatch.device_wait_idle;
+  const bool has_spare_queue = dispatch.spare_queue != VK_NULL_HANDLE;
   if (host_wait == nullptr) {
     observation.SetResult(VK_ERROR_INITIALIZATION_FAILED);
     return VK_ERROR_INITIALIZATION_FAILED;
   }
-  const VkResult result = NoteDeviceResult(
-      device, State().text_overlay.DeviceWaitIdle(device, host_wait), false);
+  std::shared_ptr<std::mutex> one_at_a_time;
+  if (has_spare_queue) {
+    AdapterState& state = State();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    std::shared_ptr<std::mutex>& entry = state.device_wait_locks[device];
+    if (entry == nullptr) {
+      entry = std::make_shared<std::mutex>();
+    }
+    one_at_a_time = entry;
+  }
+  VkResult waited = VK_SUCCESS;
+  {
+    std::unique_lock<std::mutex> serial;
+    if (one_at_a_time != nullptr) {
+      serial = std::unique_lock<std::mutex>(*one_at_a_time);
+    }
+    waited = State().text_overlay.DeviceWaitIdle(device, host_wait);
+  }
+  const VkResult result = NoteDeviceResult(device, waited, false);
   observation.SetResult(result);
   return result;
 }
