@@ -914,6 +914,13 @@ std::wstring wrong_clock_date(const std::vector<std::wstring>& lines) {
   return date;
 }
 
+bool nvidia_ended(DWORD code) { return (code >> 16) == 0x6E76; }
+
+const wchar_t* nvidia_ended_line() {
+  return g.backend == L"OpenGL ES" ? L"NVIDIA's driver closed Roblox. Vulkan in Settings survives driver restarts."
+                                   : L"NVIDIA's driver closed Roblox. Start it again.";
+}
+
 std::wstring status_line() {
   wchar_t line[160];
   switch (g.stage) {
@@ -925,6 +932,7 @@ std::wstring status_line() {
     case Stage::Failed:
       if (!g.wrong_date.empty()) return L"Windows says it's " + g.wrong_date + L". Set the right date and try again.";
       if (g.gpu_too_old) return L"Update the graphics driver, Roblox needs a DirectX 10 card or newer.";
+      if (nvidia_ended(g.exit_code)) return nvidia_ended_line();
       if (g.backend != L"Vulkan") std::swprintf(line, 160, L"It exited with code %lu.", g.exit_code);
       else std::swprintf(line, 160, L"It exited with code %lu. Try OpenGL ES in Settings if it keeps happening.", g.exit_code);
       return line;
@@ -2073,7 +2081,9 @@ void watch_child() {
       });
     } else {
       g.stage = Stage::Ready;
-      g.detail = g.window_seen ? L"Roblox closed. See you next time." : L"Roblox closed before it opened a window.";
+      g.detail = !g.window_seen       ? L"Roblox closed before it opened a window."
+                 : nvidia_ended(code) ? nvidia_ended_line()
+                                      : L"Roblox closed. See you next time.";
     }
     if (g.minimized_by_us) {
       ShowWindow(g.main.hwnd, SW_RESTORE);
