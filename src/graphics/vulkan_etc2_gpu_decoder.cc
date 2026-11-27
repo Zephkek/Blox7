@@ -592,9 +592,9 @@ struct Etc2GpuDecoder::State {
   bool Begin(Slot* slot);
   bool Finish(VkQueue queue, Slot* slot);
   bool SubmitDecodes(VkQueue queue, Slot* slot, const Band* first,
-                     std::size_t count);
+                     std::size_t count, bool host_reads);
   bool SubmitBands(VkQueue queue, std::uint32_t family,
-                   std::vector<Slot*>* submitted);
+                   std::vector<Slot*>* submitted, bool host_reads);
   bool CheckEncoder(VkQueue queue, std::uint32_t family);
   bool SubmitCopies(VkQueue queue, Slot* slot, const Piece* first,
                     std::size_t count, bool after_compute);
@@ -1010,8 +1010,8 @@ bool Etc2GpuDecoder::State::Finish(VkQueue queue, Slot* slot) {
 }
 
 bool Etc2GpuDecoder::State::SubmitDecodes(VkQueue queue, Slot* slot,
-                                          const Band* first,
-                                          std::size_t count) {
+                                          const Band* first, std::size_t count,
+                                          bool host_reads) {
   buffers.resize(count * 2);
   writes.resize(count * 2);
   for (std::size_t index = 0; index < count; ++index) {
@@ -1094,9 +1094,12 @@ bool Etc2GpuDecoder::State::SubmitDecodes(VkQueue queue, Slot* slot,
                    (job.blocks_wide + kGroupSize - 1) / kGroupSize,
                    (band.rows + kGroupSize - 1) / kGroupSize, band.layers);
   }
+  const VkPipelineStageFlags reader_stage =
+      host_reads ? VK_PIPELINE_STAGE_HOST_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT;
+  const VkAccessFlags reader_access =
+      host_reads ? VK_ACCESS_HOST_READ_BIT : VK_ACCESS_TRANSFER_READ_BIT;
   Barrier(vk, slot->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-          VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-          VK_ACCESS_TRANSFER_READ_BIT);
+          VK_ACCESS_SHADER_WRITE_BIT, reader_stage, reader_access);
   return Finish(queue, slot);
 }
 
@@ -1145,7 +1148,8 @@ void Etc2GpuDecoder::State::Drain(const std::vector<Slot*>& submitted) {
 }
 
 bool Etc2GpuDecoder::State::SubmitBands(VkQueue queue, std::uint32_t family,
-                                        std::vector<Slot*>* submitted) {
+                                        std::vector<Slot*>* submitted,
+                                        bool host_reads) {
   for (std::size_t first = 0; first < bands.size();) {
     VkDeviceSize used = 0;
     std::size_t last = first;
@@ -1160,7 +1164,7 @@ bool Etc2GpuDecoder::State::SubmitBands(VkQueue queue, std::uint32_t family,
     }
     Slot* slot = Acquire(family);
     if (slot == nullptr || !ReserveBlocks(slot, used, last - first) ||
-        !SubmitDecodes(queue, slot, &bands[first], last - first)) {
+        !SubmitDecodes(queue, slot, &bands[first], last - first, host_reads)) {
       Drain(*submitted);
       return false;
     }
@@ -1217,7 +1221,7 @@ bool Etc2GpuDecoder::State::CheckEncoder(VkQueue queue, std::uint32_t family) {
     ran = ran && Plan(upload, &bands);
   }
   std::vector<Slot*> submitted;
-  ran = ran && SubmitBands(queue, family, &submitted);
+  ran = ran && SubmitBands(queue, family, &submitted, true);
   Drain(submitted);
   for (const Slot* slot : submitted) {
     ran = ran && !slot->pending;
@@ -1342,7 +1346,7 @@ bool Etc2GpuDecoder::Decode(VkQueue queue, std::uint32_t family,
     }
   }
   std::vector<Slot*> submitted;
-  return state.SubmitBands(queue, family, &submitted);
+  return state.SubmitBands(queue, family, &submitted, false);
 }
 
 bool Etc2GpuDecoder::Copy(VkQueue queue, std::uint32_t family,
