@@ -843,8 +843,6 @@ struct debug_target {
   struct debug_target* next;
 };
 
-static GLDEBUGPROC g_debug_proc;
-static const void* g_debug_user;
 static struct debug_target* g_debug_targets;
 static void (BRIDGE_MS* g_real_debug_callback)(void*, const void*);
 static void (BRIDGE_MS* g_real_debug_callback_khr)(void*, const void*);
@@ -888,9 +886,7 @@ static void set_debug_callback(void (BRIDGE_MS* real)(void*, const void*), GLDEB
   if (!real) real = g_real_debug_callback ? g_real_debug_callback : g_real_debug_callback_khr;
   if (!real) return;
   const struct debug_target* target = callback ? debug_target_for(callback, user) : NULL;
-  g_debug_proc = target ? callback : NULL;
-  g_debug_user = user;
-  real(target ? (void*)debug_trampoline : NULL, target);
+  real(target ? (void*)debug_trampoline : NULL, target ? (const void*)target : user);
 }
 
 BRIDGE_EXPORT void GL_APIENTRY glDebugMessageCallback(GLDEBUGPROC callback, const void* user) {
@@ -902,15 +898,19 @@ BRIDGE_EXPORT void GL_APIENTRY glDebugMessageCallbackKHR(GLDEBUGPROCKHR callback
 }
 
 void gles_get_pointerv(void (BRIDGE_MS* real)(GLenum, void**), GLenum pname, void** params) {
-  if (params && pname == GL_DEBUG_CALLBACK_FUNCTION) {
-    *params = (void*)g_debug_proc;
+  if (!params || (pname != GL_DEBUG_CALLBACK_FUNCTION && pname != GL_DEBUG_CALLBACK_USER_PARAM)) {
+    real(pname, params);
     return;
   }
-  if (params && pname == GL_DEBUG_CALLBACK_USER_PARAM) {
-    *params = (void*)g_debug_user;
-    return;
-  }
-  real(pname, params);
+  void* function = NULL;
+  void* user = NULL;
+  real(GL_DEBUG_CALLBACK_FUNCTION, &function);
+  real(GL_DEBUG_CALLBACK_USER_PARAM, &user);
+  const struct debug_target* target = function == (void*)debug_trampoline ? user : NULL;
+  if (pname == GL_DEBUG_CALLBACK_FUNCTION)
+    *params = target ? (void*)target->proc : function;
+  else
+    *params = target ? (void*)target->user : user;
 }
 
 static int gles_refused(void) {
