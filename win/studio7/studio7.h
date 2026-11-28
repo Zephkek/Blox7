@@ -11,6 +11,8 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "../webview2/wv2setup.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -177,6 +179,7 @@ BOOL links_set(const Paths *paths, BOOL on);
 void links_refresh(const Paths *paths);
 BOOL is_link(const WCHAR *text);
 BOOL webview_version(WCHAR *out, DWORD room);
+BOOL webview_wanted(void);
 
 void ui_status(const char *format, ...) S7_PRINTF(1, 2);
 

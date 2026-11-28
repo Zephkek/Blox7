@@ -14,7 +14,7 @@ std::wstring start_failure(const Run& run);
 bool self_updates(const Paths& paths);
 bool update_self(const Paths& paths);
 int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::wstring& arguments, bool open_when_ready,
-                 const std::wstring& failure);
+                 const std::wstring& failure, bool webview_started);
 int render_ui(const std::wstring& dir);
 std::wstring check_cursor(const std::wstring& file);
 std::wstring check_font(const std::wstring& file);

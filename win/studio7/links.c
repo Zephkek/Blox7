@@ -165,9 +165,10 @@ BOOL webview_version(WCHAR *out, DWORD room) {
         L"SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
     };
     static const HKEY roots[] = {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER};
+    BOOL installed = wv2_system_usable();
     int root, key;
 
-    for (root = 0; root < 2; root++) {
+    for (root = 0; installed && root < 2; root++) {
         for (key = 0; key < 2; key++) {
             DWORD size = room * sizeof(WCHAR);
 
@@ -176,6 +177,16 @@ BOOL webview_version(WCHAR *out, DWORD room) {
                 return TRUE;
         }
     }
+    if (wv2_windows_major() < 10 && wv2_folder_complete() && room > wcslen(WV2_VERSION)) {
+        wcscpy(out, WV2_VERSION);
+        return TRUE;
+    }
     out[0] = 0;
     return FALSE;
+}
+
+BOOL webview_wanted(void) {
+    WCHAR own[4];
+
+    return !GetEnvironmentVariableW(L"WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", own, 4) && wv2_needs_setup();
 }

@@ -106,6 +106,8 @@ bool open_now(const Paths& paths, const std::wstring& arguments, std::wstring* f
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int argc = 0;
   wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (argv && argc >= 2 && wcscmp(argv[1], WV2_SETUP_SWITCH) == 0)
+    return wv2_setup_run(argc >= 3 && wcscmp(argv[2], L"--now") == 0);
   if (argv && argc == 3 && wcscmp(argv[1], L"--render-ui") == 0) return studio7::render_ui(argv[2]);
   wchar_t self[MAX_PATH];
   const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
@@ -122,6 +124,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     studio7::update_self(paths);
     return 0;
   }
+  const bool webview_started =
+      length && length < MAX_PATH && studio7::windows_seven() && webview_wanted() && wv2_setup_spawn(self, 0);
   std::wstring arguments, failure;
   bool open = false;
   if (argv && argc == 2 && is_link(argv[1])) {
@@ -132,5 +136,5 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     open = true;
   }
   if (open && studio7::windows_seven() && open_now(paths, arguments, &failure)) return 0;
-  return studio7::run_launcher(instance, show, paths, arguments, open && failure.empty(), failure);
+  return studio7::run_launcher(instance, show, paths, arguments, open && failure.empty(), failure, webview_started);
 }

@@ -33,6 +33,7 @@ constexpr UINT kJobDone = WM_APP + 2;
 constexpr UINT kSelfUpdated = WM_APP + 3;
 constexpr UINT_PTR kAnimTimer = 1;
 constexpr UINT_PTR kWatchTimer = 2;
+constexpr UINT_PTR kWebviewTimer = 3;
 constexpr UINT kAboutCommand = 0x0010;
 
 constexpr float kMargin = 11, kMainWidth = 460, kCommandHeight = 45;
@@ -166,6 +167,10 @@ struct App {
 
   Stage stage = Stage::Fresh;
   std::wstring version, webview, detail, updates, failure, offer, newer;
+  wv2_status webview_job{};
+  int webview_error = WV2_OK;
+  bool webview_wanted = false, webview_busy = false;
+  ULONGLONG webview_started = 0;
   std::vector<std::wstring> error_lines;
   bool details = false, failed_start = false, automatic = true;
   float clock = 0;
@@ -193,6 +198,7 @@ std::unordered_map<std::wstring, std::wstring> g_fitted;
 
 void act();
 void open_settings(Tab tab);
+void retry_webview();
 
 IDWriteTextFormat* make_font(float size, DWRITE_FONT_WEIGHT weight, DWRITE_TEXT_ALIGNMENT align, bool middle, bool single_line,
                              const wchar_t* family = L"Segoe UI") {
@@ -630,10 +636,39 @@ void refresh_info() {
     g.version = widen(name);
   }
   g.webview = webview_version(webview, 64) ? webview : L"";
+  g.webview_wanted = windows_seven() && webview_wanted();
+  g.webview_error = g.webview_wanted ? wv2_last_error(nullptr) : WV2_OK;
   g.automatic = updates_automatic(&g.paths);
 }
 
 std::wstring megabytes(ULONG64 bytes) { return std::to_wstring((bytes + 524288) / 1048576) + L" MB"; }
+
+bool webview_running() {
+  const bool running = wv2_status_read(&g.webview_job) != 0;
+  if (running || GetTickCount64() - g.webview_started > 5000) g.webview_started = 0;
+  return running || g.webview_started;
+}
+
+bool webview_failed() { return g.webview_wanted && !g.webview_busy && g.webview_error != WV2_OK; }
+
+std::wstring sign_in_line() {
+  const wv2_status& job = g.webview_job;
+  if (g.webview_busy && job.total > 0 && job.state == WV2_STATE_DOWNLOADING)
+    return L"Setting up WebView2: " + std::to_wstring((static_cast<ULONG64>(job.done) + 524288) / 1048576) + L" of " +
+           megabytes(static_cast<ULONG64>(job.total));
+  if (g.webview_busy && job.total > 0 && job.state == WV2_STATE_UNPACKING)
+    return L"Setting up WebView2: " + std::to_wstring(job.done * 100 / job.total) + L"%";
+  if (g.webview_busy) return L"Setting up WebView2...";
+  if (!g.webview.empty()) return L"WebView2 " + g.webview;
+  if (webview_failed()) return L"Couldn't set up WebView2.";
+  return L"The WebView2 Runtime is missing.";
+}
+
+std::wstring webview_reason() {
+  std::wstring reason = wv2_error_text(g.webview_error);
+  if (!reason.empty() && reason[0] >= L'a' && reason[0] <= L'z') reason[0] = static_cast<wchar_t>(reason[0] - 32);
+  return reason + L".";
+}
 
 std::wstring job_text() {
   std::lock_guard<std::mutex> hold(g.lock);
@@ -678,6 +713,7 @@ std::wstring updates_line() {
 
 float main_content_height() {
   float h = 101;
+  if (webview_failed()) h += 17;
   if (!status_line().empty()) h += 20;
   if (busy()) h += 22;
   if (g.stage == Stage::Failed && g.details) h += 11 + 16 + 15 * static_cast<float>(std::max<size_t>(1, g.error_lines.size())) + 7 + 15;
@@ -711,18 +747,19 @@ void draw_main() {
   const std::pair<const wchar_t*, std::wstring> facts[] = {
       {L"Studio:", g.version.empty() ? L"Not installed yet" : g.version},
       {L"Updates:", updates_line()},
-      {L"Sign-in:", g.webview.empty() ? L"The WebView2 Runtime is missing." : L"WebView2 " + g.webview}};
+      {L"Sign-in:", sign_in_line()}};
   float y = 37;
   for (const auto& [label, value] : facts) {
     text(label, g.fonts.body, rect(x, y, 64, 15), kSecondary);
     text(value, g.fonts.body, rect(x + 64, y, tw - 64, 15), kText);
     y += 17;
   }
-  if (g.webview.empty())
-    link(kWebviewLink, x + 64 + text_width(facts[2].second, g.fonts.body) + 6, y - 17, L"Get version 109", [] {
-      ShellExecuteW(g.main.hwnd, L"open", L"https://www.catalog.update.microsoft.com/Search.aspx?q=WebView2%20Runtime%20109",
-                    nullptr, nullptr, SW_SHOWNORMAL);
-    });
+  if (g.webview_wanted && !g.webview_busy)
+    link(kWebviewLink, x + 64 + text_width(facts[2].second, g.fonts.body) + 6, y - 17, L"Try again", retry_webview);
+  if (webview_failed()) {
+    text(webview_reason(), g.fonts.body, rect(x + 64, y, tw - 64, 15), kText);
+    y += 17;
+  }
   y += 9;
   const std::wstring status = status_line();
   if (!status.empty()) {
@@ -1278,6 +1315,27 @@ void watch_studio() {
   repaint(g.main);
 }
 
+void watch_webview() {
+  const std::wstring before = sign_in_line();
+  const bool was = g.webview_busy, failed = webview_failed();
+  g.webview_busy = webview_running();
+  if (was && !g.webview_busy) refresh_info();
+  if (!g.webview_busy && !g.webview_wanted) KillTimer(g.main.hwnd, kWebviewTimer);
+  if (webview_failed() != failed) fit_main_window();
+  if (webview_failed() != failed || sign_in_line() != before) repaint(g.main);
+}
+
+void retry_webview() {
+  wchar_t self[MAX_PATH];
+  const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
+  if (!length || length >= MAX_PATH || !wv2_setup_spawn(self, 0)) return;
+  g.webview_started = GetTickCount64();
+  g.webview_busy = true;
+  SetTimer(g.main.hwnd, kWebviewTimer, 500, nullptr);
+  fit_main_window();
+  repaint(g.main);
+}
+
 Canvas* canvas_of(HWND hwnd) { return reinterpret_cast<Canvas*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA)); }
 
 void track_mouse(LPARAM lp) {
@@ -1397,6 +1455,7 @@ LRESULT handle(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case WM_TIMER:
       if (wp == kAnimTimer) step_animation();
       else if (wp == kWatchTimer) watch_studio();
+      else if (wp == kWebviewTimer) watch_webview();
       return 0;
     case kProgress:
       if (g.stage == Stage::Setting) fit_main_window();
@@ -1584,6 +1643,9 @@ int render_ui(const std::wstring& dir) {
     const wchar_t *version, *updates, *text, *webview;
     double fraction;
     bool details;
+    LONG webview_state = WV2_STATE_IDLE;
+    LONGLONG webview_done = 0, webview_total = 0;
+    int webview_error = WV2_OK;
   } mains[] = {
       {L"main-fresh", Stage::Fresh, kOpenButton, L"", L"", L"Roblox Studio 0.748.0.7481526, a 570 MB download.", L"109.0.1518.140", -1, false},
       {L"main-setting", Stage::Setting, 0, L"", L"", L"Downloading, 312 of 570 MB (5.7 MB/s)", L"109.0.1518.140", 0.49, false},
@@ -1591,7 +1653,13 @@ int render_ui(const std::wstring& dir) {
       {L"main-updating", Stage::Ready, 0, L"0.748.0.7481526", L"Downloading, 96 of 571 MB (5.4 MB/s)", L"", L"109.0.1518.140", -1, false},
       {L"main-starting", Stage::Starting, 0, L"0.748.0.7481526", L"Up to date", L"", L"109.0.1518.140", -1, false},
       {L"main-running", Stage::Running, 0, L"0.748.0.7481526", L"Up to date", L"", L"109.0.1518.140", -1, false},
-      {L"main-no-webview", Stage::Ready, kWebviewLink, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false},
+      {L"main-no-webview", Stage::Ready, kWebviewLink, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false,
+       WV2_STATE_IDLE, 0, 0, WV2_ERROR_NETWORK},
+      {L"main-webview-missing", Stage::Ready, 0, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false},
+      {L"main-webview-download", Stage::Ready, 0, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false,
+       WV2_STATE_DOWNLOADING, 38797312, 150552536},
+      {L"main-webview-unpack", Stage::Ready, 0, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false,
+       WV2_STATE_UNPACKING, 209302290, 465116199},
       {L"main-failed", Stage::Failed, kDetailsButton, L"", L"", L"setup.rbxcdn.com did not answer (error 10060)", L"109.0.1518.140", -1, true},
       {L"main-unsupported", Stage::Unsupported, 0, L"", L"", L"This Windows runs Roblox Studio from roblox.com as it is.",
        L"140.0.3485.54", -1, false}};
@@ -1608,6 +1676,10 @@ int render_ui(const std::wstring& dir) {
       g.version = shot.version;
       g.updates = shot.updates;
       g.webview = shot.webview;
+      g.webview_job = {shot.webview_state, WV2_OK, 0, 0, shot.webview_done, shot.webview_total};
+      g.webview_busy = shot.webview_state != WV2_STATE_IDLE;
+      g.webview_error = shot.webview_error;
+      g.webview_wanted = !shot.webview[0] && shot.stage != Stage::Unsupported;
       g.detail = shot.stage == Stage::Unsupported ? shot.text : L"";
       g.offer = shot.stage == Stage::Fresh ? shot.text : L"";
       g.failure = shot.stage == Stage::Failed ? shot.text : L"";
@@ -1652,7 +1724,7 @@ int render_ui(const std::wstring& dir) {
 }
 
 int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::wstring& arguments, bool open_when_ready,
-                 const std::wstring& failure) {
+                 const std::wstring& failure, bool webview_started) {
   HANDLE single = g.single = CreateMutexW(nullptr, TRUE, L"Local\\Studio7.Launcher");
   if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
     if (HWND other = FindWindowW(kMainClass, nullptr)) {
@@ -1668,7 +1740,9 @@ int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::ws
   g.paths = paths;
   g.arguments = arguments;
   g.open_when_ready = open_when_ready;
+  g.webview_started = webview_started ? GetTickCount64() : 0;
   refresh_info();
+  g.webview_busy = webview_running();
   if (!windows_seven()) {
     DWORD major = 0, minor = 0, build = 0;
     windows_version(&major, &minor, &build);
@@ -1705,6 +1779,7 @@ int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::ws
   }
   ShowWindow(hwnd, show == SW_HIDE ? SW_SHOWNORMAL : show);
   UpdateWindow(hwnd);
+  if (g.webview_wanted || g.webview_busy) SetTimer(hwnd, kWebviewTimer, 500, nullptr);
 
   if (g.stage == Stage::Fresh && g.open_when_ready) {
     install();
