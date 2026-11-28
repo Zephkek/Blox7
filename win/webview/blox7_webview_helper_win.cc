@@ -2677,7 +2677,6 @@ int wmain(int argc, wchar_t** argv) {
     return EXIT_FAILURE;
   }
   g_app.primary = primary;
-  ShowWindow(primary->window, SW_SHOW);
   // ready once the window exists, webview2's first start can blow the readiness deadline
   if (!SendEvent(WebViewHelperEventType::kReady, {})) {
     Log("could not publish helper readiness");
