@@ -2,8 +2,8 @@
 and the certificates mozilla revoked in onecrl, from the snapshot in win/tools/trust-anchors.txt
 usage: trust-anchors.py [<cacert.pem> <trust-anchors.txt> <roots.h>]
        trust-anchors.py refresh <certdata.txt> <genname.c> <onecrl.json> [<cacert.pem> <trust-anchors.txt> <roots.h>]
-refresh takes the certdata.txt whose sha-256 is on cacert.pem's "## SHA256:" line, nss's lib/certdb/genname.c and
-onecrl.json from https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/
+refresh takes the certdata.txt whose sha-256 is on cacert.pem's "## SHA256:" line, lib/certdb/genname.c from the same
+nss and onecrl.json from https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/
 changeset?_expected=0 (or that collection's /records), and writes the snapshot, then roots.h"""
 import base64
 import binascii
@@ -385,15 +385,16 @@ def c_bytes(text, what):
 
 
 def genname_lines(path):
-    with open(path, encoding='utf-8') as f:
-        text = re.sub(r'\\\n', ' ', f.read().replace('\r\n', '\n'))
+    with open(path, 'rb') as f:
+        raw = f.read()
+    text = re.sub(r'\\\n', ' ', raw.decode('utf-8').replace('\r\n', '\n'))
     table = re.findall(r'builtInNameConstraints\[\]\[2\] = \{(.*?)\};', text, re.S)
     if len(table) != 1:
         fail(path + ' has no builtInNameConstraints table')
     labels = re.findall(r'NAME_CONSTRAINTS_ENTRY\((\w+)\)', table[0])
     if not labels or re.sub(r'NAME_CONSTRAINTS_ENTRY\(\w+\)|[\s,]', '', table[0]):
         fail(path + ' has an unexpected builtInNameConstraints table')
-    lines = set()
+    lines = {f'genname {hashlib.sha256(raw).hexdigest()}'}
     for label in labels:
         body = re.findall(rf'^[ \t]*#[ \t]*define[ \t]+{label}_SUBJECT_DN\b(.*)$', text, re.M)
         if len(body) != 1:
@@ -416,7 +417,7 @@ def bundle(pem):
 def snapshot(lines, path):
     if lines != sorted(set(lines)):
         fail(path + ' is not sorted or holds a line twice')
-    single, left_out = {'certdata': [], 'certificates': [], 'onecrl': []}, {}
+    single, left_out = {'certdata': [], 'certificates': [], 'genname': [], 'onecrl': []}, {}
     constrained, serials, keys = set(), set(), set()
     for line in lines:
         kind, *rest = line.split(' ')
