@@ -2521,6 +2521,17 @@ LRESULT CALLBACK MessageProc(HWND window, UINT message, WPARAM wparam, LPARAM lp
   }
 }
 
+std::string DropForeignVariables() {
+  std::string dropped;
+  for (const wchar_t* name : {L"WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", L"WEBVIEW2_USER_DATA_FOLDER",
+                              L"WEBVIEW2_RELEASE_CHANNEL_PREFERENCE"}) {
+    if (GetEnvironmentVariableW(name, nullptr, 0) == 0) continue;
+    SetEnvironmentVariableW(name, nullptr);
+    dropped += (dropped.empty() ? "" : ", ") + Utf8(name);
+  }
+  return dropped;
+}
+
 bool LoadWebView2() {
   wchar_t path[MAX_PATH];
   GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -2660,6 +2671,7 @@ int wmain(int argc, wchar_t** argv) {
 
   Surface* primary = CreateSurfaceWindow(true, nullptr);
   if (delayload_guard_needed()) AddVectoredExceptionHandler(1, delayload_guard_handler);
+  const std::string ignored = DropForeignVariables();
   if (primary == nullptr || !LoadWebView2()) {
     Log("WebView2 is unavailable: WebView2Loader.dll or the window could not be loaded");
     return EXIT_FAILURE;
@@ -2682,7 +2694,9 @@ int wmain(int argc, wchar_t** argv) {
   if (!g_app.runtime_folder.empty() && DisplayAdapterIsVmware()) {
     g_app.browser_arguments += g_app.browser_arguments.empty() ? L"--ignore-gpu-blocklist" : L" --ignore-gpu-blocklist";
   }
-  Log("WebView2 runtime: %s", g_app.runtime_folder.empty() ? "installed" : Utf8(g_app.runtime_folder.c_str()).c_str());
+  Log("WebView2 runtime: %s%s%s%s",
+      g_app.runtime_folder.empty() ? "installed" : Utf8(g_app.runtime_folder.c_str()).c_str(),
+      ignored.empty() ? "" : " (ignored ", ignored.c_str(), ignored.empty() ? "" : ")");
   if (const std::wstring trace = TraceBrowserArguments(); !trace.empty()) {
     g_app.browser_arguments += (g_app.browser_arguments.empty() ? L"" : L" ") + trace;
   }
