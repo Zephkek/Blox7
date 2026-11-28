@@ -32,6 +32,15 @@ typedef struct {
 } Patch;
 
 typedef struct {
+    char name[96];
+    int hashed, first, count;
+} SchemaSet;
+
+typedef struct {
+    char importer[64], host[64];
+} SchemaValue;
+
+typedef struct {
     const LayerJob *job;
     Unit *units;
     int unit_count;
@@ -42,48 +51,12 @@ typedef struct {
     Patch patches[MAX_PATCHES];
     int patch_count;
     int missing, failures;
+    SchemaSet *sets;
+    SchemaValue *values;
+    int set_count, value_count;
+    DWORD schema;
+    BOOL seven;
 } World;
-
-static const struct {
-    const char *set, *host;
-    BOOL kernel32_goes_to_kernelbase;
-} g_schema[] = {
-    {"api-ms-win-core-console-l1-1-0.dll", "kernel32.dll", FALSE},
-    {"api-ms-win-core-datetime-l1-1-0.dll", "kernel32.dll", FALSE},
-    {"api-ms-win-core-debug-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-delayload-l1-1-0.dll", "kernel32.dll", FALSE},
-    {"api-ms-win-core-errorhandling-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-fibers-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-file-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-handle-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-heap-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-interlocked-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-io-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-libraryloader-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-localization-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-localregistry-l1-1-0.dll", "kernel32.dll", FALSE},
-    {"api-ms-win-core-memory-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-misc-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-namedpipe-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-processenvironment-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-processthreads-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-profile-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-rtlsupport-l1-1-0.dll", "ntdll.dll", FALSE},
-    {"api-ms-win-core-string-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-synch-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-sysinfo-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-threadpool-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-core-ums-l1-1-0.dll", "kernel32.dll", FALSE},
-    {"api-ms-win-core-util-l1-1-0.dll", "kernel32.dll", TRUE},
-    {"api-ms-win-core-xstate-l1-1-0.dll", "ntdll.dll", FALSE},
-    {"api-ms-win-security-base-l1-1-0.dll", "kernelbase.dll", FALSE},
-    {"api-ms-win-security-lsalookup-l1-1-0.dll", "sechost.dll", FALSE},
-    {"api-ms-win-security-sddl-l1-1-0.dll", "sechost.dll", FALSE},
-    {"api-ms-win-service-core-l1-1-0.dll", "sechost.dll", FALSE},
-    {"api-ms-win-service-management-l1-1-0.dll", "sechost.dll", FALSE},
-    {"api-ms-win-service-management-l2-1-0.dll", "sechost.dll", FALSE},
-    {"api-ms-win-service-winsvc-l1-1-0.dll", "sechost.dll", FALSE},
-};
 
 static const char *g_homes[] = {"kernel32.dll", "advapi32.dll", "ole32.dll", "user32.dll", "gdi32.dll", "shlwapi.dll",
                                 "shell32.dll", "oleaut32.dll", "version.dll", "ws2_32.dll", "ntdll.dll"};
@@ -122,13 +95,29 @@ static BOOL is_crt_set(const char *name) {
     return !strncmp(name, "api-ms-win-crt-", 15);
 }
 
-static const char *schema_host(const char *name, const char *importer) {
-    int i;
+static const char *schema_host(const World *w, const char *name, const char *importer) {
+    char key[96];
+    const char *dash;
+    size_t length = strlen(name), prefix;
+    int i, j;
 
-    for (i = 0; i < (int)(sizeof(g_schema) / sizeof(g_schema[0])); i++) {
-        if (strcmp(g_schema[i].set, name)) continue;
-        if (g_schema[i].kernel32_goes_to_kernelbase && importer && !strcmp(importer, "kernel32.dll")) return "kernelbase.dll";
-        return g_schema[i].host;
+    if (strncmp(name, "api-", 4) && (w->schema < 4 || strncmp(name, "ext-", 4))) return NULL;
+    if (length > 4 && !strcmp(name + length - 4, ".dll")) length -= 4;
+    if (length >= sizeof(key)) return NULL;
+    memcpy(key, name, length);
+    key[length] = 0;
+    dash = strrchr(key, '-');
+    prefix = dash ? (size_t)(dash - key) : length;
+    for (i = 0; i < w->set_count; i++) {
+        const SchemaSet *s = &w->sets[i];
+
+        if (w->schema >= 6 ? (size_t)s->hashed != prefix || strncmp(s->name, key, prefix) : strcmp(s->name, key + 4))
+            continue;
+        for (j = 0; importer && j < s->count; j++)
+            if (!strcmp(w->values[s->first + j].importer, importer)) return w->values[s->first + j].host;
+        for (j = 0; j < s->count; j++)
+            if (!w->values[s->first + j].importer[0]) return w->values[s->first + j].host;
+        return "";
     }
     return NULL;
 }
@@ -212,10 +201,10 @@ static Unit *system_unit(World *w, const char *name) {
 }
 
 static Unit *find_unit(World *w, const char *name, const char *importer) {
-    const char *host = is_set(name) ? schema_host(name, importer) : NULL;
+    const char *host = is_set(name) ? schema_host(w, name, importer) : NULL;
     Unit *u;
 
-    if (host) return system_unit(w, host);
+    if (host) return *host ? system_unit(w, host) : NULL;
     u = local_unit(w, name);
     return u ? u : system_unit(w, name);
 }
@@ -352,7 +341,7 @@ static BOOL journal_find(const LayerJob *job, const WCHAR *file, DWORD offset, c
 
 static BOOL needs_stub(World *w, const char *dll) {
     if (is_crt_set(dll) || shim_named(w, dll) || side_by_side(dll)) return FALSE;
-    if (is_set(dll)) return !schema_host(dll, NULL);
+    if (is_set(dll)) return !schema_host(w, dll, NULL);
     return !local_unit(w, dll) && !system_unit(w, dll);
 }
 
@@ -472,18 +461,129 @@ static void close_units(World *w) {
     w->unit_count = 0;
 }
 
+static DWORD read32(const BYTE *base, DWORD size, DWORD at) {
+    return at <= size && size - at >= 4 ? *(const DWORD *)(base + at) : 0;
+}
+
+static BOOL schema_text(const BYTE *base, DWORD size, DWORD at, DWORD length, char *out, size_t room) {
+    DWORD i;
+
+    if ((length & 1) || at > size || length > size - at || length / 2 >= room) return FALSE;
+    for (i = 0; i < length / 2; i++) {
+        WCHAR c = (WCHAR)(base[at + 2 * i] | base[at + 2 * i + 1] << 8);
+
+        if (c >= 128) return FALSE;
+        out[i] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    }
+    out[i] = 0;
+    return TRUE;
+}
+
+static BOOL load_schema(World *w) {
+    WCHAR path[MAX_PATH];
+    const BYTE *base = NULL;
+    DWORD size = 0, count, i, j;
+    int capacity = 0, k;
+    Pe pe;
+
+    join(path, w->job->system, "apisetschema.dll");
+    if (!pe_open(path, &pe)) return FALSE;
+    for (k = 0; k < pe.section_count; k++) {
+        const IMAGE_SECTION_HEADER *s = &pe.sections[k];
+
+        if (memcmp(s->Name, ".apiset", 8) || s->PointerToRawData > pe.size) continue;
+        base = pe.data + s->PointerToRawData;
+        size = s->SizeOfRawData < pe.size - s->PointerToRawData ? s->SizeOfRawData : pe.size - s->PointerToRawData;
+    }
+    w->schema = base ? read32(base, size, 0) : 0;
+    count = w->schema == 2 ? read32(base, size, 4) : w->schema == 4 || w->schema == 6 ? read32(base, size, 12) : 0;
+    w->sets = count && count < 65536 ? calloc(count, sizeof(SchemaSet)) : NULL;
+    for (i = 0; w->sets && i < count; i++) {
+        SchemaSet *s = &w->sets[w->set_count];
+        DWORD at, values, n, step;
+
+        if (w->schema == 2) {
+            at = 8 + 12 * i;
+            values = read32(base, size, at + 8) + 4;
+            n = read32(base, size, values - 4);
+            step = 16;
+        } else if (w->schema == 4) {
+            at = 16 + 24 * i;
+            values = read32(base, size, at + 20) + 8;
+            n = read32(base, size, values - 4);
+            step = 20;
+        } else {
+            at = read32(base, size, 16) + 24 * i;
+            s->hashed = (int)(read32(base, size, at + 12) / 2);
+            values = read32(base, size, at + 16);
+            n = read32(base, size, at + 20);
+            step = 20;
+        }
+        if (!schema_text(base, size, read32(base, size, at + (w->schema == 2 ? 0 : 4)),
+                         read32(base, size, at + (w->schema == 2 ? 4 : 8)), s->name, sizeof(s->name)))
+            continue;
+        s->first = w->value_count;
+        for (j = 0; j < n && j < 64; j++) {
+            DWORD v = values + step * j + step - 16;
+            SchemaValue *value;
+
+            if (w->value_count == capacity) {
+                SchemaValue *more = realloc(w->values, sizeof(SchemaValue) * (size_t)(capacity + 512));
+
+                if (!more) break;
+                w->values = more;
+                capacity += 512;
+            }
+            value = &w->values[w->value_count];
+            if (!schema_text(base, size, read32(base, size, v), read32(base, size, v + 4), value->importer,
+                             sizeof(value->importer)) ||
+                !schema_text(base, size, read32(base, size, v + 8), read32(base, size, v + 12), value->host,
+                             sizeof(value->host)))
+                continue;
+            w->value_count++;
+            s->count++;
+        }
+        w->set_count++;
+    }
+    pe_close(&pe);
+    return w->set_count > 0;
+}
+
+static BOOL seven_loader(const LayerJob *job) {
+    WCHAR path[MAX_PATH];
+    VS_FIXEDFILEINFO *info;
+    DWORD size, ignored;
+    UINT length;
+    void *data;
+    BOOL seven = TRUE;
+
+    wide_format(path, MAX_PATH, L"%ls\\ntdll.dll", job->system);
+    size = GetFileVersionInfoSizeW(path, &ignored);
+    data = size ? malloc(size) : NULL;
+    if (data && GetFileVersionInfoW(path, 0, size, data) && VerQueryValueW(data, L"\\", (void **)&info, &length) &&
+        length >= sizeof(*info))
+        seven = info->dwFileVersionMS <= MAKELONG(1, 6);
+    free(data);
+    return seven;
+}
+
 static World *world_new(const LayerJob *job, BOOL with_shims) {
     World *w = calloc(1, sizeof(World));
 
     if (!w) return NULL;
     w->job = job;
     w->units = calloc(MAX_UNITS, sizeof(Unit));
-    if (!w->units || (with_shims && !load_shims(w))) {
-        if (with_shims) say(job, "the layer DLLs are missing");
+    if (!w->units || (with_shims && !load_shims(w)) || !load_schema(w)) {
+        if (!w->units) say(job, "out of memory");
+        else if (with_shims && !w->shim_count) say(job, "the layer DLLs are missing");
+        else say(job, "this Windows' API set schema could not be read");
+        free(w->sets);
+        free(w->values);
         free(w->units);
         free(w);
         return NULL;
     }
+    w->seven = seven_loader(job);
     scan(w, job->studio, 0);
     return w;
 }
@@ -497,6 +597,8 @@ static void world_free(World *w) {
         for (j = 0; j < w->stubs[i].count; j++) free(w->stubs[i].functions[j]);
         free(w->stubs[i].functions);
     }
+    free(w->sets);
+    free(w->values);
     free(w->units);
     free(w);
 }
@@ -603,7 +705,7 @@ static int verify(const LayerJob *job) {
     }
     runtime = local_unit(w, "ucrtbase.dll");
     kernel = local_unit(w, S7_KERNEL);
-    if (runtime && open_unit(runtime)) {
+    if (w->seven && runtime && open_unit(runtime)) {
         PeImport imports[MAX_DESCRIPTORS];
         int count = pe_imports(&runtime->pe, imports, MAX_DESCRIPTORS);
         char dll[96];
@@ -612,7 +714,7 @@ static int verify(const LayerJob *job) {
             Unit *u;
 
             lower(dll, imports[j].dll, sizeof(dll));
-            u = is_set(dll) && !schema_host(dll, NULL) ? local_unit(w, dll) : NULL;
+            u = is_set(dll) && !schema_host(w, dll, NULL) ? local_unit(w, dll) : NULL;
             if (u && is_ours(u)) anchored = TRUE;
         }
         if (!anchored || !kernel || !open_unit(kernel) || !resolves(w, "bcrypt.dll", "BCryptGenRandom", NULL, 0)) {

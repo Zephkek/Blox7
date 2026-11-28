@@ -584,7 +584,7 @@ def build_studio7():
     shared = os.path.join(gen, 'shared.rsp')
     with open(shared, 'w', encoding='utf-8') as f:
         f.write('\n'.join(f'"{o}"' for o in objs[:-4]))
-    libs = ['-lws2_32', '-lcrypt32', '-ladvapi32', '-lshell32', '-static', '-Wl,--gc-sections'] + WIN7
+    libs = ['-lws2_32', '-lcrypt32', '-ladvapi32', '-lshell32', '-lversion', '-static', '-Wl,--gc-sections'] + WIN7
     release = os.path.join(OUT, 'release')
     os.makedirs(release, exist_ok=True)
     exe = os.path.join(release, 'Studio7.exe')
