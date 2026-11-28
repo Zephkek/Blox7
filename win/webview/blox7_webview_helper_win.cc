@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "WebView2.h"
+#include "delayload_guard.h"
 #include "runtime/display_size.h"
 #include "runtime/webview_helper_launcher.h"
 #include "webview/webview_helper_policy.h"
@@ -2480,6 +2481,7 @@ bool LoadWebView2() {
   if (wchar_t* slash = wcsrchr(path, L'\\')) wcscpy(slash + 1, L"WebView2Loader.dll");
   HMODULE loader = LoadLibraryW(path);
   if (loader == nullptr) return false;
+  delayload_guard_loader = loader;
   g_create_environment =
       reinterpret_cast<CreateEnvironmentFn>(GetProcAddress(loader, "CreateCoreWebView2EnvironmentWithOptions"));
   g_browser_version =
@@ -2611,6 +2613,7 @@ int wmain(int argc, wchar_t** argv) {
   if (g_trace.on) SetTimer(g_app.message_window, kTraceTimer, 250, nullptr);
 
   Surface* primary = CreateSurfaceWindow(true, nullptr);
+  if (delayload_guard_needed()) AddVectoredExceptionHandler(1, delayload_guard_handler);
   if (primary == nullptr || !LoadWebView2()) {
     Log("WebView2 is unavailable: WebView2Loader.dll or the window could not be loaded");
     return EXIT_FAILURE;
