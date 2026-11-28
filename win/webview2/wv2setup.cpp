@@ -422,8 +422,17 @@ BOOL direct_sink(void* context, const BYTE* data, DWORD size) {
 Outcome direct(Job& job, const Source& source, const std::string& url, Download& d) {
   HttpResult result{};
   Direct c{job, d, result, kNone, false};
-  const BOOL done = http_get(url.c_str(), direct_sink, &c, d.have, &result);
+  BOOL done = http_get(url.c_str(), direct_sink, &c, d.have, &result);
+  if (!done && !c.answered && result.status == 200 && d.have != 0) {
+    note(job, "http 200 instead of the rest, from the start again");
+    if (!restart(d)) {
+      job.win32 = GetLastError();
+      return kDisk;
+    }
+    done = http_get(url.c_str(), direct_sink, &c, 0, &result);
+  }
   if (c.outcome != kNone) return c.outcome;
+  if (!c.answered && result.status != 0) note(job, "http %d", result.status);
   if (!done && result.status == 0) {
     const bool blocked = name_blocked(source);
     note(job, "no answer, %s%s", result.error, blocked ? ", the name is blocked" : "");
