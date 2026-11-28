@@ -181,9 +181,9 @@ int write_failure(DWORD error) {
   return error == ERROR_DISK_FULL || error == ERROR_HANDLE_DISK_FULL ? WV2_ERROR_DISK_SPACE : WV2_ERROR_BLOCKED_FILE;
 }
 
-bool on_fixed_drive(const std::wstring& path) {
+bool on_local_drive(const std::wstring& path) {
   wchar_t root[MAX_PATH + 1];
-  return GetVolumePathNameW(path.c_str(), root, MAX_PATH + 1) && GetDriveTypeW(root) == DRIVE_FIXED;
+  return GetVolumePathNameW(path.c_str(), root, MAX_PATH + 1) && GetDriveTypeW(root) != DRIVE_REMOTE;
 }
 
 ULONGLONG free_bytes(const std::wstring& path) {
@@ -400,12 +400,16 @@ int verdict(const Outcome* last) {
     if (last[i] == kProxy) return WV2_ERROR_PROXY_AUTH;
   for (int i = 0; i < kSourceCount; ++i)
     if (last[i] == kBlocked) return WV2_ERROR_BLOCKED;
+  int answers = 0;
   bool gone = true;
   bool answered = true;
   for (int i = 0; i < kSourceCount; ++i) {
+    if (last[i] == kNetwork) continue;
+    ++answers;
     gone = gone && last[i] == kGone;
     answered = answered && (last[i] == kGone || last[i] == kBad);
   }
+  if (answers < 2) return WV2_ERROR_NETWORK;
   return gone ? WV2_ERROR_GONE : answered ? WV2_ERROR_MISMATCH : WV2_ERROR_NETWORK;
 }
 
@@ -531,8 +535,8 @@ int setup(Job& job) {
     return WV2_OK;
   }
   if (exists(folder)) remove_tree(folder);
-  if (!on_fixed_drive(job.home)) {
-    note(job, "AppData isn't on a local fixed drive");
+  if (!on_local_drive(job.home)) {
+    note(job, "AppData is on a network drive");
     return WV2_ERROR_NETWORK_DRIVE;
   }
   const std::wstring download = job.home + L"\\download";
