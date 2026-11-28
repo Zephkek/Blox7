@@ -212,12 +212,16 @@ static BOOL constrained(const Der *name) {
     return listed(g_constrained, sizeof(g_constrained) / sizeof(g_constrained[0]), &hash);
 }
 
-static BOOL chain_revoked(PCCERT_CHAIN_CONTEXT chain) {
+static BOOL chain_flagged(PCCERT_CHAIN_CONTEXT chain) {
     DWORD i, j;
+    Parts p;
 
     for (i = 0; i < chain->cChain; i++)
-        for (j = 0; j < chain->rgpChain[i]->cElement; j++)
-            if (revoked(chain->rgpChain[i]->rgpElement[j]->pCertContext)) return TRUE;
+        for (j = 0; j < chain->rgpChain[i]->cElement; j++) {
+            PCCERT_CONTEXT cert = chain->rgpChain[i]->rgpElement[j]->pCertContext;
+
+            if (revoked(cert) || !cert_parts(cert, &p) || constrained(&p.subject)) return TRUE;
+        }
     return FALSE;
 }
 
@@ -358,8 +362,7 @@ static unsigned trust_end_chain(const br_x509_class **context) {
     memset(&status, 0, sizeof(status));
     status.cbSize = sizeof(status);
     if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &policy, &status)) goto done;
-    if (!status.dwError) {
-        if (chain_revoked(chain)) goto done;
+    if (!status.dwError && !chain_flagged(chain)) {
         br_x509_decoder_init(&t->decoder, NULL, NULL);
         br_x509_decoder_push(&t->decoder, t->certs[0], t->lengths[0]);
         key = br_x509_decoder_get_pkey(&t->decoder);
@@ -368,7 +371,8 @@ static unsigned trust_end_chain(const br_x509_class **context) {
             goto done;
         }
         t->usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
-    } else if (!root_missing(status.dwError, chain->TrustStatus.dwErrorStatus) || !(key = trust_roots(t, chain))) {
+    } else if ((status.dwError && !root_missing(status.dwError, chain->TrustStatus.dwErrorStatus)) ||
+               !(key = trust_roots(t, chain))) {
         goto done;
     }
     t->key = *key;
