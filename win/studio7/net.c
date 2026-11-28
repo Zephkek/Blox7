@@ -110,7 +110,14 @@ static const br_x509_pkey *trust_roots(Trust *t, PCCERT_CHAIN_CONTEXT chain) {
     now = ((((ULONG64)clock.dwHighDateTime << 32) | clock.dwLowDateTime) - 116444736000000000ull) / 10000000;
     for (i = 0; i < sizeof(g_roots) / sizeof(g_roots[0]); i++)
         if (g_root_ends[i] >= now) t->roots[live++] = g_roots[i];
-    br_x509_minimal_init_full(&t->minimal, t->roots, live);
+    br_x509_minimal_init(&t->minimal, &br_sha256_vtable, t->roots, live);
+    br_x509_minimal_set_hash(&t->minimal, br_sha224_ID, &br_sha224_vtable);
+    br_x509_minimal_set_hash(&t->minimal, br_sha256_ID, &br_sha256_vtable);
+    br_x509_minimal_set_hash(&t->minimal, br_sha384_ID, &br_sha384_vtable);
+    br_x509_minimal_set_hash(&t->minimal, br_sha512_ID, &br_sha512_vtable);
+    br_x509_minimal_set_rsa(&t->minimal, &br_rsa_i31_pkcs1_vrfy);
+    br_x509_minimal_set_ecdsa(&t->minimal, &br_ec_prime_i31, &br_ecdsa_i31_vrfy_asn1);
+    br_x509_minimal_set_minrsa(&t->minimal, 256);
     br_x509_minimal_set_time(&t->minimal, (uint32_t)(now / 86400 + 719528), (uint32_t)(now % 86400));
     (*x)->start_chain(x, t->host);
     while (used < (size_t)t->count && t->minimal.err != BR_ERR_X509_OK) {
