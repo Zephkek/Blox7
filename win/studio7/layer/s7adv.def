@@ -271,7 +271,6 @@ EXPORTS
     EventEnabled = advapi32.EventEnabled @1270
     EventProviderEnabled = advapi32.EventProviderEnabled @1271
     EventRegister = advapi32.EventRegister @1272
-    EventSetInformation = s7_EventSetInformation @1273
     EventUnregister = advapi32.EventUnregister @1274
     EventWrite = advapi32.EventWrite @1275
     EventWriteEndScenario = advapi32.EventWriteEndScenario @1276
@@ -809,3 +808,4 @@ EXPORTS
     WmiSetSingleItemA = advapi32.WmiSetSingleItemA @1807
     WmiSetSingleItemW = advapi32.WmiSetSingleItemW @1808
     WriteEncryptedFileRaw = advapi32.WriteEncryptedFileRaw @1809
+    EventSetInformation = s7_EventSetInformation @2809

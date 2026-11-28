@@ -500,7 +500,7 @@ Studio7.exe contains the software below, each under its own license.
     TLS 1.2 for the downloads. Windows itself still decides which certificates are trusted.
 
  3. Microsoft Edge WebView2 Runtime - https://developer.microsoft.com/microsoft-edge/webview2/
-    It isn't part of Studio7.exe: on Windows 7, 8 and 8.1 Studio7 downloads WebView2 Runtime 109.0.1518.140 from
+    It isn't part of Studio7.exe: on Windows 7 Studio7 downloads WebView2 Runtime 109.0.1518.140 from
     Microsoft and sets it up for Roblox Studio. It includes Microsoft Defender SmartScreen, which collects and
     sends your information to Microsoft as disclosed in Microsoft's Privacy Statement at https://aka.ms/privacy
     and the Microsoft Edge Privacy Whitepaper at
