@@ -415,7 +415,8 @@ def write_forced_flags(gen):
 
 
 def write_roots():
-    subprocess.check_call([sys.executable, '-I', os.path.join(HERE, 'trust-anchors.py')])
+    if subprocess.call([sys.executable, '-I', os.path.join(HERE, 'trust-anchors.py')]):
+        sys.exit(1)
 
 
 def update_jobs(deps):

@@ -154,6 +154,14 @@ static BOOL revoked(PCCERT_CONTEXT cert) {
     return listed(g_revoked_keys, sizeof(g_revoked_keys) / sizeof(g_revoked_keys[0]), &hash);
 }
 
+static BOOL constrained(const Der *name) {
+    br_sha256_context hash;
+
+    br_sha256_init(&hash);
+    br_sha256_update(&hash, name->at, name->size);
+    return listed(g_constrained, sizeof(g_constrained) / sizeof(g_constrained[0]), &hash);
+}
+
 static BOOL chain_revoked(PCCERT_CHAIN_CONTEXT chain) {
     DWORD i, j;
 
@@ -172,6 +180,7 @@ static BOOL root_missing(DWORD error, DWORD bits) {
 static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
     PCCERT_SIMPLE_CHAIN path = chain->rgpChain[0];
     DWORD past = 0;
+    Parts p;
     size_t i;
 
     for (i = 0; i < used; i++) {
@@ -179,7 +188,8 @@ static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
 
         if ((path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING) ||
             CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension) ||
-            revoked(cert))
+            revoked(cert) || !cert_parts(cert, &p) || constrained(&p.subject) ||
+            (i + 1 == used && constrained(&p.issuer)))
             return FALSE;
     }
     for (; i < path->cElement; i++) past |= path->rgpElement[i]->TrustStatus.dwErrorStatus;

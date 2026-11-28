@@ -1,9 +1,10 @@
-"""writes win/studio7/roots.h, the bearssl trust anchors for the roots in exe/cacert.pem and the certificates
-mozilla revoked in onecrl, from the snapshot in win/tools/trust-anchors.txt
+"""writes win/studio7/roots.h, the bearssl trust anchors for the roots in exe/cacert.pem, the subjects nss constrains
+and the certificates mozilla revoked in onecrl, from the snapshot in win/tools/trust-anchors.txt
 usage: trust-anchors.py [<cacert.pem> <trust-anchors.txt> <roots.h>]
-       trust-anchors.py refresh <onecrl.json> [<cacert.pem> <trust-anchors.txt> <roots.h>]
-refresh takes onecrl.json from https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/
-onecrl/changeset?_expected=0 (or that collection's /records) and writes the snapshot, then roots.h"""
+       trust-anchors.py refresh <certdata.txt> <genname.c> <onecrl.json> [<cacert.pem> <trust-anchors.txt> <roots.h>]
+refresh takes the certdata.txt whose sha-256 is on cacert.pem's "## SHA256:" line, nss's lib/certdb/genname.c and
+onecrl.json from https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/onecrl/
+changeset?_expected=0 (or that collection's /records), and writes the snapshot, then roots.h"""
 import base64
 import binascii
 import calendar
@@ -18,8 +19,9 @@ WIN = os.path.dirname(HERE)
 PEM = os.path.join(os.path.dirname(WIN), 'exe', 'cacert.pem')
 SNAPSHOT = os.path.join(HERE, 'trust-anchors.txt')
 OUT = os.path.join(WIN, 'studio7', 'roots.h')
+REFRESH = 'trust-anchors.py refresh <certdata.txt> <genname.c> <onecrl.json>'
 USAGE = ('usage: trust-anchors.py [<cacert.pem> <trust-anchors.txt> <roots.h>]\n'
-         '       trust-anchors.py refresh <onecrl.json> [<cacert.pem> <trust-anchors.txt> <roots.h>]')
+         f'       {REFRESH} [<cacert.pem> <trust-anchors.txt> <roots.h>]')
 RSA = '1.2.840.113549.1.1.1'
 EC = '1.2.840.10045.2.1'
 CURVES = {'1.2.840.10045.3.1.7': ('BR_EC_secp256r1', 32), '1.3.132.0.34': ('BR_EC_secp384r1', 48),
@@ -30,13 +32,9 @@ KEY_USAGE = '2.5.29.15'
 LIMITS = {'2.5.29.30': 'name constraints', '2.5.29.36': 'policy constraints', '2.5.29.37': 'extended key usage',
           '2.5.29.54': 'inhibit any policy'}
 STRINGS = {0x0C: 'utf-8', 0x13: 'ascii', 0x16: 'ascii', 0x14: 'latin-1', 0x1E: 'utf-16-be', 0x1C: 'utf-32-be'}
-ENTRUST_NET_PREMIUM_2048 = '6dc47172e01cbcb0bf62580d895fe2b8ac9ad4f873801e0c10b9c837d21eb177'
-ENTRUST_ROOT_G2 = '43df5774b03e7fef5fe40d931a7bedf1bb2e6b42738c4e6d3841103d3aa7f339'
-ENTRUST_ROOT_EC1 = '02ed0eb28c14da45165c566791700d6451d7fb56f0b2ab1d3b8eb070e56edff5'
-IZENPE = '2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f'
-TUBITAK_KAMU_SM_SSL_1 = '46edc3689046d53a453fb3104ab80dcaec658b2660ea1629dd7e867990648716'
-SERVER_DISTRUST_AFTER = (ENTRUST_NET_PREMIUM_2048, ENTRUST_ROOT_G2, ENTRUST_ROOT_EC1, IZENPE)
-NSS_NAME_CONSTRAINTS = (TUBITAK_KAMU_SM_SSL_1,)
+ESCAPES = {'n': 10, 't': 9, 'r': 13, 'a': 7, 'b': 8, 'f': 12, 'v': 11, '\\': 92, '"': 34, "'": 39, '?': 63}
+DIGEST = '[0-9a-f]{64}'
+WORD = '[0-9A-Za-z_-]+'
 
 
 def fail(text):
@@ -273,7 +271,7 @@ def onecrl_lines(path):
     lines, newest = set(), 0
     for record in records:
         if (not isinstance(record, dict) or record.get('deleted') or not isinstance(record.get('last_modified'), int)
-                or not isinstance(record.get('id'), str) or not re.fullmatch('[0-9A-Za-z_-]+', record['id'])):
+                or not isinstance(record.get('id'), str) or not re.fullmatch(WORD, record['id'])):
             fail(f'{path} holds a record that is not a live onecrl entry')
         found = False
         if 'issuerName' in record and 'serialNumber' in record:
@@ -296,21 +294,152 @@ def onecrl_lines(path):
     return lines | {f'onecrl {newest}'}
 
 
+def certdata_objects(raw, path):
+    lines, objects = [line.rstrip('\r') for line in raw.decode('utf-8').split('\n')], []
+    if 'BEGINDATA' not in lines:
+        fail(path + ' is not a certdata.txt')
+    at = lines.index('BEGINDATA') + 1
+    while at < len(lines):
+        line = lines[at]
+        at += 1
+        if not line.strip() or line.startswith('#'):
+            continue
+        words = line.split(' ', 2)
+        if len(words) == 2 and words[1] == 'MULTILINE_OCTAL':
+            data = b''
+            while at < len(lines) and lines[at] != 'END':
+                if not re.fullmatch(r'(\\[0-7]{3})+', lines[at]):
+                    fail(f'{path} line {at + 1} is not octal')
+                data += bytes(int(digits, 8) for digits in re.findall(r'\\([0-7]{3})', lines[at]))
+                at += 1
+            if at == len(lines):
+                fail(path + ' ends inside a value')
+            at += 1
+            words.append(data)
+        if len(words) != 3:
+            fail(f'{path} line {at} is not an attribute')
+        if words[0] == 'CKA_CLASS':
+            objects.append({})
+        if not objects or words[0] in objects[-1]:
+            fail(f'{path} line {at} is outside an object or repeats an attribute')
+        objects[-1][words[0]] = (words[1], words[2])
+    return objects
+
+
+def certdata_lines(path, stamp, contents, ders):
+    with open(path, 'rb') as f:
+        raw = f.read()
+    if hashlib.sha256(raw).hexdigest() != stamp:
+        fail(f'{path} is not the certdata.txt cacert.pem was made from (its "## SHA256:" line says {stamp})')
+    certificates, trusts, lines = {}, {}, {f'certdata {stamp}', f'certificates {contents}'}
+    for item in certdata_objects(raw, path):
+        kind = item.get('CKA_CLASS')
+        if kind == ('CK_OBJECT_CLASS', 'CKO_CERTIFICATE'):
+            value = item.get('CKA_VALUE')
+            if not value or value[0] != 'MULTILINE_OCTAL':
+                fail(path + ' holds a certificate without its value')
+            certificates[hashlib.sha256(value[1]).hexdigest()] = item.get('CKA_NSS_SERVER_DISTRUST_AFTER',
+                                                                         ('CK_BBOOL', 'CK_FALSE'))
+        elif kind == ('CK_OBJECT_CLASS', 'CKO_NSS_TRUST'):
+            sha1 = item.get('CKA_CERT_SHA1_HASH')
+            if not sha1 or sha1[0] != 'MULTILINE_OCTAL' or sha1[1] in trusts:
+                fail(path + ' holds a trust object without its own CKA_CERT_SHA1_HASH')
+            trusts[sha1[1]] = item.get('CKA_TRUST_SERVER_AUTH', ('', 'none'))
+    for digest, distrust in certificates.items():
+        if distrust != ('CK_BBOOL', 'CK_FALSE'):
+            when = distrust[1].decode('ascii', 'replace') if distrust[0] == 'MULTILINE_OCTAL' else distrust[1]
+            if not re.fullmatch(WORD, when):
+                fail(f'{path} holds a CKA_NSS_SERVER_DISTRUST_AFTER of {when!r}')
+            lines.add(f'left-out {digest} server-distrust-after {when}')
+    for der in ders:
+        digest, trust = hashlib.sha256(der).hexdigest(), trusts.get(hashlib.sha1(der).digest(), ('', 'none'))
+        if digest not in certificates:
+            fail(f'cacert.pem holds a certificate {path} does not ({digest})')
+        if trust != ('CK_TRUST', 'CKT_NSS_TRUSTED_DELEGATOR'):
+            lines.add(f'left-out {digest} server-trust {trust[1] if re.fullmatch(WORD, trust[1]) else "other"}')
+    return lines
+
+
+def c_bytes(text, what):
+    text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.S)
+    literal = r'"((?:[^"\\\n]|\\.)*)"'
+    if re.sub(literal, ' ', text).strip():
+        fail(what + ' is not only string literals')
+    out = bytearray()
+    for body in re.findall(literal, text):
+        at = 0
+        while at < len(body):
+            if body[at] != '\\':
+                if not ' ' <= body[at] <= '~':
+                    fail(what + ' holds a character that is not ascii')
+                out.append(ord(body[at]))
+                at += 1
+                continue
+            escape = re.match(r'x([0-9A-Fa-f]+)|([0-7]{1,3})|(.)', body[at + 1:])
+            if escape.group(1) or escape.group(2):
+                number = int(escape.group(1), 16) if escape.group(1) else int(escape.group(2), 8)
+                if number > 0xFF:
+                    fail(what + ' holds an escape over 0xff')
+                out.append(number)
+            elif escape.group(3) in ESCAPES:
+                out.append(ESCAPES[escape.group(3)])
+            else:
+                fail(what + ' holds an unknown escape')
+            at += 1 + len(escape.group(0))
+    return bytes(out)
+
+
+def genname_lines(path):
+    with open(path, encoding='utf-8') as f:
+        text = re.sub(r'\\\n', ' ', f.read().replace('\r\n', '\n'))
+    table = re.findall(r'builtInNameConstraints\[\]\[2\] = \{(.*?)\};', text, re.S)
+    if len(table) != 1:
+        fail(path + ' has no builtInNameConstraints table')
+    labels = re.findall(r'NAME_CONSTRAINTS_ENTRY\((\w+)\)', table[0])
+    if not labels or re.sub(r'NAME_CONSTRAINTS_ENTRY\(\w+\)|[\s,]', '', table[0]):
+        fail(path + ' has an unexpected builtInNameConstraints table')
+    lines = set()
+    for label in labels:
+        body = re.findall(rf'^[ \t]*#[ \t]*define[ \t]+{label}_SUBJECT_DN\b(.*)$', text, re.M)
+        if len(body) != 1:
+            fail(f'{path} does not define {label}_SUBJECT_DN once')
+        subject = one_name(c_bytes(body[0], f'{label}_SUBJECT_DN'), f'{label}_SUBJECT_DN')
+        lines.add(f'constrained {hashlib.sha256(subject).hexdigest()} {label}')
+    return lines
+
+
+def bundle(pem):
+    with open(pem, encoding='utf-8') as f:
+        text = f.read()
+    stamp = re.findall(r'^## SHA256: ([0-9a-f]{64})$', text, re.M)
+    if len(stamp) != 1:
+        fail(pem + ' has no "## SHA256:" line naming its certdata.txt')
+    ders = pem_blocks(text)
+    return stamp[0], hashlib.sha256(b''.join(ders)).hexdigest(), ders
+
+
 def snapshot(lines, path):
     if lines != sorted(set(lines)):
         fail(path + ' is not sorted or holds a line twice')
-    serials, keys, kinds = set(), set(), []
+    single, left_out = {'certdata': [], 'certificates': [], 'onecrl': []}, {}
+    constrained, serials, keys = set(), set(), set()
     for line in lines:
         kind, *rest = line.split(' ')
-        kinds.append(kind)
-        if (kind in ('revoked-serial', 'revoked-key') and len(rest) == 2 and re.fullmatch('[0-9a-f]{64}', rest[0])
-                and re.fullmatch('[0-9A-Za-z_-]+', rest[1])):
+        if kind in single and len(rest) == 1 and re.fullmatch('[0-9]+' if kind == 'onecrl' else DIGEST, rest[0]):
+            single[kind].append(rest[0])
+        elif (kind == 'left-out' and len(rest) == 3 and re.fullmatch(DIGEST, rest[0])
+              and rest[1] in ('server-distrust-after', 'server-trust') and re.fullmatch(WORD, rest[2])):
+            left_out[rest[0]] = f'{rest[1]} {rest[2]}'
+        elif kind == 'constrained' and len(rest) == 2 and re.fullmatch(DIGEST, rest[0]) and re.fullmatch(WORD, rest[1]):
+            constrained.add(bytes.fromhex(rest[0]))
+        elif (kind in ('revoked-serial', 'revoked-key') and len(rest) == 2 and re.fullmatch(DIGEST, rest[0])
+              and re.fullmatch(WORD, rest[1])):
             (serials if kind == 'revoked-serial' else keys).add(bytes.fromhex(rest[0]))
-        elif kind != 'onecrl' or len(rest) != 1 or not rest[0].isdigit():
+        else:
             fail(f'{path} holds an unknown line: {line[:80]}')
-    if kinds.count('onecrl') != 1 or not serials or not keys:
-        fail(path + ' lacks the onecrl revocations')
-    return serials, keys
+    if any(len(found) != 1 for found in single.values()) or not constrained or not serials or not keys:
+        fail(f'{path} is not a whole snapshot, refresh it: {REFRESH}')
+    return single['certdata'][0], single['certificates'][0], left_out, constrained, serials, keys
 
 
 def save(path, text, encoding):
@@ -356,28 +485,33 @@ def digests(name, values):
 def main():
     sys.stdout.reconfigure(errors='backslashreplace')
     args = sys.argv[1:]
-    if args[:1] == ['refresh'] and len(args) in (2, 5):
-        pem, path, out = args[2:] or (PEM, SNAPSHOT, OUT)
-        records = sorted(onecrl_lines(args[1]))
-    elif len(args) in (0, 3):
+    refresh = args[:1] == ['refresh']
+    if refresh and len(args) in (4, 7):
+        pem, path, out = args[4:] or (PEM, SNAPSHOT, OUT)
+    elif not refresh and len(args) in (0, 3):
         pem, path, out = args or (PEM, SNAPSHOT, OUT)
+    else:
+        fail(USAGE)
+    stamp, contents, ders = bundle(pem)
+    if refresh:
+        records = sorted(certdata_lines(args[1], stamp, contents, ders) | genname_lines(args[2]) |
+                         onecrl_lines(args[3]))
+    else:
         try:
             with open(path, encoding='utf-8') as f:
                 records = f.read().splitlines()
         except OSError:
-            fail(f'cannot read {path}, make it with: trust-anchors.py refresh <onecrl.json>')
-    else:
-        fail(USAGE)
-    serials, keys = snapshot(records, path)
-    with open(pem, encoding='utf-8') as f:
-        ders = pem_blocks(f.read())
+            fail(f'cannot read {path}, make it with: {REFRESH}')
+    made_from, certificates, left_out, constrained, serials, keys = snapshot(records, path)
+    if (made_from, certificates) != (stamp, contents):
+        fail(f'{pem} is not the cacert.pem {path} was made from, refresh the snapshot with: {REFRESH}')
     lines, table, ends, skipped = ['#pragma once', '', '#include <bearssl.h>'], [], [], []
     for der in ders:
         subject, common, end, key, problem, ids = certificate(der)
         digest = hashlib.sha256(der).hexdigest()
-        if digest in SERVER_DISTRUST_AFTER:
-            problem = 'distrusted for servers after a date'
-        elif digest in NSS_NAME_CONSTRAINTS:
+        if digest in left_out:
+            problem = 'left out by certdata.txt, ' + left_out[digest]
+        elif hashlib.sha256(subject).digest() in constrained:
             problem = 'name constrained by nss'
         elif ids[0] in serials or ids[1] in keys:
             problem = 'revoked in onecrl'
@@ -401,16 +535,17 @@ def main():
     lines += ['', 'static const br_x509_trust_anchor g_roots[] = {'] + table + ['};', '',
               'static const unsigned long long g_root_ends[] = {']
     lines += ['    ' + ', '.join(str(end) for end in ends[at:at + 8]) + ',' for at in range(0, len(ends), 8)]
-    lines += ['};', ''] + digests('g_revoked_serials', serials) + [''] + digests('g_revoked_keys', keys) + ['']
-    if max(len(line) for line in lines) > 120:
-        fail('a line of the header is over 120 columns')
-    if args[:1] == ['refresh']:
+    lines += ['};', ''] + digests('g_constrained', constrained) + [''] + digests('g_revoked_serials', serials)
+    lines += [''] + digests('g_revoked_keys', keys) + ['']
+    if max(len(line) for line in lines + records) > 120:
+        fail('a line of the header or the snapshot is over 120 columns')
+    if refresh:
         print(f'{len(records)} lines', 'written to' if save(path, '\n'.join(records) + '\n', 'utf-8') else 'in', path)
     same = not save(out, '\n'.join(lines), 'ascii')
     for line in skipped:
         print('skipped', line)
-    print(f'{len(ends)} of {len(ders)} roots and {len(serials) + len(keys)} onecrl revocations',
-          'in' if same else 'written to', out)
+    print(f'{len(ends)} of {len(ders)} roots, {len(constrained)} subjects nss constrains and '
+          f'{len(serials) + len(keys)} onecrl revocations', 'in' if same else 'written to', out)
 
 
 if __name__ == '__main__':
