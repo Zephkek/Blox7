@@ -537,8 +537,9 @@ int fetch(Job& job, const std::wstring& part, const std::wstring& pkg) {
   Outcome last[kSourceCount] = {};
   int source = 0;
   int misses = 0;
+  int bad = 0;
   size_t pauses = 0;
-  while (result == WV2_OK && !got) {
+  while (result == WV2_OK && !got && bad < kSourceCount) {
     if (misses >= kSourceCount) {
       bool offline = true;
       for (const Outcome outcome : last) offline = offline && outcome == kNetwork;
@@ -560,6 +561,7 @@ int fetch(Job& job, const std::wstring& part, const std::wstring& pkg) {
     } else {
       last[source] = outcome;
       ++misses;
+      if (outcome == kBad && ++bad == kSourceCount) note(job, "got %d wrong answers, stopping", bad);
       source = (source + 1) % kSourceCount;
     }
   }
