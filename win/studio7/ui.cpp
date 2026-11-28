@@ -1219,6 +1219,7 @@ void open_studio() {
     start_studio();
     return;
   }
+  wv2_setup_spawn(nullptr, 1);
   g.webview_wait = true;
   g.detail.clear();
   g.stage = Stage::Starting;
@@ -1353,6 +1354,7 @@ void watch_webview() {
   if (!g.webview_busy && !g.webview_wanted) KillTimer(g.main.hwnd, kWebviewTimer);
   if (webview_failed() != failed) fit_main_window();
   if (webview_failed() != failed || sign_in_line() != before) repaint(g.main);
+  if (g.webview_wait && g.webview_busy) wv2_setup_spawn(nullptr, 1);
   if (g.webview_wait && !g.webview_busy) open_studio();
 }
 

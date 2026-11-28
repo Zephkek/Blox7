@@ -2711,7 +2711,8 @@ void WaitForSetup() {
   FILETIME now;
   GetSystemTimeAsFileTime(&now);
   g_app.setup_since = FileTimeValue(now);
-  if (!g_app.setup_seen && (launcher == nullptr || *launcher == 0 || !wv2_setup_spawn(launcher, 1))) {
+  if (!g_app.setup_seen &&
+      (launcher == nullptr || *launcher == 0 || !wv2_setup_spawn(launcher, g_app.visible ? 1 : 0))) {
     WebView2Failed("missing", HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
     return;
   }
@@ -2726,6 +2727,7 @@ void PollSetup() {
   wv2_status status;
   if (wv2_status_read(&status)) {
     g_app.setup_seen = true;
+    if (g_app.visible) wv2_setup_spawn(nullptr, 1);
     std::wstring line;
     if (status.state == WV2_STATE_DOWNLOADING && status.total > 0) {
       line = std::to_wstring(status.done / 1000000) + L" of " + std::to_wstring(status.total / 1000000) + L" MB";

@@ -582,6 +582,7 @@ int run_locked(const std::wstring& home, int now) {
   job.home = home;
   make_dirs(home);
   open_log(job);
+  job.hurry = CreateEventW(nullptr, TRUE, FALSE, WV2_HURRY);
   HANDLE mapping =
       CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(wv2_status), WV2_STATUS);
   void* view = mapping != nullptr ? MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, sizeof(wv2_status)) : nullptr;
@@ -591,7 +592,6 @@ int run_locked(const std::wstring& home, int now) {
     InterlockedExchange(reinterpret_cast<volatile LONG*>(&job.status->win32), 0);
     InterlockedExchange(reinterpret_cast<volatile LONG*>(&job.status->pid), static_cast<LONG>(GetCurrentProcessId()));
   }
-  job.hurry = CreateEventW(nullptr, TRUE, FALSE, WV2_HURRY);
   job.background = !now && SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
   show(job, WV2_STATE_PREPARING, 0, 0);
   note(job, "start, Windows %s, %s", windows_version().c_str(), now ? "now" : "in the background");
@@ -629,6 +629,12 @@ int run(int now) {
   DWORD previous = wait == WAIT_ABANDONED ? owner() : 0;
   if (wait == WAIT_TIMEOUT) {
     previous = owner();
+    if (now) {
+      if (HANDLE hurry = OpenEventW(EVENT_MODIFY_STATE, FALSE, WV2_HURRY)) {
+        SetEvent(hurry);
+        CloseHandle(hurry);
+      }
+    }
     wait = WaitForSingleObject(mutex, INFINITE);
     const bool complete = wv2_folder_complete();
     const int last = wv2_last_error(nullptr);
