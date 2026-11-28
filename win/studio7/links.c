@@ -198,25 +198,35 @@ BOOL webview_wanted(void) {
 static WCHAR g_lent_arguments[2048];
 static BOOL g_had_arguments;
 
-static void lend_root_store(void) {
-    static const WCHAR feature[] = L"msMicrosoftRootStoreUsed", key[] = L"--enable-features=";
-    WCHAR arguments[ARRAYSIZE(g_lent_arguments) + 64];
+static BOOL merge_feature(WCHAR *arguments, size_t room, const WCHAR *key, const WCHAR *feature) {
+    WCHAR before[ARRAYSIZE(g_lent_arguments) + 256];
     const WCHAR *found;
-    DWORD length = GetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, g_lent_arguments, ARRAYSIZE(g_lent_arguments));
     size_t at;
+
+    if (wcsstr(arguments, feature)) return FALSE;
+    wide_format(before, ARRAYSIZE(before), L"%ls", arguments);
+    found = wcsstr(before, key);
+    if (!found) {
+        wide_format(arguments, room, L"%ls%ls%ls%ls", before, before[0] ? L" " : L"", key, feature);
+    } else {
+        at = wcscspn(found, L" ") + (size_t)(found - before);
+        wide_format(arguments, room, L"%.*ls,%ls%ls", (int)at, before, feature, before + at);
+    }
+    return TRUE;
+}
+
+static void lend_switches(void) {
+    WCHAR arguments[ARRAYSIZE(g_lent_arguments) + 256];
+    DWORD length = GetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, g_lent_arguments, ARRAYSIZE(g_lent_arguments));
 
     g_had_arguments = length > 0 && length < ARRAYSIZE(g_lent_arguments);
     if (!g_had_arguments) g_lent_arguments[0] = 0;
-    if (length >= ARRAYSIZE(g_lent_arguments) || wcsstr(g_lent_arguments, feature)) return;
-    found = wcsstr(g_lent_arguments, key);
-    if (!found) {
-        wide_format(arguments, ARRAYSIZE(arguments), L"%ls%ls%ls%ls", g_lent_arguments,
-                    g_lent_arguments[0] ? L" " : L"", key, feature);
-    } else {
-        at = wcscspn(found, L" ") + (size_t)(found - g_lent_arguments);
-        wide_format(arguments, ARRAYSIZE(arguments), L"%.*ls,%ls%ls", (int)at, g_lent_arguments, feature,
-                    g_lent_arguments + at);
-    }
+    if (length >= ARRAYSIZE(g_lent_arguments)) return;
+    wide_format(arguments, ARRAYSIZE(arguments), L"%ls", g_lent_arguments);
+    merge_feature(arguments, ARRAYSIZE(arguments), L"--enable-features=", L"msMicrosoftRootStoreUsed");
+    if (merge_feature(arguments, ARRAYSIZE(arguments), L"--disable-features=", L"WebRtcHideLocalIpsWithMdns") &&
+        !wcsstr(arguments, L"--force-webrtc-ip-handling-policy"))
+        wcscat(arguments, L" --force-webrtc-ip-handling-policy=default_public_interface_only");
     SetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, arguments);
 }
 
@@ -226,7 +236,7 @@ BOOL webview_lend(void) {
     if (own_webview() || wv2_windows_major() >= 10 || wv2_system_usable() || !wv2_folder_complete() ||
         !wv2_folder(folder, MAX_PATH) || !SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, folder))
         return FALSE;
-    lend_root_store();
+    lend_switches();
     return TRUE;
 }
 
