@@ -221,6 +221,30 @@ static BOOL chain_revoked(PCCERT_CHAIN_CONTEXT chain) {
     return FALSE;
 }
 
+static BOOL purposes_checked(Der extensions, BOOL leaf) {
+    static const BYTE kp[] = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03};
+    Der extension, oid, value, purposes, purpose;
+
+    while (extensions.size) {
+        BOOL server = FALSE;
+
+        if (!der_read(&extensions, 0x30, &extension, NULL) || !der_read(&extension, 0x06, &oid, NULL) ||
+            (extension.size && extension.at[0] == 0x01 && !der_read(&extension, 0x01, NULL, NULL)) ||
+            !der_read(&extension, 0x04, &value, NULL))
+            return FALSE;
+        if (oid.size != 3 || oid.at[0] != 0x55 || oid.at[1] != 0x1D || oid.at[2] != 0x25) continue;
+        if (!der_read(&value, 0x30, &purposes, NULL) || value.size) return FALSE;
+        while (purposes.size) {
+            if (!der_read(&purposes, 0x06, &purpose, NULL)) return FALSE;
+            if (purpose.size != sizeof(kp) + 1 || memcmp(purpose.at, kp, sizeof(kp))) continue;
+            if (purpose.at[sizeof(kp)] == 0x01) server = TRUE;
+            if (leaf && purpose.at[sizeof(kp)] == 0x09) return FALSE;
+        }
+        if (!server) return FALSE;
+    }
+    return TRUE;
+}
+
 static BOOL root_missing(DWORD error, DWORD bits) {
     if (bits & ~PAST_ANCHOR) return FALSE;
     if (error == (DWORD)CERT_E_EXPIRED) return (bits & CERT_TRUST_IS_NOT_TIME_VALID) != 0;
@@ -239,7 +263,7 @@ static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
         if ((path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING) ||
             CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension) ||
             revoked(cert) || !cert_parts(cert, &p) || constrained(&p.subject) ||
-            (i + 1 == used && constrained(&p.issuer)))
+            (i + 1 == used && constrained(&p.issuer)) || !purposes_checked(p.extensions, i == 0))
             return FALSE;
     }
     for (; i < path->cElement; i++) past |= path->rgpElement[i]->TrustStatus.dwErrorStatus;
