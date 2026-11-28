@@ -772,7 +772,7 @@ BOOL run_start(const Paths *paths, const WCHAR *arguments, Run *run) {
         run->code = GetLastError();
         note("could not start %s (error %lu)", utf8(exe, shown, sizeof(shown)), run->code);
     }
-    if (lent) SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, NULL);
+    if (lent) webview_unlend();
     free(command);
     return run->process != NULL;
 }

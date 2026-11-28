@@ -195,11 +195,42 @@ BOOL webview_wanted(void) {
     return !own_webview() && wv2_needs_setup();
 }
 
+static WCHAR g_lent_arguments[2048];
+static BOOL g_had_arguments;
+
+static void lend_root_store(void) {
+    static const WCHAR feature[] = L"msMicrosoftRootStoreUsed", key[] = L"--enable-features=";
+    WCHAR arguments[ARRAYSIZE(g_lent_arguments) + 64];
+    const WCHAR *found;
+    DWORD length = GetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, g_lent_arguments, ARRAYSIZE(g_lent_arguments));
+    size_t at;
+
+    g_had_arguments = length > 0 && length < ARRAYSIZE(g_lent_arguments);
+    if (!g_had_arguments) g_lent_arguments[0] = 0;
+    if (length >= ARRAYSIZE(g_lent_arguments) || wcsstr(g_lent_arguments, feature)) return;
+    found = wcsstr(g_lent_arguments, key);
+    if (!found) {
+        wide_format(arguments, ARRAYSIZE(arguments), L"%ls%ls%ls%ls", g_lent_arguments,
+                    g_lent_arguments[0] ? L" " : L"", key, feature);
+    } else {
+        at = wcscspn(found, L" ") + (size_t)(found - g_lent_arguments);
+        wide_format(arguments, ARRAYSIZE(arguments), L"%.*ls,%ls%ls", (int)at, g_lent_arguments, feature,
+                    g_lent_arguments + at);
+    }
+    SetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, arguments);
+}
+
 BOOL webview_lend(void) {
     WCHAR folder[MAX_PATH];
 
     if (own_webview() || wv2_windows_major() >= 10 || wv2_system_usable() || !wv2_folder_complete() ||
-        !wv2_folder(folder, MAX_PATH))
+        !wv2_folder(folder, MAX_PATH) || !SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, folder))
         return FALSE;
-    return SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, folder);
+    lend_root_store();
+    return TRUE;
+}
+
+void webview_unlend(void) {
+    SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, NULL);
+    SetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, g_had_arguments ? g_lent_arguments : NULL);
 }
