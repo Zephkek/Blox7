@@ -60,6 +60,12 @@ bool update_self(const Paths& paths) {
   return true;
 }
 
+bool launcher_open() {
+  HANDLE launcher = OpenMutexW(SYNCHRONIZE, FALSE, S7_LAUNCHER);
+  if (launcher) CloseHandle(launcher);
+  return launcher != nullptr;
+}
+
 std::wstring start_failure(const Run& run) {
   wchar_t text[200];
   if (run.ran) std::swprintf(text, 200, L"It closed right after it started (code 0x%lX).", run.code);
@@ -135,6 +141,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     arguments = after_program(after_program(GetCommandLineW()));
     open = true;
   }
-  if (open && studio7::windows_seven() && open_now(paths, arguments, &failure)) return 0;
+  const bool wait = open && webview_started && !studio_running(&paths) && !studio7::launcher_open();
+  if (open && studio7::windows_seven() && !wait && open_now(paths, arguments, &failure)) return 0;
   return studio7::run_launcher(instance, show, paths, arguments, open && failure.empty(), failure, webview_started);
 }

@@ -9,6 +9,7 @@ namespace studio7 {
 
 std::wstring widen(const char* text);
 bool windows_seven();
+bool launcher_open();
 void start_background();
 std::wstring start_failure(const Run& run);
 bool self_updates(const Paths& paths);

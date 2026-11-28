@@ -169,7 +169,7 @@ struct App {
   std::wstring version, webview, detail, updates, failure, offer, newer;
   wv2_status webview_job{};
   int webview_error = WV2_OK;
-  bool webview_wanted = false, webview_busy = false;
+  bool webview_wanted = false, webview_busy = false, webview_wait = false;
   ULONGLONG webview_started = 0;
   std::vector<std::wstring> error_lines;
   bool details = false, failed_start = false, automatic = true;
@@ -490,7 +490,10 @@ const Hit* hit_at(float x, float y) {
 }
 
 bool busy() { return g.stage == Stage::Setting || g.stage == Stage::Starting; }
-bool can_act() { return g.stage == Stage::Fresh || g.stage == Stage::Setting || g.stage == Stage::Ready || g.stage == Stage::Failed; }
+bool can_act() {
+  return g.stage == Stage::Fresh || g.stage == Stage::Setting || g.stage == Stage::Ready || g.stage == Stage::Failed ||
+         (g.stage == Stage::Starting && g.webview_wait);
+}
 
 bool animating() {
   if (c == &g.main && (busy() || (can_act() && c->active))) return true;
@@ -664,6 +667,12 @@ std::wstring sign_in_line() {
   return L"The WebView2 Runtime is missing.";
 }
 
+double webview_fraction() {
+  const wv2_status& job = g.webview_job;
+  if (job.total <= 0 || (job.state != WV2_STATE_DOWNLOADING && job.state != WV2_STATE_UNPACKING)) return -1;
+  return static_cast<double>(job.done) / static_cast<double>(job.total);
+}
+
 std::wstring webview_reason() {
   std::wstring reason = wv2_error_text(g.webview_error);
   if (!reason.empty() && reason[0] >= L'a' && reason[0] <= L'z') reason[0] = static_cast<wchar_t>(reason[0] - 32);
@@ -694,7 +703,9 @@ std::wstring status_line() {
       const std::wstring text = job_text();
       return g.stop ? L"Stopping..." : text.empty() ? L"Getting ready..." : text;
     }
-    case Stage::Starting: return L"Waiting for Roblox Studio's window...";
+    case Stage::Starting:
+      if (g.webview_wait) return L"Roblox Studio starts once WebView2 is set up.";
+      return L"Waiting for Roblox Studio's window...";
     case Stage::Running: return g.detail.empty() ? L"Close Roblox Studio to come back here." : g.detail;
     case Stage::Failed: return g.failure;
     default: return g.detail;
@@ -767,8 +778,9 @@ void draw_main() {
     y += 20;
   }
   if (busy()) {
-    const double fraction = g.fraction.load();
-    progress_bar(rect(x, y, tw, 15), static_cast<float>(fraction), g.stage == Stage::Starting || fraction < 0);
+    const double fraction = g.webview_wait ? webview_fraction() : g.fraction.load();
+    progress_bar(rect(x, y, tw, 15), static_cast<float>(fraction),
+                 (g.stage == Stage::Starting && !g.webview_wait) || fraction < 0);
     y += 22;
   }
   if (g.stage == Stage::Failed && g.details) {
@@ -813,6 +825,7 @@ void draw_main() {
   const wchar_t* label = g.stage == Stage::Fresh     ? L"Install"
                          : g.stage == Stage::Setting ? L"Cancel"
                          : g.stage == Stage::Failed  ? L"Try again"
+                         : g.webview_wait            ? L"Open now"
                                                      : L"Open Studio";
   push_button(kOpenButton, rect(right - kButtonWidth * 2 - kGap, by, kButtonWidth, kButtonHeight), label,
               can_act() && !(g.stage == Stage::Setting && g.stop), act, g.stage != Stage::Setting);
@@ -1107,7 +1120,7 @@ void restart_if_idle() {
     CloseHandle(g.single);
   }
   if (!CreateProcessW(self, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process)) {
-    g.single = CreateMutexW(nullptr, TRUE, L"Local\\Studio7.Launcher");
+    g.single = CreateMutexW(nullptr, TRUE, S7_LAUNCHER);
     return;
   }
   CloseHandle(process.hThread);
@@ -1178,7 +1191,8 @@ void start_job(Job job, bool quiet) {
   }).detach();
 }
 
-void open_studio() {
+void start_studio() {
+  g.webview_wait = false;
   if (!run_start(&g.paths, g.arguments.c_str(), &g.run)) {
     refresh_info();
     if (g.version.empty()) {
@@ -1196,6 +1210,19 @@ void open_studio() {
   g.stage = Stage::Starting;
   g.fraction = -1;
   SetTimer(g.main.hwnd, kWatchTimer, 250, nullptr);
+  fit_main_window();
+  repaint(g.main);
+}
+
+void open_studio() {
+  if (!g.webview_wanted || !webview_running() || studio_running(&g.paths)) {
+    start_studio();
+    return;
+  }
+  g.webview_wait = true;
+  g.detail.clear();
+  g.stage = Stage::Starting;
+  SetTimer(g.main.hwnd, kWebviewTimer, 500, nullptr);
   fit_main_window();
   repaint(g.main);
 }
@@ -1223,6 +1250,9 @@ void act() {
       repaint(g.main);
       break;
     case Stage::Ready: open_studio(); break;
+    case Stage::Starting:
+      if (g.webview_wait) start_studio();
+      break;
     case Stage::Failed:
       if (g.failed_start && !g.version.empty()) open_studio();
       else install();
@@ -1323,6 +1353,7 @@ void watch_webview() {
   if (!g.webview_busy && !g.webview_wanted) KillTimer(g.main.hwnd, kWebviewTimer);
   if (webview_failed() != failed) fit_main_window();
   if (webview_failed() != failed || sign_in_line() != before) repaint(g.main);
+  if (g.webview_wait && !g.webview_busy) open_studio();
 }
 
 void retry_webview() {
@@ -1646,6 +1677,7 @@ int render_ui(const std::wstring& dir) {
     LONG webview_state = WV2_STATE_IDLE;
     LONGLONG webview_done = 0, webview_total = 0;
     int webview_error = WV2_OK;
+    bool webview_wait = false;
   } mains[] = {
       {L"main-fresh", Stage::Fresh, kOpenButton, L"", L"", L"Roblox Studio 0.748.0.7481526, a 570 MB download.", L"109.0.1518.140", -1, false},
       {L"main-setting", Stage::Setting, 0, L"", L"", L"Downloading, 312 of 570 MB (5.7 MB/s)", L"109.0.1518.140", 0.49, false},
@@ -1660,6 +1692,8 @@ int render_ui(const std::wstring& dir) {
        WV2_STATE_DOWNLOADING, 38797312, 150552536},
       {L"main-webview-unpack", Stage::Ready, 0, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false,
        WV2_STATE_UNPACKING, 209302290, 465116199},
+      {L"main-webview-wait", Stage::Starting, kOpenButton, L"0.748.0.7481526", L"Up to date", L"", L"", -1, false,
+       WV2_STATE_DOWNLOADING, 38797312, 150552536, WV2_OK, true},
       {L"main-failed", Stage::Failed, kDetailsButton, L"", L"", L"setup.rbxcdn.com did not answer (error 10060)", L"109.0.1518.140", -1, true},
       {L"main-unsupported", Stage::Unsupported, 0, L"", L"", L"This Windows runs Roblox Studio from roblox.com as it is.",
        L"140.0.3485.54", -1, false}};
@@ -1680,6 +1714,7 @@ int render_ui(const std::wstring& dir) {
       g.webview_busy = shot.webview_state != WV2_STATE_IDLE;
       g.webview_error = shot.webview_error;
       g.webview_wanted = !shot.webview[0] && shot.stage != Stage::Unsupported;
+      g.webview_wait = shot.webview_wait;
       g.detail = shot.stage == Stage::Unsupported ? shot.text : L"";
       g.offer = shot.stage == Stage::Fresh ? shot.text : L"";
       g.failure = shot.stage == Stage::Failed ? shot.text : L"";
@@ -1725,7 +1760,7 @@ int render_ui(const std::wstring& dir) {
 
 int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::wstring& arguments, bool open_when_ready,
                  const std::wstring& failure, bool webview_started) {
-  HANDLE single = g.single = CreateMutexW(nullptr, TRUE, L"Local\\Studio7.Launcher");
+  HANDLE single = g.single = CreateMutexW(nullptr, TRUE, S7_LAUNCHER);
   if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
     if (HWND other = FindWindowW(kMainClass, nullptr)) {
       ShowWindow(other, SW_RESTORE);
@@ -1786,6 +1821,10 @@ int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::ws
   } else if (g.stage == Stage::Fresh || (g.stage == Stage::Ready && g.automatic)) {
     if (g.stage == Stage::Ready) g.updates = L"Checking...";
     start_job(Job::Check, true);
+  }
+  if (g.stage == Stage::Ready && g.open_when_ready) {
+    g.open_when_ready = false;
+    open_studio();
   }
   std::thread([hwnd] {
     if (update_self(g.paths)) PostMessageW(hwnd, kSelfUpdated, 0, 0);

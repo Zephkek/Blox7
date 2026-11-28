@@ -185,8 +185,21 @@ BOOL webview_version(WCHAR *out, DWORD room) {
     return FALSE;
 }
 
-BOOL webview_wanted(void) {
-    WCHAR own[4];
+static BOOL own_webview(void) {
+    WCHAR value[4];
 
-    return !GetEnvironmentVariableW(L"WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", own, 4) && wv2_needs_setup();
+    return GetEnvironmentVariableW(S7_WEBVIEW_FOLDER, value, 4) != 0;
+}
+
+BOOL webview_wanted(void) {
+    return !own_webview() && wv2_needs_setup();
+}
+
+BOOL webview_lend(void) {
+    WCHAR folder[MAX_PATH];
+
+    if (own_webview() || wv2_windows_major() >= 10 || wv2_system_usable() || !wv2_folder_complete() ||
+        !wv2_folder(folder, MAX_PATH))
+        return FALSE;
+    return SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, folder);
 }

@@ -743,6 +743,7 @@ BOOL run_start(const Paths *paths, const WCHAR *arguments, Run *run) {
     STARTUPINFOW startup;
     PROCESS_INFORMATION process;
     size_t room;
+    BOOL lent;
 
     memset(run, 0, sizeof(*run));
     if (!studio_current(paths, run->version, sizeof(run->version))) return FALSE;
@@ -759,6 +760,7 @@ BOOL run_start(const Paths *paths, const WCHAR *arguments, Run *run) {
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
     memset(&process, 0, sizeof(process));
+    lent = webview_lend();
     if (CreateProcessW(exe, command, NULL, NULL, FALSE, 0, NULL, folder, &startup, &process)) {
         CloseHandle(process.hThread);
         run->process = process.hProcess;
@@ -770,6 +772,7 @@ BOOL run_start(const Paths *paths, const WCHAR *arguments, Run *run) {
         run->code = GetLastError();
         note("could not start %s (error %lu)", utf8(exe, shown, sizeof(shown)), run->code);
     }
+    if (lent) SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, NULL);
     free(command);
     return run->process != NULL;
 }

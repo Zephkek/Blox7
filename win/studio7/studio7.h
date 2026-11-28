@@ -25,6 +25,8 @@ extern "C" {
 #define S7_KERNEL "s7kernel.dll"
 #define S7_STUDIO_EXE L"RobloxStudioBeta.exe"
 #define S7_ICON L"studio7.ico"
+#define S7_WEBVIEW_FOLDER L"WEBVIEW2_BROWSER_EXECUTABLE_FOLDER"
+#define S7_LAUNCHER L"Local\\Studio7.Launcher"
 #define S7_PRINTF(at, first) __attribute__((format(printf, at, first)))
 
 typedef struct {
@@ -180,6 +182,7 @@ void links_refresh(const Paths *paths);
 BOOL is_link(const WCHAR *text);
 BOOL webview_version(WCHAR *out, DWORD room);
 BOOL webview_wanted(void);
+BOOL webview_lend(void);
 
 void ui_status(const char *format, ...) S7_PRINTF(1, 2);
 
