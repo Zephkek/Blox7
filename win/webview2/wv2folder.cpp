@@ -8,6 +8,7 @@
 namespace {
 
 constexpr wchar_t kClients[] = L"\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+HANDLE g_spawned = nullptr;
 
 std::wstring env(const wchar_t* name) {
   std::wstring value(32768, L'\0');
@@ -218,8 +219,17 @@ int wv2_setup_spawn(const wchar_t* exe, int now) {
     return 0;
   }
   CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
+  if (g_spawned != nullptr) CloseHandle(g_spawned);
+  g_spawned = process.hProcess;
   return 1;
+}
+
+int wv2_setup_process(DWORD pid) {
+  if (pid == 0) return 0;
+  if (g_spawned != nullptr && GetProcessId(g_spawned) == pid) return 1;
+  wv2_status status;
+  read_status(&status);
+  return status.pid == pid;
 }
 
 }

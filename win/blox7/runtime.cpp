@@ -484,7 +484,8 @@ static bool another_blox7_running() {
   entry.dwSize = sizeof entry;
   bool found = false;
   for (BOOL more = Process32FirstW(snapshot, &entry); more && !found; more = Process32NextW(snapshot, &entry))
-    found = entry.th32ProcessID != GetCurrentProcessId() && _wcsicmp(entry.szExeFile, L"Blox7.exe") == 0;
+    found = entry.th32ProcessID != GetCurrentProcessId() && _wcsicmp(entry.szExeFile, L"Blox7.exe") == 0 &&
+            !wv2_setup_process(entry.th32ProcessID);
   CloseHandle(snapshot);
   return found;
 }
