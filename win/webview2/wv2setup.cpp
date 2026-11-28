@@ -314,6 +314,13 @@ bool range_starts_at(const Net& net, HINTERNET request, ULONGLONG at) {
          std::wcstoull(whole + 1, nullptr, 10) == wv2_package_bytes();
 }
 
+Outcome checked(Job& job, Download& d) {
+  if (matches(d.hash)) return kGot;
+  note(job, "the file isn't Microsoft's");
+  restart(d);
+  return kBad;
+}
+
 Outcome receive(Job& job, const Net& net, HINTERNET request, Download& d) {
   const ULONGLONG total = wv2_package_bytes();
   DWORD status = 0;
@@ -370,12 +377,7 @@ Outcome receive(Job& job, const Net& net, HINTERNET request, Download& d) {
     note(job, "the server stopped at %I64u bytes", d.have);
     return kNetwork;
   }
-  if (!matches(d.hash)) {
-    note(job, "the file isn't Microsoft's");
-    restart(d);
-    return kBad;
-  }
-  return kGot;
+  return checked(job, d);
 }
 
 struct Direct {
@@ -447,12 +449,7 @@ Outcome direct(Job& job, const Source& source, const std::string& url, Download&
     note(job, "the server stopped at %I64u bytes", d.have);
     return kNetwork;
   }
-  if (!matches(d.hash)) {
-    note(job, "the file isn't Microsoft's");
-    restart(d);
-    return kBad;
-  }
-  return kGot;
+  return checked(job, d);
 }
 
 Outcome wininet(Job& job, const Net& net, const Source& source, const std::string& url, Download& d) {
@@ -479,8 +476,9 @@ Outcome attempt(Job& job, const Net& net, const Source& source, Download& d) {
   note(job, "source %s from %I64u%s", url.c_str(), d.have, source.own_tls ? " with our own tls" : "");
   const ULONGLONG started = GetTickCount64();
   d.received = 0;
-  const Outcome outcome = source.own_tls ? direct(job, source, url, d) : wininet(job, net, source, url, d);
+  Outcome outcome = source.own_tls ? direct(job, source, url, d) : wininet(job, net, source, url, d);
   if (d.received != 0) note(job, "got %I64u bytes in %.1f s", d.received, seconds(started));
+  if (outcome == kNetwork && d.have == wv2_package_bytes()) outcome = checked(job, d);
   return outcome;
 }
 
