@@ -95,6 +95,7 @@ IMP HRESULT WINAPI MFCreateMediaType(IMFMediaType **);
 IMP HRESULT WINAPI MFCreateSample(IMFSample **);
 IMP HRESULT WINAPI MFCreateMemoryBuffer(DWORD, IMFMediaBuffer **);
 IMP HRESULT WINAPI MFCreateAlignedMemoryBuffer(DWORD, DWORD, IMFMediaBuffer **);
+IMP ULONG WINAPI EventSetInformation(ULONGLONG, int, PVOID, ULONG);
 
 static int passed, failed;
 
@@ -704,6 +705,37 @@ static void test_misc(void) {
           at_least(windows, 10, 0, 0), ten_build, eleven, eight, seven);
 }
 
+typedef ULONG(WINAPI *EventRegisterFn)(const GUID *, PVOID, PVOID, ULONGLONG *);
+typedef ULONG(WINAPI *EventUnregisterFn)(ULONGLONG);
+typedef ULONG(WINAPI *EventSetFn)(ULONGLONG, int, PVOID, ULONG);
+
+static void test_events(void) {
+    static const GUID provider = {0x5d1a3f2c, 0x7c4e, 0x4b9a, {0x9e, 0x31, 0x6f, 0x0b, 0x2d, 0x88, 0x14, 0x57}};
+    static const BYTE traits[] = {10, 0, 's', '7', 'l', 'a', 'y', 'e', 'r', 0};
+    HMODULE advapi = LoadLibraryW(L"advapi32.dll"), ours = GetModuleHandleW(L"s7adv.dll");
+    EventRegisterFn reg = (EventRegisterFn)(void *)GetProcAddress(advapi, "EventRegister");
+    EventUnregisterFn unreg = (EventUnregisterFn)(void *)GetProcAddress(advapi, "EventUnregister");
+    EventSetFn real = (EventSetFn)(void *)GetProcAddress(advapi, "EventSetInformation");
+    EventSetFn stand_in = ours ? (EventSetFn)(void *)GetProcAddress(ours, "EventSetInformation") : NULL;
+    ULONGLONG a = 0, b = 0;
+    ULONG mine, theirs, status;
+
+    check(stand_in && stand_in != real && GetProcAddress(ours, "EventRegister") == (FARPROC)(void *)reg,
+          "events: stand-in and forwarders", "s7adv %p, advapi32 %p%s", (void *)stand_in, (void *)real,
+          real ? "" : " (Windows has none)");
+    status = reg ? reg(&provider, NULL, NULL, &a) : ERROR_PROC_NOT_FOUND;
+    if (!status) status = reg(&provider, NULL, NULL, &b);
+    mine = EventSetInformation(a, 2, (PVOID)traits, sizeof(traits));
+    theirs = real ? real(b, 2, (PVOID)traits, sizeof(traits)) : ERROR_NOT_SUPPORTED;
+    check(!status && mine == theirs, "events: provider traits", "register %lu, stand-in %lu, %s %lu", status, mine,
+          real ? "advapi32" : "expected", theirs);
+    mine = EventSetInformation(0, 2, (PVOID)traits, sizeof(traits));
+    theirs = real ? real(0, 2, (PVOID)traits, sizeof(traits)) : ERROR_NOT_SUPPORTED;
+    check(mine == theirs, "events: no provider", "stand-in %lu, %s %lu", mine, real ? "advapi32" : "expected", theirs);
+    if (a) unreg(a);
+    if (b) unreg(b);
+}
+
 DEFINE_GUID(LowLatencyMode, 0x9c27891a, 0xed7a, 0x40e1, 0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee);
 
 static HRESULT video_type(IMFMediaType **type, REFGUID format, UINT32 width, UINT32 height, BOOL encoded) {
@@ -848,7 +880,8 @@ done:
 int main(int argc, char **argv) {
     static const struct { const char *name; void (*run)(void); } tests[] = {
         {"wait", test_wait}, {"time", test_time}, {"stack", test_stack}, {"files", test_files},
-        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"media", test_media}, {"exit", test_exit},
+        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"events", test_events}, {"media", test_media},
+        {"exit", test_exit},
     };
     int i, j;
 

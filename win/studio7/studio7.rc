@@ -8,6 +8,7 @@ S7WS2.DLL RCDATA "layer/s7ws2.dll"
 S7MF.DLL RCDATA "layer/s7mf.dll"
 S7BCP.DLL RCDATA "layer/s7bcp.dll"
 S7RT.DLL RCDATA "layer/s7rt.dll"
+S7ADV.DLL RCDATA "layer/s7adv.dll"
 NOTICES RCDATA "licenses.txt"
 
 VS_VERSION_INFO VERSIONINFO

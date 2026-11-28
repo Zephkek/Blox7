@@ -15,6 +15,7 @@ OURS = {
     'ws2_32': ('s7ws2', ['GetAddrInfoExW', 'GetAddrInfoExCancel', 'GetAddrInfoExOverlappedResult'], [], []),
     'mfplat': ('s7mf', ['MFCreateDXGIDeviceManager', 'MFCreateDXGISurfaceBuffer'], [], ['MFTEnumEx']),
     'bcryptprimitives': ('s7bcp', ['ProcessPrng'], [], []),
+    'advapi32': ('s7adv', [], [], ['EventSetInformation']),
 }
 
 

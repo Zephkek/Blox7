@@ -481,7 +481,8 @@ S7_LAYER = (('s7kernel', ('kernel', 'sync', 'time', 'file', 'version', 'crt'), (
             ('s7ws2', ('net', 'crt'), ('ws2_32', 'kernel32'), ''),
             ('s7mf', ('media',), ('mfplat', 'kernel32'), ''),
             ('s7bcp', ('rng',), ('bcrypt',), ''),
-            ('s7rt', ('winrt', 'crt'), ('ole32', 'kernel32'), ''))
+            ('s7rt', ('winrt', 'crt'), ('ole32', 'kernel32'), ''),
+            ('s7adv', ('adv',), ('kernel32',), ''))
 
 
 S7_NOTICES = """Studio7 third-party notices
