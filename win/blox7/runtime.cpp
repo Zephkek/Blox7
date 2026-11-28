@@ -367,14 +367,12 @@ const wchar_t* payload_id() { return BLOX7_PAYLOAD_ID; }
 
 OsInfo os_info() {
   OsInfo info;
-  RTL_OSVERSIONINFOW version{};
-  version.dwOSVersionInfoSize = sizeof version;
-  using RtlGetVersion = LONG(WINAPI*)(RTL_OSVERSIONINFOW*);
-  auto get = reinterpret_cast<RtlGetVersion>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
-  if (get && get(&version) == 0) {
-    info.major = version.dwMajorVersion;
-    info.minor = version.dwMinorVersion;
-    info.build = version.dwBuildNumber;
+  using RtlGetNtVersionNumbers = void(WINAPI*)(DWORD*, DWORD*, DWORD*);
+  auto get = reinterpret_cast<RtlGetNtVersionNumbers>(
+      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetNtVersionNumbers"));
+  if (get) {
+    get(&info.major, &info.minor, &info.build);
+    info.build &= 0x0FFFFFFF;
   }
   return info;
 }
