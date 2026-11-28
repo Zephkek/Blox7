@@ -496,6 +496,18 @@ Studio7.exe contains the software below, each under its own license.
 
  2. BearSSL - https://bearssl.org
     TLS 1.2 for the downloads. Windows itself still decides which certificates are trusted.
+
+ 3. Microsoft Edge WebView2 Runtime - https://developer.microsoft.com/microsoft-edge/webview2/
+    It isn't part of Studio7.exe: on Windows 7, 8 and 8.1 Studio7 downloads WebView2 Runtime 109.0.1518.140 from
+    Microsoft and sets it up for Roblox Studio. It includes Microsoft Defender SmartScreen, which collects and
+    sends your information to Microsoft as disclosed in Microsoft's Privacy Statement at https://aka.ms/privacy
+    and the Microsoft Edge Privacy Whitepaper at
+    https://learn.microsoft.com/en-us/microsoft-edge/privacy-whitepaper#smartscreen. On Windows 7 and 8.1 it may
+    periodically check for updates, and download and install them without any additional notice.
+
+ 4. LZMA SDK - https://www.7-zip.org/sdk.html
+    Unpacks WebView2 109 from Microsoft's file: LzmaDec.c and Bcj2.c from the LZMA SDK 25.01 by Igor Pavlov,
+    unmodified, which is in the public domain.
 """
 
 
@@ -527,7 +539,9 @@ def build_studio7():
     root = os.path.dirname(WIN)
     with open(os.path.join(root, 'NOTICE'), encoding='utf-8') as f:
         notices = f.read().replace('\r\n', '\n').strip('\n') + f'\n\n{rule}\n' + S7_NOTICES
-    for number, (name, path) in enumerate((('zlib', f'{deps}/zlib/LICENSE'), ('BearSSL', f'{deps}/bearssl/LICENSE.txt')), 1):
+    licenses = (('zlib', f'{deps}/zlib/LICENSE'), ('BearSSL', f'{deps}/bearssl/LICENSE.txt'),
+                ('Microsoft Edge WebView2 Runtime', os.path.join(WIN, 'licenses', 'webview2-runtime.txt')))
+    for number, (name, path) in enumerate(licenses, 1):
         with open(path, encoding='utf-8', errors='replace') as f:
             notices += f'\n{rule}\n{number}. {name}\n{rule}\n' + f.read().replace('\r\n', '\n').strip('\n') + '\n'
     with open(os.path.join(root, 'LICENSE'), encoding='utf-8') as f:

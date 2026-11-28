@@ -76,6 +76,16 @@ PARTS = [
     ('Microsoft WebView2 SDK', 'https://developer.microsoft.com/microsoft-edge/webview2/',
      'WebView2Loader.dll, which starts the web view Roblox\'s sign-in pages run in.',
      [f'{SRC}/webview2-sdk/pkg/LICENSE.txt', f'{SRC}/webview2-sdk/pkg/NOTICE.txt']),
+    ('Microsoft Edge WebView2 Runtime', 'https://developer.microsoft.com/microsoft-edge/webview2/',
+     'The web view itself. It isn\'t part of Blox7.exe: on Windows 7, 8 and 8.1 Blox7 downloads WebView2 Runtime '
+     '109.0.1518.140 from Microsoft and sets it up in its own folder. It includes Microsoft Defender SmartScreen, '
+     'which collects and sends your information to Microsoft as disclosed in Microsoft\'s Privacy Statement at '
+     'https://aka.ms/privacy and the Microsoft Edge Privacy Whitepaper at '
+     'https://learn.microsoft.com/en-us/microsoft-edge/privacy-whitepaper#smartscreen. On Windows 7 and 8.1 it may '
+     'periodically check for updates, and download and install them without any additional notice.',
+     [f'{LIC}/webview2-runtime.txt']),
+    ('LZMA SDK', 'https://www.7-zip.org/sdk.html', 'Unpacks WebView2 109 from Microsoft\'s file, inside Blox7.exe: '
+     'LzmaDec.c and Bcj2.c from the LZMA SDK 25.01 by Igor Pavlov, unmodified, which is in the public domain.', []),
     ('shaderc', 'https://github.com/google/shaderc', 'glslc.exe, which compiles custom effect shaders, from the '
      'Android NDK r28c.', [f'{LIC}/shaderc.txt']),
     ('glslang', 'https://github.com/KhronosGroup/glslang', 'The GLSL front end inside glslc.exe.', [f'{LIC}/glslang.txt']),
