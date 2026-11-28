@@ -128,16 +128,13 @@ BOOL paths_init(Paths *p) {
 }
 
 void windows_version(DWORD *major, DWORD *minor, DWORD *build) {
-    typedef LONG(WINAPI *RtlGetVersionFn)(OSVERSIONINFOW *);
-    RtlGetVersionFn get = (RtlGetVersionFn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion");
-    OSVERSIONINFOW info;
+    typedef void(WINAPI *RtlGetNtVersionNumbersFn)(DWORD *, DWORD *, DWORD *);
+    RtlGetNtVersionNumbersFn get =
+        (RtlGetNtVersionNumbersFn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetNtVersionNumbers");
 
-    memset(&info, 0, sizeof(info));
-    info.dwOSVersionInfoSize = sizeof(info);
-    if (get) get(&info);
-    *major = info.dwMajorVersion;
-    *minor = info.dwMinorVersion;
-    *build = info.dwBuildNumber;
+    *major = *minor = *build = 0;
+    if (get) get(major, minor, build);
+    *build &= 0x0FFFFFFF;
 }
 
 void state_get(const Paths *p, const WCHAR *key, char *out, size_t room) {
