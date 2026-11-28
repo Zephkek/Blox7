@@ -2,7 +2,7 @@
 
 static ULONG64 g_scale;
 static LONG64 g_tick;
-static volatile LONG64 g_offset;
+static volatile LONG64 g_offset, g_last;
 
 void s7_time_init(void) {
     LARGE_INTEGER frequency;
@@ -19,7 +19,7 @@ VOID WINAPI s7_GetSystemTimePreciseAsFileTime(LPFILETIME out) {
     FILETIME ft, again;
     LARGE_INTEGER counter;
     ULONG64 high, low_part;
-    LONG64 coarse, count, offset, low;
+    LONG64 coarse, count, offset, low, last;
 
     do {
         GetSystemTimeAsFileTime(&ft);
@@ -34,6 +34,14 @@ VOID WINAPI s7_GetSystemTimePreciseAsFileTime(LPFILETIME out) {
     if (offset < low) g_offset = offset = low;
     else if (offset > low + g_tick) g_offset = offset = low + g_tick;
     count += offset;
+    for (;;) {
+        last = g_last;
+        if (count < last && last - count <= g_tick) {
+            count = last;
+            break;
+        }
+        if (count == last || InterlockedCompareExchange64(&g_last, count, last) == last) break;
+    }
     out->dwLowDateTime = (DWORD)count;
     out->dwHighDateTime = (DWORD)(count >> 32);
 }
