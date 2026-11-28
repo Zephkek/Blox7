@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "../studio7/studio7.h"
 #include "wv2unpack.h"
 
 namespace {
@@ -29,12 +30,14 @@ constexpr char kPath[] =
 
 struct Source {
   bool https;
+  bool own_tls;
   const char* host;
 };
 
-constexpr Source kSources[] = {{false, "catalog.s.download.windowsupdate.com"},
-                               {false, "download.windowsupdate.com"},
-                               {true, "catalog.s.download.windowsupdate.com"}};
+constexpr Source kSources[] = {{false, false, "catalog.s.download.windowsupdate.com"},
+                               {false, false, "download.windowsupdate.com"},
+                               {true, false, "catalog.s.download.windowsupdate.com"},
+                               {true, true, "catalog.s.download.windowsupdate.com"}};
 constexpr int kSourceCount = sizeof kSources / sizeof kSources[0];
 
 enum Outcome { kNone, kGot, kNetwork, kBlocked, kProxy, kGone, kBad, kDisk };
@@ -263,10 +266,14 @@ Lookup look_up(const char* host) {
   return answer;
 }
 
+bool name_blocked(const Source& source) {
+  const Lookup host = look_up(source.host);
+  return host == kNowhere || (host == kNoAnswer && look_up("roblox.com") == kAnswered);
+}
+
 Outcome lost(Job& job, const Source& source, DWORD error) {
   job.win32 = error;
-  const Lookup host = look_up(source.host);
-  const bool blocked = host == kNowhere || (host == kNoAnswer && look_up("roblox.com") == kAnswered);
+  const bool blocked = name_blocked(source);
   note(job, "no answer, error %lu%s", error, blocked ? ", the name is blocked" : "");
   return blocked ? kBlocked : kNetwork;
 }
@@ -371,11 +378,75 @@ Outcome receive(Job& job, const Net& net, HINTERNET request, Download& d) {
   return kGot;
 }
 
-Outcome attempt(Job& job, const Net& net, const Source& source, Download& d) {
-  const std::string url = std::string(source.https ? "https://" : "http://") + source.host + kPath;
-  note(job, "source %s from %I64u", url.c_str(), d.have);
-  const ULONGLONG started = GetTickCount64();
-  d.received = 0;
+struct Direct {
+  Job& job;
+  Download& d;
+  const HttpResult& result;
+  Outcome outcome;
+  bool answered;
+};
+
+BOOL direct_sink(void* context, const BYTE* data, DWORD size) {
+  Direct& c = *static_cast<Direct*>(context);
+  const ULONGLONG total = wv2_package_bytes();
+  if (!c.answered) {
+    c.answered = true;
+    if (c.result.length != 0) {
+      note(c.job, "http %d, %I64u bytes", c.result.status, c.result.length);
+    } else {
+      note(c.job, "http %d", c.result.status);
+    }
+    if (c.result.length != 0 && c.d.have + c.result.length != total) {
+      c.outcome = c.d.have != 0 ? kNetwork : kBad;
+      return FALSE;
+    }
+  }
+  if (c.d.have + size > total) {
+    restart(c.d);
+    c.outcome = kBad;
+    return FALSE;
+  }
+  DWORD wrote = 0;
+  if (!WriteFile(c.d.file, data, size, &wrote, nullptr) || wrote != size) {
+    c.job.win32 = GetLastError();
+    c.outcome = kDisk;
+    return FALSE;
+  }
+  br_sha256_update(&c.d.hash, data, size);
+  c.d.have += size;
+  c.d.received += size;
+  show(c.job, WV2_STATE_DOWNLOADING, c.d.have, total);
+  return TRUE;
+}
+
+Outcome direct(Job& job, const Source& source, const std::string& url, Download& d) {
+  HttpResult result{};
+  Direct c{job, d, result, kNone, false};
+  const BOOL done = http_get(url.c_str(), direct_sink, &c, d.have, &result);
+  if (c.outcome != kNone) return c.outcome;
+  if (!done && result.status == 0) {
+    const bool blocked = name_blocked(source);
+    note(job, "no answer, %s%s", result.error, blocked ? ", the name is blocked" : "");
+    return blocked ? kBlocked : kNetwork;
+  }
+  if (!done) {
+    note(job, "%s", result.error);
+    if (result.status == 404 || result.status == 410) return kGone;
+    return result.status == 416 ? kBad : kNetwork;
+  }
+  if (d.have < wv2_package_bytes()) {
+    note(job, "the server stopped at %I64u bytes", d.have);
+    return kNetwork;
+  }
+  if (!matches(d.hash)) {
+    note(job, "the file isn't Microsoft's");
+    restart(d);
+    return kBad;
+  }
+  return kGot;
+}
+
+Outcome wininet(Job& job, const Net& net, const Source& source, const std::string& url, Download& d) {
   HINTERNET session = net.open(L"Blox7", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
   if (session == nullptr) return lost(job, source, GetLastError());
   DWORD connect = 30000;
@@ -391,6 +462,15 @@ Outcome attempt(Job& job, const Net& net, const Source& source, Download& d) {
   const Outcome outcome = request != nullptr ? receive(job, net, request, d) : lost(job, source, GetLastError());
   if (request != nullptr) net.close(request);
   net.close(session);
+  return outcome;
+}
+
+Outcome attempt(Job& job, const Net& net, const Source& source, Download& d) {
+  const std::string url = std::string(source.https ? "https://" : "http://") + source.host + kPath;
+  note(job, "source %s from %I64u%s", url.c_str(), d.have, source.own_tls ? " with our own tls" : "");
+  const ULONGLONG started = GetTickCount64();
+  d.received = 0;
+  const Outcome outcome = source.own_tls ? direct(job, source, url, d) : wininet(job, net, source, url, d);
   if (d.received != 0) note(job, "got %I64u bytes in %.1f s", d.received, seconds(started));
   return outcome;
 }
