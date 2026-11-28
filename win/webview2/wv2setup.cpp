@@ -446,10 +446,20 @@ int fetch(Job& job, const std::wstring& part, const std::wstring& pkg) {
     result = write_failure(job.win32);
   }
   bool got = result == WV2_OK && d.have == wv2_package_bytes();
+  constexpr DWORD kPauses[] = {5000, 15000, 30000};
   Outcome last[kSourceCount] = {};
   int source = 0;
   int misses = 0;
-  while (result == WV2_OK && !got && misses < kSourceCount) {
+  size_t pauses = 0;
+  while (result == WV2_OK && !got) {
+    if (misses >= kSourceCount) {
+      bool offline = true;
+      for (const Outcome outcome : last) offline = offline && outcome == kNetwork;
+      if (!offline || pauses == sizeof kPauses / sizeof kPauses[0]) break;
+      note(job, "no source answered, trying again in %lu s", kPauses[pauses] / 1000);
+      Sleep(kPauses[pauses++]);
+      misses = 0;
+    }
     const ULONGLONG before = d.have;
     const Outcome outcome = attempt(job, net, kSources[source], d);
     if (outcome == kGot) {
@@ -459,6 +469,7 @@ int fetch(Job& job, const std::wstring& part, const std::wstring& pkg) {
     } else if (outcome == kNetwork && d.have > before) {
       last[source] = outcome;
       misses = 0;
+      pauses = 0;
     } else {
       last[source] = outcome;
       ++misses;
