@@ -68,6 +68,8 @@ bool launcher_open() {
 
 std::wstring start_failure(const Run& run) {
   wchar_t text[200];
+  if (!run.ran && run.code == STATUS_ILLEGAL_INSTRUCTION)
+    return L"Studio would crash on this PC because Windows has AVX turned off.";
   if (run.ran) std::swprintf(text, 200, L"It closed right after it started (code 0x%lX).", run.code);
   else std::swprintf(text, 200, L"Windows could not start Roblox Studio (error %lu).", run.code);
   return text;

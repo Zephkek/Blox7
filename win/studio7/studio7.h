@@ -186,6 +186,8 @@ BOOL webview_wanted(void);
 BOOL webview_lend(void);
 void webview_unlend(void);
 
+BOOL luau_sync(const Paths *paths, const char *version);
+
 void ui_status(const char *format, ...) S7_PRINTF(1, 2);
 
 void ui_progress(double fraction);

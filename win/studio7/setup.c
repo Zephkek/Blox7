@@ -752,6 +752,10 @@ BOOL run_start(const Paths *paths, const WCHAR *arguments, Run *run) {
     state_get(paths, L"name", run->name, sizeof(run->name));
     studio_folder(paths, run->version, folder);
     if (!in_use(folder)) mods_apply(paths, run->version);
+    if (!luau_sync(paths, run->version)) {
+        run->code = STATUS_ILLEGAL_INSTRUCTION;
+        return FALSE;
+    }
     join(exe, folder, S7_STUDIO_EXE);
     room = wcslen(exe) + (arguments ? wcslen(arguments) : 0) + 8;
     command = malloc(sizeof(WCHAR) * room);
@@ -821,7 +825,8 @@ int run_poll(const Paths *paths, Run *run) {
 }
 
 BOOL studio_remove(const Paths *paths) {
-    static const WCHAR *files[] = {L"studio7.ini", L"studio7.log", L"studio7.old.log", L"licenses.txt", L"window.ico"};
+    static const WCHAR *files[] = {L"studio7.ini", L"studio7.log", L"studio7.old.log", L"licenses.txt", L"window.ico",
+                                   L"studio7.luau"};
     static const WCHAR *empty[] = {L"Mods\\content", L"Mods"};
     WCHAR path[MAX_PATH];
     size_t i;
@@ -832,6 +837,7 @@ BOOL studio_remove(const Paths *paths) {
         return FALSE;
     }
     links_set(paths, FALSE);
+    luau_sync(paths, NULL);
     EnterCriticalSection(&g_log_lock);
     if (g_log) fclose(g_log);
     g_log = NULL;

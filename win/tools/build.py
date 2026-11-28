@@ -556,7 +556,7 @@ def build_studio7():
 
     includes = [f'-I{deps}/bearssl/inc', f'-I{deps}/zlib']
     flags = ['-O2', '-Wall', '-Wextra', '-ffunction-sections', '-fdata-sections'] + includes
-    engine = ('bind', 'embed', 'install', 'links', 'mods', 'pe', 'setup', 'stub', 'zip', 's7tool')
+    engine = ('bind', 'embed', 'install', 'links', 'luau', 'mods', 'pe', 'setup', 'stub', 'zip', 's7tool')
     jobs = update_jobs(deps) + webview2_jobs(deps)
     jobs += [(f'{deps}/zlib/{name}.c', obj_path(f'{deps}/zlib/{name}.c', 's7deps'), ['-O2', '-w', '-ffunction-sections', '-fdata-sections'] + includes)
              for name in ('adler32', 'crc32', 'inffast', 'inflate', 'inftrees', 'zutil')]
