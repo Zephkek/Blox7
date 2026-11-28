@@ -34,7 +34,7 @@ typedef struct {
 } Der;
 
 typedef struct {
-    Der serial, issuer, subject, key;
+    Der serial, issuer, subject, key, extensions;
 } Parts;
 
 typedef struct {
@@ -111,13 +111,63 @@ static BOOL der_read(Der *in, BYTE tag, Der *value, Der *whole) {
 }
 
 static BOOL cert_parts(PCCERT_CONTEXT cert, Parts *p) {
-    Der in = {cert->pbCertEncoded, cert->cbCertEncoded}, body, tbs;
+    Der in = {cert->pbCertEncoded, cert->cbCertEncoded}, body, tbs, field;
 
+    memset(p, 0, sizeof(*p));
     if (!der_read(&in, 0x30, &body, NULL) || in.size || !der_read(&body, 0x30, &tbs, NULL)) return FALSE;
     if (tbs.size && tbs.at[0] == 0xA0 && !der_read(&tbs, 0xA0, NULL, NULL)) return FALSE;
-    return der_read(&tbs, 0x02, &p->serial, NULL) && der_read(&tbs, 0x30, NULL, NULL) &&
-           der_read(&tbs, 0x30, NULL, &p->issuer) && der_read(&tbs, 0x30, NULL, NULL) &&
-           der_read(&tbs, 0x30, NULL, &p->subject) && der_read(&tbs, 0x30, NULL, &p->key);
+    if (!der_read(&tbs, 0x02, &p->serial, NULL) || !der_read(&tbs, 0x30, NULL, NULL) ||
+        !der_read(&tbs, 0x30, NULL, &p->issuer) || !der_read(&tbs, 0x30, NULL, NULL) ||
+        !der_read(&tbs, 0x30, NULL, &p->subject) || !der_read(&tbs, 0x30, NULL, &p->key))
+        return FALSE;
+    while (tbs.size) {
+        BYTE tag = tbs.at[0];
+
+        if (!der_read(&tbs, tag, &field, NULL) || (tag == 0xA3 && !der_read(&field, 0x30, &p->extensions, NULL)))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static size_t labels(const BYTE *name, size_t size) {
+    size_t count = 0, i;
+
+    for (i = 0; i < size; i++)
+        if (name[i] != '.' && (!i || name[i - 1] == '.')) count++;
+    return count;
+}
+
+static BOOL leaf_checked(PCCERT_CONTEXT leaf) {
+    Der extension, oid, value, names, name;
+    int dns = 0;
+    Parts p;
+
+    if (!cert_parts(leaf, &p)) return FALSE;
+    while (p.extensions.size) {
+        if (!der_read(&p.extensions, 0x30, &extension, NULL) || !der_read(&extension, 0x06, &oid, NULL) ||
+            (extension.size && extension.at[0] == 0x01 && !der_read(&extension, 0x01, NULL, NULL)) ||
+            !der_read(&extension, 0x04, &value, NULL))
+            return FALSE;
+        if (oid.size != 3 || oid.at[0] != 0x55 || oid.at[1] != 0x1D || (oid.at[2] != 0x11 && oid.at[2] != 0x13))
+            continue;
+        if (!der_read(&value, 0x30, &names, NULL)) return FALSE;
+        if (oid.at[2] == 0x13) {
+            if (names.size && names.at[0] == 0x01 &&
+                (!der_read(&names, 0x01, &name, NULL) || name.size != 1 || name.at[0]))
+                return FALSE;
+            continue;
+        }
+        while (names.size) {
+            BYTE tag = names.at[0];
+
+            if (!der_read(&names, tag, &name, NULL)) return FALSE;
+            if (tag != 0x82) continue;
+            dns++;
+            if (name.size >= 2 && name.at[0] == '*' && name.at[1] == '.' && labels(name.at + 2, name.size - 2) < 2)
+                return FALSE;
+        }
+    }
+    return dns > 0;
 }
 
 static int digest_order(const void *a, const void *b) {
@@ -194,7 +244,8 @@ static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
     }
     for (; i < path->cElement; i++) past |= path->rgpElement[i]->TrustStatus.dwErrorStatus;
     return !(past & ~PAST_ANCHOR) && !((chain->TrustStatus.dwErrorStatus | path->TrustStatus.dwErrorStatus) &
-                                       ~(ROOT_MISSING | (past & CERT_TRUST_IS_NOT_TIME_VALID)));
+                                       ~(ROOT_MISSING | (past & CERT_TRUST_IS_NOT_TIME_VALID))) &&
+           leaf_checked(path->rgpElement[0]->pCertContext);
 }
 
 static const br_x509_pkey *trust_roots(Trust *t, PCCERT_CHAIN_CONTEXT chain) {
