@@ -329,10 +329,11 @@ static BOOL side_by_side(const char *dll) {
     return FALSE;
 }
 
-static BOOL always_ours(const char *function, const char *module) {
+static BOOL always_ours(const World *w, const char *function, const char *module) {
     if (!strcmp(function, "VerifyVersionInfoW")) return !strcmp(module, "robloxstudiobeta.exe");
-    if (!strcmp(function, "LoadLibraryExW")) return !strcmp(module, "webview2loader.dll");
     if (!strcmp(function, "SendMessageW") || !strcmp(function, "RegisterClassExW")) return !strcmp(module, "qwindows.dll");
+    if (!w->seven) return FALSE;
+    if (!strcmp(function, "LoadLibraryExW")) return !strcmp(module, "webview2loader.dll");
     return !strcmp(function, "GetAddrInfoExW") || !strcmp(function, "WakeConditionVariable") ||
            !strcmp(function, "WakeAllConditionVariable");
 }
@@ -363,7 +364,7 @@ static void plan_module(World *w, Unit *u) {
         shim = shim_for(w, dll);
         for (j = 0; (function = pe_import_function(&u->pe, &imports[i], j, ordinal)) != NULL; j++) {
             if (shim && shim_owning(w, function, dll) &&
-                (always_ours(function, u->name) || !resolves(w, dll, function, u->name, 0)))
+                (always_ours(w, function, u->name) || !resolves(w, dll, function, u->name, 0)))
                 use = TRUE;
             if (needs_stub(w, dll)) want(w, dll, function);
         }
