@@ -36,6 +36,7 @@ constexpr char kNativeGlInterfaceClass[] =
 constexpr char kConnectionPointerField[] = "a";
 constexpr std::size_t kMaximumPendingHostWindowEvents = 256;
 constexpr std::string_view kBrowserLoginUrl = "https://www.roblox.com/login";
+constexpr std::string_view kPrewarmWebViewTitle = "Prewarm WebView";
 
 bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
   if (a.size() != b.size()) return false;
@@ -1202,7 +1203,8 @@ Status RobloxWebViewBridge::DispatchOpenRequest(
   if (!status.ok()) {
     return status;
   }
-  const bool login_challenge = IsLoginChallengeUrl(request.url);
+  const bool login_challenge = IsLoginChallengeUrl(request.url) &&
+                               request.title != kPrewarmWebViewTitle;
   const bool browser_login_fallback =
       ProcessEnvironment{}.Get("BLOX7_NATIVE_LOGIN") == "0" &&
       login_challenge;
