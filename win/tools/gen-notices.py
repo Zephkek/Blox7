@@ -32,7 +32,8 @@ PARTS = [
      [f'{SRC}/zlib/contrib/minizip/LICENSE.Info-Zip']),
     ('BoringSSL', 'https://boringssl.googlesource.com/boringssl', 'TLS and cryptography.', [f'{SRC}/boringssl/LICENSE']),
     ('curl', 'https://curl.se', 'HTTP downloads.', [f'{SRC}/curl/COPYING']),
-    ('BearSSL', 'https://bearssl.org', 'TLS for the check for a newer Blox7.exe, inside Blox7.exe. Windows decides '
+    ('BearSSL', 'https://bearssl.org', 'TLS for the check for a newer Blox7.exe and for the WebView2 109 download, '
+     'inside Blox7.exe. Windows decides '
      'which certificates are trusted, and when it doesn\'t have a site\'s root certificate, BearSSL checks the site '
      'against the Mozilla CA certificate list below.', [f'{SRC}/bearssl/LICENSE.txt']),
     ('libyaml', 'https://github.com/yaml/libyaml', 'Reading config.yaml.', [f'{SRC}/libyaml/License']),
