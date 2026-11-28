@@ -2546,17 +2546,23 @@ bool LoadWebView2() {
   return g_create_environment != nullptr;
 }
 
+std::wstring OwnRuntimeFolder() {
+  wchar_t folder[MAX_PATH];
+  if (wv2_windows_major() >= 10 || !wv2_folder(folder, MAX_PATH) || !wv2_folder_complete()) return {};
+  return folder;
+}
+
 // the last webview2 for win7 is 109, a newer fixed-version runtime in <prefix>\webview2 wins when there
 std::wstring FindRuntimeFolder() {
   if (const wchar_t* chosen = _wgetenv(L"BLOX7_WEBVIEW2_RUNTIME"); chosen != nullptr && *chosen != 0) {
     return wcscmp(chosen, L"installed") == 0 ? std::wstring() : std::wstring(chosen);
   }
   wchar_t path[MAX_PATH];
-  if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) return {};
+  if (GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) return OwnRuntimeFolder();
   std::wstring prefix = path;
   for (int i = 0; i < 3; i++) {
     const std::size_t slash = prefix.find_last_of(L'\\');
-    if (slash == std::wstring::npos) return {};
+    if (slash == std::wstring::npos) return OwnRuntimeFolder();
     prefix.resize(slash);
   }
   static constexpr std::wstring_view kStem = L"Microsoft.WebView2.FixedVersionRuntime.";
@@ -2564,11 +2570,11 @@ std::wstring FindRuntimeFolder() {
   unsigned best_version[4] = {};
   WIN32_FIND_DATAW found;
   HANDLE search = FindFirstFileW((prefix + L"\\webview2\\" + std::wstring(kStem) + L"*").c_str(), &found);
-  if (search == INVALID_HANDLE_VALUE) return {};
+  if (search == INVALID_HANDLE_VALUE) return OwnRuntimeFolder();
   do {
     if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) continue;
     const std::wstring folder = prefix + L"\\webview2\\" + found.cFileName;
-    if (GetFileAttributesW((folder + L"\\msedgewebview2.exe").c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+    if (!wv2_folder_usable(folder.c_str())) continue;
     unsigned version[4] = {};
     if (swscanf(found.cFileName + kStem.size(), L"%u.%u.%u.%u", &version[0], &version[1], &version[2], &version[3]) != 4) {
       continue;
@@ -2579,7 +2585,7 @@ std::wstring FindRuntimeFolder() {
     }
   } while (FindNextFileW(search, &found));
   FindClose(search);
-  return best;
+  return best.empty() ? OwnRuntimeFolder() : best;
 }
 
 // chromium's blocklist turns the gpu off on every vmware adapter (entry 68), 109's didn't
