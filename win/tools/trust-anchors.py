@@ -17,6 +17,10 @@ EC = '1.2.840.10045.2.1'
 CURVES = {'1.2.840.10045.3.1.7': ('BR_EC_secp256r1', 32), '1.3.132.0.34': ('BR_EC_secp384r1', 48),
           '1.3.132.0.35': ('BR_EC_secp521r1', 66)}
 RSA_BITS = 4096
+BASIC_CONSTRAINTS = '2.5.29.19'
+KEY_USAGE = '2.5.29.15'
+LIMITS = {'2.5.29.30': 'name constraints', '2.5.29.36': 'policy constraints', '2.5.29.37': 'extended key usage',
+          '2.5.29.54': 'inhibit any policy'}
 STRINGS = {0x0C: 'utf-8', 0x13: 'ascii', 0x16: 'ascii', 0x14: 'latin-1', 0x1E: 'utf-16-be', 0x1C: 'utf-32-be'}
 ENTRUST_NET_PREMIUM_2048 = '6dc47172e01cbcb0bf62580d895fe2b8ac9ad4f873801e0c10b9c837d21eb177'
 ENTRUST_ROOT_G2 = '43df5774b03e7fef5fe40d931a7bedf1bb2e6b42738c4e6d3841103d3aa7f339'
@@ -167,6 +171,27 @@ def public_key(data, item):
     return ('ec', symbol, key), None
 
 
+def limit(der, parts):
+    kind = oid(der, parts[0])
+    if len(parts) == 3 and value(der, parts[1]) not in (b'\0', b'\xff'):
+        fail('bad critical flag')
+    if kind in LIMITS:
+        return LIMITS[kind]
+    if kind == BASIC_CONSTRAINTS:
+        inner, = children(der, parts[-1][2], parts[-1][3], [0x30], 'basic constraints')
+        flags = [item[0] for item in children(der, inner[2], inner[3])]
+        if flags not in ([], [0x01], [0x02], [0x01, 0x02]):
+            fail('bad basic constraints')
+        return 'path length limit' if 0x02 in flags else None
+    if kind == KEY_USAGE:
+        inner, = children(der, parts[-1][2], parts[-1][3], [0x03], 'key usage')
+        bits = value(der, inner)
+        if not bits or bits[0] > 7:
+            fail('bad key usage')
+        return None if len(bits) > 1 and bits[1] & 0x04 else 'key usage without certificate signing'
+    return 'critical extension ' + kind if len(parts) == 3 and value(der, parts[1]) != b'\0' else None
+
+
 def certificate(der):
     tag, start, stop = element(der, 0, len(der))
     if tag != 0x30 or stop != len(der):
@@ -183,6 +208,7 @@ def certificate(der):
     rest = [field[0] for field in fields[6:]]
     if rest != sorted(set(rest)) or not set(rest) <= {0x81, 0x82, 0xA3}:
         fail('unexpected fields after the key')
+    limits = []
     for extensions in fields[6:]:
         if extensions[0] == 0xA3:
             outer, = children(der, extensions[2], extensions[3], [0x30], 'extensions')
@@ -190,7 +216,9 @@ def certificate(der):
                 parts = children(der, extension[2], extension[3])
                 if extension[0] != 0x30 or [part[0] for part in parts] not in ([0x06, 0x04], [0x06, 0x01, 0x04]):
                     fail('bad extension')
-                oid(der, parts[0])
+                reason = limit(der, parts)
+                if reason:
+                    limits.append(reason)
     name(der, fields[2])
     validity = children(der, fields[3][2], fields[3][3])
     if len(validity) != 2:
@@ -198,7 +226,7 @@ def certificate(der):
     _, end = (moment(der, item) for item in validity)
     subject, common = name(der, fields[4])
     key, problem = public_key(der, fields[5])
-    return subject, common, end, key, problem
+    return subject, common, end, key, problem or ', '.join(limits)
 
 
 def pem_blocks(text):
@@ -222,6 +250,7 @@ def blob(name, data):
 
 
 def main():
+    sys.stdout.reconfigure(errors='backslashreplace')
     if len(sys.argv) not in (1, 3):
         fail('usage: trust-anchors.py [<cacert.pem> <roots.h>]')
     pem, out = sys.argv[1:3] if len(sys.argv) == 3 else (PEM, OUT)
