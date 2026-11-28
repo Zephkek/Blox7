@@ -422,6 +422,16 @@ def update_jobs(deps):
                    (norm(os.path.join(WIN, 'update', 'update.c')), obj_path('update', 's7'), flags)]
 
 
+def webview2_jobs(deps):
+    lzma = f'{deps}/lzma/C'
+    plain = ['-O2', '-w', '-ffunction-sections', '-fdata-sections']
+    jobs = [(f'{lzma}/{name}.c', obj_path(f'{lzma}/{name}.c', 'wv2deps'), plain) for name in ('LzmaDec', 'Bcj2')]
+    flags = ['-std=c++20', '-municode', '-O2', '-Wall', '-Wextra', '-ffunction-sections', '-fdata-sections',
+             f'-I{deps}/bearssl/inc', f'-I{lzma}']
+    return jobs + [(norm(os.path.join(WIN, 'webview2', name + '.cpp')), obj_path(name, 'wv2'), flags)
+                   for name in ('wv2folder', 'wv2setup', 'wv2unpack')]
+
+
 def build_blox7():
     gen = os.path.join(OUT, 'blox7')
     os.makedirs(gen, exist_ok=True)
@@ -448,13 +458,14 @@ def build_blox7():
     except PermissionError:
         exe = os.path.join(release, 'Blox7.new.exe')
         print('Blox7.exe is running, so this build goes to Blox7.new.exe')
-    update = os.path.join(gen, 'update.rsp')
-    with open(update, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(f'"{o}"' for o in compile_all(update_jobs(os.environ.get('BLOX7_DEPS_SRC', 'D:/toolchains/src')),
+    deps = os.environ.get('BLOX7_DEPS_SRC', 'D:/toolchains/src')
+    objects = os.path.join(gen, 'objects.rsp')
+    with open(objects, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(f'"{o}"' for o in compile_all(update_jobs(deps) + webview2_jobs(deps),
                                                          f'{MINGW}/bin/clang.exe', f'{MINGW}/bin/clang++.exe')))
     cmd = [f'{MINGW}/bin/clang++.exe', '-std=c++20', '-O2', '-Wall', '-Wextra', '-municode', '-mwindows', '-I', gen,
            os.path.join(src, 'main.cpp'), os.path.join(src, 'runtime.cpp'), os.path.join(src, 'settings.cpp'),
-           os.path.join(src, 'ui.cpp'), os.path.join(src, 'update.cpp'), boot, isa, res, f'@{update}',
+           os.path.join(src, 'ui.cpp'), os.path.join(src, 'update.cpp'), boot, isa, res, f'@{objects}',
            '-o', exe, '-static', '-lws2_32', '-lcrypt32', '-lsetupapi', '-luuid', '-Wl,--gc-sections',
            '-Wl,--major-subsystem-version,6', '-Wl,--minor-subsystem-version,1', '-Wl,--major-os-version,6',
            '-Wl,--minor-os-version,1']
@@ -530,7 +541,7 @@ def build_studio7():
     includes = [f'-I{deps}/bearssl/inc', f'-I{deps}/zlib']
     flags = ['-O2', '-Wall', '-Wextra', '-ffunction-sections', '-fdata-sections'] + includes
     engine = ('bind', 'embed', 'install', 'links', 'mods', 'pe', 'setup', 'stub', 'zip', 's7tool')
-    jobs = update_jobs(deps)
+    jobs = update_jobs(deps) + webview2_jobs(deps)
     jobs += [(f'{deps}/zlib/{name}.c', obj_path(f'{deps}/zlib/{name}.c', 's7deps'), ['-O2', '-w', '-ffunction-sections', '-fdata-sections'] + includes)
              for name in ('adler32', 'crc32', 'inffast', 'inflate', 'inftrees', 'zutil')]
     jobs += [(norm(os.path.join(src, name + '.c')), obj_path(name, 's7'), flags) for name in engine]
@@ -552,7 +563,7 @@ def build_studio7():
         print('Studio7.exe is running, so this build goes to Studio7.new.exe')
     subprocess.check_call([cxx, '-municode', '-mwindows'] + window + [f'@{shared}', res, '-o', exe] + libs)
     print('built', exe, f'{os.path.getsize(exe) / 1024:.0f} KB')
-    subprocess.check_call([cc, '-municode', '-mconsole', tool, f'@{shared}', '-o', os.path.join(gen, 's7tool.exe')] + libs)
+    subprocess.check_call([cxx, '-municode', '-mconsole', tool, f'@{shared}', '-o', os.path.join(gen, 's7tool.exe')] + libs)
 
     test = os.path.join(gen, 'test')
     os.makedirs(test, exist_ok=True)
