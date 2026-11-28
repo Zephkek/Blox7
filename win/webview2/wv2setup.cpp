@@ -32,9 +32,9 @@ struct Source {
   const char* host;
 };
 
-constexpr Source kSources[] = {{true, "catalog.s.download.windowsupdate.com"},
-                               {false, "catalog.s.download.windowsupdate.com"},
-                               {false, "download.windowsupdate.com"}};
+constexpr Source kSources[] = {{false, "catalog.s.download.windowsupdate.com"},
+                               {false, "download.windowsupdate.com"},
+                               {true, "catalog.s.download.windowsupdate.com"}};
 constexpr int kSourceCount = sizeof kSources / sizeof kSources[0];
 
 enum Outcome { kNone, kGot, kNetwork, kBlocked, kProxy, kGone, kBad, kDisk };
