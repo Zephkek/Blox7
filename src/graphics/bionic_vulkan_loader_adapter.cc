@@ -257,6 +257,7 @@ struct AdapterState {
   VkSwapchainKHR retired_swapchain = VK_NULL_HANDLE;
   VkDevice retired_swapchain_device = VK_NULL_HANDLE;
   VkSurfaceKHR retired_swapchain_surface = VK_NULL_HANDLE;
+  std::unordered_set<VkSwapchainKHR> app_retired_swapchains;
   std::vector<VkSurfaceKHR> lost_surfaces;
   std::uint64_t lost_surface_noted_ns = 0;
   std::vector<VkDevice> lost_devices;
@@ -1931,6 +1932,7 @@ void ShutdownIdleAdapterLocked(AdapterState& state) {
   InvalidateFastDispatchCaches();
   state.surface_queries.clear();
   state.device_wait_locks.clear();
+  state.app_retired_swapchains.clear();
   state.latest_instance = VK_NULL_HANDLE;
   state.full_screen_exclusive_instances.clear();
   state.note_present.store(nullptr, std::memory_order_release);
@@ -2798,6 +2800,9 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
+    if (create_info->oldSwapchain != VK_NULL_HANDLE) {
+      state.app_retired_swapchains.insert(create_info->oldSwapchain);
+    }
     if (state.retired_swapchain != VK_NULL_HANDLE &&
         create_info->oldSwapchain == VK_NULL_HANDLE &&
         state.retired_swapchain_device == device &&
@@ -2877,9 +2882,11 @@ vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
       HostDeviceProc(device, "vkDestroySwapchainKHR"));
   State().text_overlay.DestroySwapchain(device, swapchain);
   VkSurfaceKHR surface = VK_NULL_HANDLE;
+  bool retired = false;
   {
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
+    retired = state.app_retired_swapchains.erase(swapchain) != 0;
     if (const auto hidden = state.hidden_images.find(swapchain);
         hidden != state.hidden_images.end()) {
       state.hidden_image_count.fetch_sub(hidden->second.size(),
@@ -2898,7 +2905,7 @@ vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain,
     }
   }
   if (KeepVulkanObjects() && allocator == nullptr &&
-      surface != VK_NULL_HANDLE) {
+      surface != VK_NULL_HANDLE && !retired) {
     DestroyRetiredSwapchain();
     AdapterState& state = State();
     std::lock_guard<std::mutex> lock(state.mutex);
