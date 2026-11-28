@@ -253,8 +253,7 @@ def b64(text, what):
 
 
 def one_name(data, what):
-    tag, _, stop = element(data, 0, len(data))
-    if tag != 0x30 or stop != len(data):
+    if len(data) < 2 or data[0] != 0x30 or element(data, 0, len(data))[2] != len(data):
         fail(what + ' is not one der name')
     return data
 
@@ -273,23 +272,19 @@ def onecrl_lines(path):
         if (not isinstance(record, dict) or record.get('deleted') or not isinstance(record.get('last_modified'), int)
                 or not isinstance(record.get('id'), str) or not re.fullmatch(WORD, record['id'])):
             fail(f'{path} holds a record that is not a live onecrl entry')
-        found = False
-        if 'issuerName' in record and 'serialNumber' in record:
-            issuer = one_name(b64(record['issuerName'], 'an issuerName'), 'an issuerName')
-            serial = b64(record['serialNumber'], 'a serialNumber')
-            if not serial:
-                fail('an empty serialNumber')
+        what = f'of onecrl record {record["id"]}'
+        if record.get('issuerName') and record.get('serialNumber'):
+            issuer = one_name(b64(record['issuerName'], 'the issuerName ' + what), 'the issuerName ' + what)
+            serial = b64(record['serialNumber'], 'the serialNumber ' + what)
             lines.add(f'revoked-serial {serial_id(issuer, serial).hex()} {record["id"]}')
-            found = True
-        if 'subject' in record and 'pubKeyHash' in record:
-            subject = one_name(b64(record['subject'], 'a subject'), 'a subject')
-            key_hash = b64(record['pubKeyHash'], 'a pubKeyHash')
+        elif record.get('subject') and record.get('pubKeyHash'):
+            subject = one_name(b64(record['subject'], 'the subject ' + what), 'the subject ' + what)
+            key_hash = b64(record['pubKeyHash'], 'the pubKeyHash ' + what)
             if len(key_hash) != 32:
-                fail('a pubKeyHash is not 32 bytes')
+                fail(f'the pubKeyHash {what} is not 32 bytes')
             lines.add(f'revoked-key {key_id(subject, key_hash).hex()} {record["id"]}')
-            found = True
-        if not found:
-            fail(f'{path} holds a record without issuerName and serialNumber or subject and pubKeyHash')
+        else:
+            print(f'skipped onecrl record {record["id"]}: no issuerName and serialNumber, or subject and pubKeyHash')
         newest = max(newest, record['last_modified'])
     return lines | {f'onecrl {newest}'}
 
