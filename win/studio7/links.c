@@ -196,7 +196,7 @@ BOOL webview_wanted(void) {
 }
 
 static WCHAR g_lent_arguments[2048];
-static BOOL g_had_arguments;
+static BOOL g_had_arguments, g_lent_folder;
 
 static BOOL merge_feature(WCHAR *arguments, size_t room, const WCHAR *key, const WCHAR *feature) {
     WCHAR before[ARRAYSIZE(g_lent_arguments) + 256];
@@ -233,14 +233,15 @@ static void lend_switches(void) {
 BOOL webview_lend(void) {
     WCHAR folder[MAX_PATH];
 
-    if (own_webview() || wv2_windows_major() >= 10 || wv2_system_usable() || !wv2_folder_complete() ||
-        !wv2_folder(folder, MAX_PATH) || !SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, folder))
-        return FALSE;
+    if (wv2_windows_major() >= 10) return FALSE;
+    g_lent_folder = !own_webview() && !wv2_system_usable() && wv2_folder_complete() && wv2_folder(folder, MAX_PATH) &&
+                    SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, folder);
     lend_switches();
     return TRUE;
 }
 
 void webview_unlend(void) {
-    SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, NULL);
+    if (g_lent_folder) SetEnvironmentVariableW(S7_WEBVIEW_FOLDER, NULL);
+    g_lent_folder = FALSE;
     SetEnvironmentVariableW(S7_WEBVIEW_ARGUMENTS, g_had_arguments ? g_lent_arguments : NULL);
 }
