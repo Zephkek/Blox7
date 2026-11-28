@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <psapi.h>
+#include <winioctl.h>
 
 #include <bearssl_hash.h>
 
@@ -267,6 +268,110 @@ DWORD WINAPI die_at(void* context) {
   }
 }
 
+bool present(const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
+
+bool put_file(const std::wstring& path) {
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return false;
+  DWORD done = 0;
+  const bool ok = WriteFile(file, "blox7", 5, &done, nullptr) && done == 5;
+  CloseHandle(file);
+  return ok;
+}
+
+bool make_junction(const std::wstring& link, const std::wstring& target) {
+  if (!CreateDirectoryW(link.c_str(), nullptr)) return false;
+  HANDLE dir = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (dir == INVALID_HANDLE_VALUE) return false;
+  const std::wstring substitute = L"\\??\\" + target;
+  const USHORT substitute_bytes = static_cast<USHORT>(substitute.size() * sizeof(wchar_t));
+  const USHORT print_bytes = static_cast<USHORT>(target.size() * sizeof(wchar_t));
+  std::vector<BYTE> buffer(16 + substitute_bytes + 2 + print_bytes + 2);
+  const DWORD tag = IO_REPARSE_TAG_MOUNT_POINT;
+  const USHORT fields[] = {static_cast<USHORT>(buffer.size() - 8), 0, 0, substitute_bytes,
+                           static_cast<USHORT>(substitute_bytes + 2), print_bytes};
+  std::memcpy(buffer.data(), &tag, sizeof tag);
+  std::memcpy(buffer.data() + 4, fields, sizeof fields);
+  std::memcpy(buffer.data() + 16, substitute.c_str(), substitute_bytes);
+  std::memcpy(buffer.data() + 16 + substitute_bytes + 2, target.c_str(), print_bytes);
+  DWORD done = 0;
+  const bool ok = DeviceIoControl(dir, FSCTL_SET_REPARSE_POINT, buffer.data(), static_cast<DWORD>(buffer.size()),
+                                  nullptr, 0, &done, nullptr) != 0;
+  CloseHandle(dir);
+  return ok;
+}
+
+struct Hold {
+  HANDLE taken;
+  HANDLE release;
+};
+
+DWORD WINAPI hold_mutex(void* context) {
+  const Hold* hold = static_cast<Hold*>(context);
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, WV2_MUTEX);
+  WaitForSingleObject(mutex, INFINITE);
+  SetEvent(hold->taken);
+  WaitForSingleObject(hold->release, INFINITE);
+  ReleaseMutex(mutex);
+  CloseHandle(mutex);
+  return 0;
+}
+
+int leftover(const wchar_t* scratch) {
+  const std::wstring root = scratch;
+  if (present(root)) {
+    std::printf("leftover: %s already exists\n", narrow(root).c_str());
+    return 2;
+  }
+  SetEnvironmentVariableW(L"LOCALAPPDATA", root.c_str());
+  const std::wstring home = root + L"\\Blox7\\webview2";
+  const std::wstring folder = home + L"\\" + WV2_FOLDER;
+  const std::wstring keep = root + L"\\keep";
+  for (const std::wstring& dir : {root, root + L"\\Blox7", home, folder, folder + L"\\EBWebView", keep,
+                                  home + L"\\download", home + L"\\.partial-1"})
+    CreateDirectoryW(dir.c_str(), nullptr);
+  int failed = 0;
+  const auto check = [&failed](bool ok, const char* what) {
+    std::printf("leftover: %s %s\n", ok ? "pass" : "FAIL", what);
+    failed += !ok;
+  };
+  check(put_file(folder + L"\\msedge.dll") && put_file(folder + L"\\EBWebView\\a.dll") &&
+            put_file(home + L"\\download\\x.part") && put_file(home + L"\\.partial-1\\f") &&
+            put_file(home + L"\\setup.log") && put_file(keep + L"\\sentinel.txt"),
+        "files made");
+  check(make_junction(folder + L"\\link", keep), "junction to a folder outside made");
+  check(present(folder + L"\\link\\sentinel.txt"), "the junction leads outside");
+  const bool modern = wv2_windows_major() >= 10;
+  check(wv2_leftover() == (modern ? 1 : 0), "a leftover counts only on windows 10 and later");
+  if (modern) {
+    Hold hold = {CreateEventW(nullptr, TRUE, FALSE, nullptr), CreateEventW(nullptr, TRUE, FALSE, nullptr)};
+    HANDLE holder = CreateThread(nullptr, 0, hold_mutex, &hold, 0, nullptr);
+    WaitForSingleObject(hold.taken, INFINITE);
+    check(wv2_leftover_remove() == 0, "nothing removed while a job holds the mutex");
+    check(present(folder + L"\\msedge.dll"), "the copy stays while a job runs");
+    SetEvent(hold.release);
+    WaitForSingleObject(holder, INFINITE);
+    CloseHandle(holder);
+    CloseHandle(hold.taken);
+    CloseHandle(hold.release);
+    check(wv2_leftover_remove() == 1, "removed once the mutex is free");
+    check(!present(folder), "the copy is gone");
+    check(!present(home + L"\\download"), "the download folder is gone");
+    check(!present(home + L"\\.partial-1"), "partial folders are gone");
+    check(present(keep + L"\\sentinel.txt"), "the junction's target is untouched");
+    check(present(home + L"\\setup.log"), "setup.log stays");
+    check(wv2_leftover() == 0, "no leftover afterwards");
+  } else {
+    check(wv2_leftover_remove() == 0, "nothing removed below windows 10");
+    check(present(folder + L"\\msedge.dll"), "the copy stays below windows 10");
+  }
+  RemoveDirectoryW((folder + L"\\link").c_str());
+  remove_tree(root);
+  std::printf("leftover: %d failed\n", failed);
+  return failed ? 1 : 0;
+}
+
 int watch(int seconds) {
   for (int i = 0; i < seconds * 4; ++i) {
     wv2_status status;
@@ -309,10 +414,12 @@ int wmain(int argc, wchar_t** argv) {
     return setup(std::wstring(argv[2]) == L"now", argc >= 4 ? _wtoi64(argv[3]) : 0,
                  argc == 5 && std::wstring(argv[4]) == L"unpack");
   if (what == L"watch" && argc == 3) return watch(_wtoi(argv[2]));
+  if (what == L"leftover" && argc == 3) return leftover(argv[2]);
   std::printf("usage: wv2setup_test unpack <package> <out> fixed|all\n"
               "       wv2setup_test compare <out> <reference> [names]\n"
               "       wv2setup_test refuse <package> <scratch>\n"
               "       wv2setup_test setup now|background [kill at byte [download|unpack]]\n"
-              "       wv2setup_test watch <seconds>\n");
+              "       wv2setup_test watch <seconds>\n"
+              "       wv2setup_test leftover <scratch>\n");
   return 2;
 }

@@ -55,6 +55,8 @@ int wv2_folder_usable(const wchar_t* folder);
 int wv2_folder_complete(void);
 int wv2_system_usable(void);
 int wv2_needs_setup(void);
+int wv2_leftover(void);
+int wv2_leftover_remove(void);
 int wv2_setup_running(void);
 int wv2_status_read(wv2_status* status);
 int wv2_last_error(DWORD* win32);

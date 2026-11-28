@@ -134,6 +134,12 @@ int wv2_system_usable(void) {
 
 int wv2_needs_setup(void) { return wv2_windows_major() < 10 && !wv2_folder_complete() && !wv2_system_usable(); }
 
+int wv2_leftover(void) {
+  const std::wstring base = home();
+  return wv2_windows_major() >= 10 && !base.empty() &&
+         (exists(base + L"\\" + WV2_FOLDER) || exists(base + L"\\download"));
+}
+
 int wv2_setup_running(void) {
   wv2_status status;
   return read_status(&status);

@@ -652,3 +652,23 @@ int run(int now) {
 }  // namespace
 
 extern "C" int wv2_setup_run(int now) { return run(now); }
+
+extern "C" int wv2_leftover_remove(void) {
+  std::wstring home(32768, L'\0');
+  if (wv2_windows_major() < 10 || !wv2_home(home.data(), static_cast<DWORD>(home.size()))) return 0;
+  home.resize(std::wcslen(home.c_str()));
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, WV2_MUTEX);
+  if (mutex == nullptr) return 0;
+  const DWORD wait = WaitForSingleObject(mutex, 0);
+  if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+    CloseHandle(mutex);
+    return 0;
+  }
+  remove_tree(home + L"\\" + WV2_FOLDER);
+  remove_tree(home + L"\\download");
+  remove_partials(home);
+  DeleteFileW((home + L"\\setup-error.txt").c_str());
+  ReleaseMutex(mutex);
+  CloseHandle(mutex);
+  return 1;
+}

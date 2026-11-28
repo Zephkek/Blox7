@@ -2805,6 +2805,7 @@ int run_launcher(HINSTANCE instance, int show) {
   g.main.draw = draw_main;
   if (!runtime_ready(g.paths)) g.stage = Stage::Unpacking;
   if (webview2_setup_wanted(g.paths)) begin_webview2();
+  else if (g.paths.webview2.empty() && wv2_leftover()) std::thread([] { wv2_leftover_remove(); }).detach();
   HWND hwnd = create_window(g.main, kMainClass, L"Blox7", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 0, kMainWidth,
                             main_content_height() + kCommandHeight, nullptr);
   if (!hwnd) return 1;
