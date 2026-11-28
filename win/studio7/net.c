@@ -166,7 +166,8 @@ static unsigned trust_end_chain(const br_x509_class **context) {
     chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_OR;
     chain_para.RequestedUsage.Usage.cUsageIdentifier = 1;
     chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = usages;
-    if (!CertGetCertificateChain(NULL, leaf, NULL, store, &chain_para, 0, NULL, &chain)) goto done;
+    if (!CertGetCertificateChain(NULL, leaf, NULL, store, &chain_para, CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL, NULL, &chain))
+        goto done;
     MultiByteToWideChar(CP_ACP, 0, t->host, -1, host, 256);
     memset(&ssl, 0, sizeof(ssl));
     ssl.cbSize = sizeof(ssl);
