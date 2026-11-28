@@ -5,6 +5,7 @@
 #include <wincrypt.h>
 
 #include <bearssl.h>
+#include "roots.h"
 
 #define MAX_CHAIN 8
 #define MAX_CERT 8192
@@ -17,8 +18,11 @@ typedef struct {
     int count;
     BOOL overflow;
     br_x509_decoder_context decoder;
+    br_x509_minimal_context minimal;
+    br_x509_trust_anchor roots[sizeof(g_roots) / sizeof(g_roots[0])];
     br_x509_pkey key;
     BYTE key_data[1200];
+    unsigned usages;
     unsigned error;
 } Trust;
 
@@ -71,6 +75,41 @@ static void trust_end_cert(const br_x509_class **context) {
     if (!t->overflow && t->count < MAX_CHAIN) t->count++;
 }
 
+static BOOL root_missing(DWORD error, DWORD bits) {
+    DWORD missing = CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_PARTIAL_CHAIN;
+
+    return (error == (DWORD)CERT_E_UNTRUSTEDROOT || error == (DWORD)CERT_E_CHAINING) && (bits & missing) &&
+           !(bits & ~missing);
+}
+
+static const br_x509_pkey *trust_roots(Trust *t) {
+    const br_x509_class **x = &t->minimal.vtable;
+    FILETIME clock;
+    ULONG64 now;
+    size_t live = 0, i;
+    unsigned error;
+
+    if (!t->host[0]) return NULL;
+    GetSystemTimeAsFileTime(&clock);
+    now = ((((ULONG64)clock.dwHighDateTime << 32) | clock.dwLowDateTime) - 116444736000000000ull) / 10000000;
+    for (i = 0; i < sizeof(g_roots) / sizeof(g_roots[0]); i++)
+        if (g_root_ends[i] >= now) t->roots[live++] = g_roots[i];
+    br_x509_minimal_init_full(&t->minimal, t->roots, live);
+    br_x509_minimal_set_time(&t->minimal, (uint32_t)(now / 86400 + 719528), (uint32_t)(now % 86400));
+    (*x)->start_chain(x, t->host);
+    for (i = 0; i < (size_t)t->count; i++) {
+        (*x)->start_cert(x, (uint32_t)t->lengths[i]);
+        (*x)->append(x, t->certs[i], t->lengths[i]);
+        (*x)->end_cert(x);
+    }
+    error = (*x)->end_chain(x);
+    if (error) {
+        t->error = error;
+        return NULL;
+    }
+    return (*x)->get_pkey(x, &t->usages);
+}
+
 static unsigned trust_end_chain(const br_x509_class **context) {
     Trust *t = (Trust *)context;
     HCERTSTORE store = NULL;
@@ -113,12 +152,17 @@ static unsigned trust_end_chain(const br_x509_class **context) {
     policy.pvExtraPolicyPara = &ssl;
     memset(&status, 0, sizeof(status));
     status.cbSize = sizeof(status);
-    if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &policy, &status) || status.dwError) goto done;
-    br_x509_decoder_init(&t->decoder, NULL, NULL);
-    br_x509_decoder_push(&t->decoder, t->certs[0], t->lengths[0]);
-    key = br_x509_decoder_get_pkey(&t->decoder);
-    if (!key) {
-        t->error = BR_ERR_X509_BAD_SIGNATURE;
+    if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &policy, &status)) goto done;
+    if (!status.dwError) {
+        br_x509_decoder_init(&t->decoder, NULL, NULL);
+        br_x509_decoder_push(&t->decoder, t->certs[0], t->lengths[0]);
+        key = br_x509_decoder_get_pkey(&t->decoder);
+        if (!key) {
+            t->error = BR_ERR_X509_BAD_SIGNATURE;
+            goto done;
+        }
+        t->usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+    } else if (!root_missing(status.dwError, chain->TrustStatus.dwErrorStatus) || !(key = trust_roots(t))) {
         goto done;
     }
     t->key = *key;
@@ -147,7 +191,7 @@ static const br_x509_pkey *trust_get_pkey(const br_x509_class *const *context, u
     const Trust *t = (const Trust *)context;
 
     if (t->error) return NULL;
-    if (usages) *usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+    if (usages) *usages = t->usages;
     return &t->key;
 }
 
