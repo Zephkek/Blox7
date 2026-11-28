@@ -2288,8 +2288,21 @@ bool IsDesktopProfile() {
   return device_class != nullptr && strcmp(device_class, "pc") == 0;
 }
 
+std::wstring WithEdgeRootStore(std::wstring arguments) {
+  constexpr wchar_t kFeature[] = L"msMicrosoftRootStoreUsed";
+  constexpr wchar_t kSwitch[] = L"--enable-features=";
+  if (wv2_windows_major() >= 10 || g_app.runtime_folder.empty() || arguments.find(kFeature) != std::wstring::npos)
+    return arguments;
+  const size_t at = arguments.find(kSwitch);
+  if (at == std::wstring::npos) return arguments + (arguments.empty() ? L"" : L" ") + kSwitch + kFeature;
+  const size_t end = arguments.find(L' ', at);
+  arguments.insert(end == std::wstring::npos ? arguments.size() : end, std::wstring(L",") + kFeature);
+  return arguments;
+}
+
 void CreatePageBrowser(const std::wstring& user_agent_argument) {
-  std::wstring arguments = g_app.browser_arguments;
+  std::wstring arguments = WithEdgeRootStore(g_app.browser_arguments);
+  if (arguments != g_app.browser_arguments) Log("certificates are checked with Edge's own root store");
   if (!user_agent_argument.empty()) arguments += (arguments.empty() ? L"" : L" ") + user_agent_argument;
   SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments.empty() ? nullptr : arguments.c_str());
   if (!RuntimeInstalled()) {
