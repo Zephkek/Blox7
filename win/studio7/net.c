@@ -10,6 +10,7 @@
 #define MAX_CHAIN 8
 #define MAX_CERT 8192
 #define ROOT_MISSING (CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_PARTIAL_CHAIN)
+#define PAST_ANCHOR (ROOT_MISSING | CERT_TRUST_IS_NOT_TIME_VALID)
 
 typedef struct {
     const br_x509_class *vtable;
@@ -77,12 +78,14 @@ static void trust_end_cert(const br_x509_class **context) {
 }
 
 static BOOL root_missing(DWORD error, DWORD bits) {
-    return (error == (DWORD)CERT_E_UNTRUSTEDROOT || error == (DWORD)CERT_E_CHAINING) && (bits & ROOT_MISSING) &&
-           !(bits & ~ROOT_MISSING);
+    if (bits & ~PAST_ANCHOR) return FALSE;
+    if (error == (DWORD)CERT_E_EXPIRED) return (bits & CERT_TRUST_IS_NOT_TIME_VALID) != 0;
+    return (error == (DWORD)CERT_E_UNTRUSTEDROOT || error == (DWORD)CERT_E_CHAINING) && (bits & ROOT_MISSING);
 }
 
 static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
     PCCERT_SIMPLE_CHAIN path = chain->rgpChain[0];
+    DWORD past = 0;
     size_t i;
 
     for (i = 0; i < used; i++) {
@@ -92,7 +95,9 @@ static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
             CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension))
             return FALSE;
     }
-    return TRUE;
+    for (; i < path->cElement; i++) past |= path->rgpElement[i]->TrustStatus.dwErrorStatus;
+    return !(past & ~PAST_ANCHOR) && !((chain->TrustStatus.dwErrorStatus | path->TrustStatus.dwErrorStatus) &
+                                       ~(ROOT_MISSING | (past & CERT_TRUST_IS_NOT_TIME_VALID)));
 }
 
 static const br_x509_pkey *trust_roots(Trust *t, PCCERT_CHAIN_CONTEXT chain) {
