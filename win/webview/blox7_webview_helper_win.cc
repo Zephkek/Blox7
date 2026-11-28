@@ -37,6 +37,7 @@ using blox7::webview::EvaluateNavigationUri;
 constexpr UINT kControlMessage = WM_APP + 1;
 constexpr UINT kControlClosed = WM_APP + 2;
 constexpr UINT_PTR kCookieTimer = 1;
+constexpr UINT_PTR kSetupTimer = 2;
 constexpr char kControlMagic[] = "MWVC";
 constexpr char kEventMagic[] = "MWVE";
 constexpr unsigned char kProtocolVersion = 1;
@@ -221,6 +222,12 @@ struct App {
   bool show_domain_as_title = false;
   bool terminating = false;
   bool startup_failed = false;
+  bool security_check = false;
+  bool setting_up = false;
+  bool setup_seen = false;
+  ULONGLONG setup_since = 0;
+  ULONGLONG setup_deadline = 0;
+  std::wstring setup_line;
 };
 
 App g_app;
@@ -229,6 +236,8 @@ void BeginTermination(const char* reason);
 Surface* CreateSurfaceWindow(bool primary, HWND owner);
 void AttachWebView(Surface* surface, std::function<void(Surface*)> ready);
 ICoreWebView2CookieManager* CookieManager(Surface* surface);
+void WaitForSetup();
+void PollSetup();
 
 // BLOX7_WEBVIEW_TRACE=<dir> (or 1 for <data>\trace-<time>): one jsonl timeline of everything the helper sees,
 // plus chromium's own netlog and log, to diff against the phone. passive only, no Runtime/Page domain,
@@ -1623,12 +1632,45 @@ void BeginTermination(const char* reason) {
   PostQuitMessage(0);
 }
 
+void PaintSetup(HDC dc, const RECT& client) {
+  FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+  HFONT font = CreateFontW(-MulDiv(12, GetDeviceCaps(dc, LOGPIXELSY), 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                           DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+  HGDIOBJ previous = SelectObject(dc, font);
+  SetBkMode(dc, TRANSPARENT);
+  SetTextColor(dc, RGB(255, 255, 255));
+  TEXTMETRICW metrics{};
+  GetTextMetricsW(dc, &metrics);
+  const int line = metrics.tmHeight + metrics.tmExternalLeading;
+  const int middle = (client.top + client.bottom) / 2;
+  RECT first = {client.left, middle - line, client.right, middle};
+  RECT second = {client.left, middle, client.right, middle + line};
+  DrawTextW(dc, g_app.security_check ? L"Setting up WebView2 for this check" : L"Setting up WebView2 for this page", -1,
+            &first, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+  DrawTextW(dc, g_app.setup_line.c_str(), -1, &second, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
+  SelectObject(dc, previous);
+  DeleteObject(font);
+}
+
 LRESULT CALLBACK SurfaceProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
   auto* surface = reinterpret_cast<Surface*>(GetWindowLongPtrW(window, GWLP_USERDATA));
   TraceWindowMessage(window, message, wparam, lparam);
+  const bool setup_shown = surface != nullptr && surface->primary && g_app.setting_up;
   switch (message) {
+    case WM_PAINT: {
+      if (!setup_shown) break;
+      PAINTSTRUCT paint;
+      HDC dc = BeginPaint(window, &paint);
+      RECT client;
+      GetClientRect(window, &client);
+      PaintSetup(dc, client);
+      EndPaint(window, &paint);
+      return 0;
+    }
     case WM_SIZE:
       if (surface != nullptr) ResizeToWindow(surface);
+      if (setup_shown) InvalidateRect(window, nullptr, FALSE);
       return 0;
     case WM_SETFOCUS:
       if (surface != nullptr && surface->controller != nullptr) {
@@ -2234,14 +2276,18 @@ void ExplainMissingRuntime() {
                   nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-void WebView2StartFailed(HRESULT result) {
-  const char* reason = result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ? "start"
-                       : RuntimeSetting()                                  ? "setting"
-                                                                           : "missing";
+void WebView2Failed(const char* reason, HRESULT result) {
   Log("cannot start WebView2: 0x%08lx reason=%s", static_cast<unsigned long>(result), reason);
   if (strcmp(reason, "missing") == 0) ExplainMissingRuntime();
   g_app.startup_failed = true;
   BeginTermination("WebView2 start-up failed");
+}
+
+void WebView2StartFailed(HRESULT result) {
+  WebView2Failed(result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ? "start"
+                 : RuntimeSetting()                                  ? "setting"
+                                                                     : "missing",
+                 result);
 }
 
 bool IsUsableUserAgent(const std::string& agent) {
@@ -2388,9 +2434,31 @@ void WithBrowserUserAgent(std::function<void(std::string)> done) {
   });
 }
 
+bool IsSecurityCheck(const std::string& url) {
+  for (std::size_t at = url.find('?'); at != std::string::npos; at = url.find('&', at + 1)) {
+    if (_strnicmp(url.c_str() + at + 1, "credentialsType=authToken", 25) == 0) return false;
+  }
+  if (blox7::webview::IsRobloxChallengePage(url)) return true;
+  for (const char* base : {"https://www.roblox.com/captcha/", "https://roblox.com/captcha/"}) {
+    const std::size_t size = strlen(base);
+    if (_strnicmp(url.c_str(), base, size) == 0) return _strnicmp(url.c_str() + size, "app/signup", 10) != 0;
+  }
+  return false;
+}
+
+bool NeedsSetup() {
+  const wchar_t* chosen = _wgetenv(L"BLOX7_WEBVIEW2_RUNTIME");
+  return wv2_windows_major() < 10 && (chosen == nullptr || *chosen == 0) && g_app.runtime_folder.empty() &&
+         !RuntimeInstalled();
+}
+
 void StartWebView2(const std::string& first_url) {
   if (g_app.webview2_requested || g_app.terminating) return;
   g_app.webview2_requested = true;
+  if (NeedsSetup()) {
+    WaitForSetup();
+    return;
+  }
   if (IsDesktopProfile() && !blox7::webview::IsRobloxChallengePage(first_url)) {
     g_app.app_user_agent = false;
     Log("starting WebView2 with the desktop user agent");
@@ -2420,6 +2488,8 @@ void ApplyControl(const ControlCommand& command) {
     case Op::kLoadUrl:
       ClearSensitive(&g_app.pending_url);
       g_app.pending_url = command.payload;
+      g_app.security_check = IsSecurityCheck(command.payload);
+      if (g_app.setting_up && primary != nullptr) InvalidateRect(primary->window, nullptr, FALSE);
       StartWebView2(g_app.pending_url);
       StartInitialLoad();
       break;
@@ -2510,6 +2580,8 @@ LRESULT CALLBACK MessageProc(HWND window, UINT message, WPARAM wparam, LPARAM lp
     case WM_TIMER:
       if (wparam == kCookieTimer) {
         RequestRobloxCookie();
+      } else if (wparam == kSetupTimer) {
+        PollSetup();
       } else if (wparam == kTraceTimer) {
         TraceWindowState();
         std::lock_guard<std::mutex> hold(g_trace.lock);
@@ -2598,6 +2670,75 @@ bool DisplayAdapterIsVmware() {
     }
   }
   return false;
+}
+
+ULONGLONG FileTimeValue(const FILETIME& time) {
+  return (static_cast<ULONGLONG>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+}
+
+bool SetupFailedSince(ULONGLONG since) {
+  wchar_t home[MAX_PATH];
+  WIN32_FILE_ATTRIBUTE_DATA data;
+  return wv2_home(home, MAX_PATH) &&
+         GetFileAttributesExW((std::wstring(home) + L"\\setup-error.txt").c_str(), GetFileExInfoStandard, &data) &&
+         FileTimeValue(data.ftLastWriteTime) >= since;
+}
+
+void WaitForSetup() {
+  const wchar_t* launcher = _wgetenv(L"BLOX7_LAUNCHER_EXE");
+  g_app.setup_seen = wv2_setup_running() != 0;
+  FILETIME now;
+  GetSystemTimeAsFileTime(&now);
+  g_app.setup_since = FileTimeValue(now);
+  if (!g_app.setup_seen && (launcher == nullptr || *launcher == 0 || !wv2_setup_spawn(launcher, 1))) {
+    WebView2Failed("missing", HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+    return;
+  }
+  g_app.setting_up = true;
+  g_app.setup_deadline = GetTickCount64() + 30000;
+  SetTimer(g_app.message_window, kSetupTimer, 250, nullptr);
+  if (g_app.primary != nullptr) InvalidateRect(g_app.primary->window, nullptr, FALSE);
+}
+
+void PollSetup() {
+  if (!g_app.setting_up || g_app.terminating) return;
+  wv2_status status;
+  if (wv2_status_read(&status)) {
+    g_app.setup_seen = true;
+    std::wstring line;
+    if (status.state == WV2_STATE_DOWNLOADING && status.total > 0) {
+      line = std::to_wstring(status.done / 1000000) + L" of " + std::to_wstring(status.total / 1000000) + L" MB";
+    } else if (status.state == WV2_STATE_UNPACKING && status.total > 0) {
+      line = std::to_wstring(std::min<LONGLONG>(status.done * 100 / status.total, 100)) + L"%";
+    }
+    if (line != g_app.setup_line) {
+      g_app.setup_line = line;
+      if (g_app.primary != nullptr) InvalidateRect(g_app.primary->window, nullptr, FALSE);
+    }
+    return;
+  }
+  const bool complete = wv2_folder_complete() != 0;
+  if (!complete && !g_app.setup_seen && !SetupFailedSince(g_app.setup_since) &&
+      GetTickCount64() < g_app.setup_deadline) {
+    return;
+  }
+  KillTimer(g_app.message_window, kSetupTimer);
+  g_app.setting_up = false;
+  if (g_app.primary != nullptr) InvalidateRect(g_app.primary->window, nullptr, TRUE);
+  const std::wstring folder = complete ? OwnRuntimeFolder() : std::wstring();
+  if (folder.empty()) {
+    DWORD win32 = 0;
+    wv2_last_error(&win32);
+    WebView2Failed("setup", HRESULT_FROM_WIN32(win32));
+    return;
+  }
+  g_app.runtime_folder = folder;
+  if (DisplayAdapterIsVmware()) {
+    g_app.browser_arguments += g_app.browser_arguments.empty() ? L"--ignore-gpu-blocklist" : L" --ignore-gpu-blocklist";
+  }
+  Log("WebView2 runtime: %s", Utf8(g_app.runtime_folder.c_str()).c_str());
+  g_app.webview2_requested = false;
+  StartWebView2(g_app.pending_url);
 }
 
 bool Connect(int port, const std::string& token) {
