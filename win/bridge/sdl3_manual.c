@@ -365,10 +365,24 @@ BRIDGE_EXPORT bool SDL_Vulkan_LoadLibrary(const char* path) {
   return load_library(windows_path(path, windows, sizeof windows));
 }
 
+enum { kModulePin = 0x1, kModuleFromAddress = 0x4 };
+
+static void pin_vulkan_loader(void* loader) {
+  static int pinned;
+  if (__atomic_load_n(&pinned, __ATOMIC_ACQUIRE)) return;
+  void* kernel = __w32_pe_open("kernel32.dll");
+  int (BRIDGE_MS *get_module)(unsigned, const void*, void**) =
+      kernel ? (int (BRIDGE_MS*)(unsigned, const void*, void**))__w32_pe_symbol(kernel, "GetModuleHandleExW") : NULL;
+  void* module = NULL;
+  if (get_module && get_module(kModulePin | kModuleFromAddress, loader, &module))
+    __atomic_store_n(&pinned, 1, __ATOMIC_RELEASE);
+}
+
 BRIDGE_EXPORT SDL_FunctionPointer SDL_Vulkan_GetVkGetInstanceProcAddr(void) {
   static void* (BRIDGE_MS *get_proc)(void);
   if (!get_proc) get_proc = (void* (BRIDGE_MS*)(void))real("SDL_Vulkan_GetVkGetInstanceProcAddr");
   void* loader = get_proc();
+  if (loader) pin_vulkan_loader(loader);
   return loader ? (SDL_FunctionPointer)vkb_install(loader) : NULL;
 }
 
