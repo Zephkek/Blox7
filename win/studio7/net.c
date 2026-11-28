@@ -29,6 +29,15 @@ typedef struct {
 } Trust;
 
 typedef struct {
+    const BYTE *at;
+    size_t size;
+} Der;
+
+typedef struct {
+    Der serial, issuer, subject, key;
+} Parts;
+
+typedef struct {
     SOCKET socket;
     br_ssl_client_context client;
     br_x509_minimal_context minimal;
@@ -77,6 +86,83 @@ static void trust_end_cert(const br_x509_class **context) {
     if (!t->overflow && t->count < MAX_CHAIN) t->count++;
 }
 
+static BOOL der_read(Der *in, BYTE tag, Der *value, Der *whole) {
+    size_t length, head = 2, i;
+
+    if (in->size < 2 || in->at[0] != tag) return FALSE;
+    length = in->at[1];
+    if (length & 0x80) {
+        head += length & 0x7F;
+        if (head < 3 || head > 6 || head > in->size) return FALSE;
+        for (length = 0, i = 2; i < head; i++) length = length << 8 | in->at[i];
+    }
+    if (length > in->size - head) return FALSE;
+    if (value) {
+        value->at = in->at + head;
+        value->size = length;
+    }
+    if (whole) {
+        whole->at = in->at;
+        whole->size = head + length;
+    }
+    in->at += head + length;
+    in->size -= head + length;
+    return TRUE;
+}
+
+static BOOL cert_parts(PCCERT_CONTEXT cert, Parts *p) {
+    Der in = {cert->pbCertEncoded, cert->cbCertEncoded}, body, tbs;
+
+    if (!der_read(&in, 0x30, &body, NULL) || in.size || !der_read(&body, 0x30, &tbs, NULL)) return FALSE;
+    if (tbs.size && tbs.at[0] == 0xA0 && !der_read(&tbs, 0xA0, NULL, NULL)) return FALSE;
+    return der_read(&tbs, 0x02, &p->serial, NULL) && der_read(&tbs, 0x30, NULL, NULL) &&
+           der_read(&tbs, 0x30, NULL, &p->issuer) && der_read(&tbs, 0x30, NULL, NULL) &&
+           der_read(&tbs, 0x30, NULL, &p->subject) && der_read(&tbs, 0x30, NULL, &p->key);
+}
+
+static int digest_order(const void *a, const void *b) {
+    return memcmp(a, b, 32);
+}
+
+static BOOL listed(const unsigned char (*table)[32], size_t count, br_sha256_context *hash) {
+    BYTE digest[32];
+
+    br_sha256_out(hash, digest);
+    return bsearch(digest, table, count, sizeof(table[0]), digest_order) != NULL;
+}
+
+static BOOL revoked(PCCERT_CONTEXT cert) {
+    br_sha256_context hash;
+    BYTE key[32];
+    Parts p;
+
+    if (!cert_parts(cert, &p)) return TRUE;
+    while (p.serial.size && !p.serial.at[0]) {
+        p.serial.at++;
+        p.serial.size--;
+    }
+    br_sha256_init(&hash);
+    br_sha256_update(&hash, p.issuer.at, p.issuer.size);
+    br_sha256_update(&hash, p.serial.at, p.serial.size);
+    if (listed(g_revoked_serials, sizeof(g_revoked_serials) / sizeof(g_revoked_serials[0]), &hash)) return TRUE;
+    br_sha256_init(&hash);
+    br_sha256_update(&hash, p.key.at, p.key.size);
+    br_sha256_out(&hash, key);
+    br_sha256_init(&hash);
+    br_sha256_update(&hash, p.subject.at, p.subject.size);
+    br_sha256_update(&hash, key, sizeof(key));
+    return listed(g_revoked_keys, sizeof(g_revoked_keys) / sizeof(g_revoked_keys[0]), &hash);
+}
+
+static BOOL chain_revoked(PCCERT_CHAIN_CONTEXT chain) {
+    DWORD i, j;
+
+    for (i = 0; i < chain->cChain; i++)
+        for (j = 0; j < chain->rgpChain[i]->cElement; j++)
+            if (revoked(chain->rgpChain[i]->rgpElement[j]->pCertContext)) return TRUE;
+    return FALSE;
+}
+
 static BOOL root_missing(DWORD error, DWORD bits) {
     if (bits & ~PAST_ANCHOR) return FALSE;
     if (error == (DWORD)CERT_E_EXPIRED) return (bits & CERT_TRUST_IS_NOT_TIME_VALID) != 0;
@@ -92,7 +178,8 @@ static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
         PCCERT_CONTEXT cert = path->rgpElement[i]->pCertContext;
 
         if ((path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING) ||
-            CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension))
+            CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension) ||
+            revoked(cert))
             return FALSE;
     }
     for (; i < path->cElement; i++) past |= path->rgpElement[i]->TrustStatus.dwErrorStatus;
@@ -187,6 +274,7 @@ static unsigned trust_end_chain(const br_x509_class **context) {
     status.cbSize = sizeof(status);
     if (!CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL, chain, &policy, &status)) goto done;
     if (!status.dwError) {
+        if (chain_revoked(chain)) goto done;
         br_x509_decoder_init(&t->decoder, NULL, NULL);
         br_x509_decoder_push(&t->decoder, t->certs[0], t->lengths[0]);
         key = br_x509_decoder_get_pkey(&t->decoder);

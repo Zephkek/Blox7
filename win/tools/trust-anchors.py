@@ -1,9 +1,14 @@
-"""writes win/studio7/roots.h, the bearssl trust anchors for the roots in exe/cacert.pem
-usage: trust-anchors.py [<cacert.pem> <roots.h>]"""
+"""writes win/studio7/roots.h, the bearssl trust anchors for the roots in exe/cacert.pem and the certificates
+mozilla revoked in onecrl, from the snapshot in win/tools/trust-anchors.txt
+usage: trust-anchors.py [<cacert.pem> <trust-anchors.txt> <roots.h>]
+       trust-anchors.py refresh <onecrl.json> [<cacert.pem> <trust-anchors.txt> <roots.h>]
+refresh takes onecrl.json from https://firefox.settings.services.mozilla.com/v1/buckets/security-state/collections/
+onecrl/changeset?_expected=0 (or that collection's /records) and writes the snapshot, then roots.h"""
 import base64
 import binascii
 import calendar
 import hashlib
+import json
 import os
 import re
 import sys
@@ -11,7 +16,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 WIN = os.path.dirname(HERE)
 PEM = os.path.join(os.path.dirname(WIN), 'exe', 'cacert.pem')
+SNAPSHOT = os.path.join(HERE, 'trust-anchors.txt')
 OUT = os.path.join(WIN, 'studio7', 'roots.h')
+USAGE = ('usage: trust-anchors.py [<cacert.pem> <trust-anchors.txt> <roots.h>]\n'
+         '       trust-anchors.py refresh <onecrl.json> [<cacert.pem> <trust-anchors.txt> <roots.h>]')
 RSA = '1.2.840.113549.1.1.1'
 EC = '1.2.840.10045.2.1'
 CURVES = {'1.2.840.10045.3.1.7': ('BR_EC_secp256r1', 32), '1.3.132.0.34': ('BR_EC_secp384r1', 48),
@@ -219,14 +227,102 @@ def certificate(der):
                 reason = limit(der, parts)
                 if reason:
                     limits.append(reason)
-    name(der, fields[2])
+    issuer, _ = name(der, fields[2])
     validity = children(der, fields[3][2], fields[3][3])
     if len(validity) != 2:
         fail('validity is not two times')
     _, end = (moment(der, item) for item in validity)
     subject, common = name(der, fields[4])
     key, problem = public_key(der, fields[5])
-    return subject, common, end, key, problem or ', '.join(limits)
+    spki = der[fields[5][1]:fields[5][3]]
+    ids = serial_id(issuer, value(der, fields[0])), key_id(subject, hashlib.sha256(spki).digest())
+    return subject, common, end, key, problem or ', '.join(limits), ids
+
+
+def serial_id(issuer, serial):
+    return hashlib.sha256(issuer + serial.lstrip(b'\0')).digest()
+
+
+def key_id(subject, key_hash):
+    return hashlib.sha256(subject + key_hash).digest()
+
+
+def b64(text, what):
+    try:
+        return base64.b64decode(text, validate=True)
+    except (binascii.Error, TypeError, ValueError):
+        fail('bad base64 in ' + what)
+
+
+def one_name(data, what):
+    tag, _, stop = element(data, 0, len(data))
+    if tag != 0x30 or stop != len(data):
+        fail(what + ' is not one der name')
+    return data
+
+
+def onecrl_lines(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        fail('cannot read the onecrl records in ' + path)
+    records = data.get('changes', data.get('data')) if isinstance(data, dict) else None
+    if not isinstance(records, list) or not records:
+        fail(path + ' holds no onecrl records')
+    lines, newest = set(), 0
+    for record in records:
+        if (not isinstance(record, dict) or record.get('deleted') or not isinstance(record.get('last_modified'), int)
+                or not isinstance(record.get('id'), str) or not re.fullmatch('[0-9A-Za-z_-]+', record['id'])):
+            fail(f'{path} holds a record that is not a live onecrl entry')
+        found = False
+        if 'issuerName' in record and 'serialNumber' in record:
+            issuer = one_name(b64(record['issuerName'], 'an issuerName'), 'an issuerName')
+            serial = b64(record['serialNumber'], 'a serialNumber')
+            if not serial:
+                fail('an empty serialNumber')
+            lines.add(f'revoked-serial {serial_id(issuer, serial).hex()} {record["id"]}')
+            found = True
+        if 'subject' in record and 'pubKeyHash' in record:
+            subject = one_name(b64(record['subject'], 'a subject'), 'a subject')
+            key_hash = b64(record['pubKeyHash'], 'a pubKeyHash')
+            if len(key_hash) != 32:
+                fail('a pubKeyHash is not 32 bytes')
+            lines.add(f'revoked-key {key_id(subject, key_hash).hex()} {record["id"]}')
+            found = True
+        if not found:
+            fail(f'{path} holds a record without issuerName and serialNumber or subject and pubKeyHash')
+        newest = max(newest, record['last_modified'])
+    return lines | {f'onecrl {newest}'}
+
+
+def snapshot(lines, path):
+    if lines != sorted(set(lines)):
+        fail(path + ' is not sorted or holds a line twice')
+    serials, keys, kinds = set(), set(), []
+    for line in lines:
+        kind, *rest = line.split(' ')
+        kinds.append(kind)
+        if (kind in ('revoked-serial', 'revoked-key') and len(rest) == 2 and re.fullmatch('[0-9a-f]{64}', rest[0])
+                and re.fullmatch('[0-9A-Za-z_-]+', rest[1])):
+            (serials if kind == 'revoked-serial' else keys).add(bytes.fromhex(rest[0]))
+        elif kind != 'onecrl' or len(rest) != 1 or not rest[0].isdigit():
+            fail(f'{path} holds an unknown line: {line[:80]}')
+    if kinds.count('onecrl') != 1 or not serials or not keys:
+        fail(path + ' lacks the onecrl revocations')
+    return serials, keys
+
+
+def save(path, text, encoding):
+    try:
+        with open(path, encoding=encoding) as f:
+            if f.read() == text:
+                return False
+    except OSError:
+        pass
+    with open(path, 'w', encoding=encoding, newline='\n') as f:
+        f.write(text)
+    return True
 
 
 def pem_blocks(text):
@@ -249,21 +345,42 @@ def blob(name, data):
     return lines + ['};']
 
 
+def digests(name, values):
+    lines = [f'static const unsigned char {name}[][32] = {{']
+    for digest in sorted(values):
+        lines.append('    {' + ', '.join(f'0x{byte:02x}' for byte in digest[:16]) + ',')
+        lines.append('     ' + ', '.join(f'0x{byte:02x}' for byte in digest[16:]) + '},')
+    return lines + ['};']
+
+
 def main():
     sys.stdout.reconfigure(errors='backslashreplace')
-    if len(sys.argv) not in (1, 3):
-        fail('usage: trust-anchors.py [<cacert.pem> <roots.h>]')
-    pem, out = sys.argv[1:3] if len(sys.argv) == 3 else (PEM, OUT)
+    args = sys.argv[1:]
+    if args[:1] == ['refresh'] and len(args) in (2, 5):
+        pem, path, out = args[2:] or (PEM, SNAPSHOT, OUT)
+        records = sorted(onecrl_lines(args[1]))
+    elif len(args) in (0, 3):
+        pem, path, out = args or (PEM, SNAPSHOT, OUT)
+        try:
+            with open(path, encoding='utf-8') as f:
+                records = f.read().splitlines()
+        except OSError:
+            fail(f'cannot read {path}, make it with: trust-anchors.py refresh <onecrl.json>')
+    else:
+        fail(USAGE)
+    serials, keys = snapshot(records, path)
     with open(pem, encoding='utf-8') as f:
         ders = pem_blocks(f.read())
     lines, table, ends, skipped = ['#pragma once', '', '#include <bearssl.h>'], [], [], []
     for der in ders:
-        subject, common, end, key, problem = certificate(der)
+        subject, common, end, key, problem, ids = certificate(der)
         digest = hashlib.sha256(der).hexdigest()
         if digest in SERVER_DISTRUST_AFTER:
             problem = 'distrusted for servers after a date'
         elif digest in NSS_NAME_CONSTRAINTS:
             problem = 'name constrained by nss'
+        elif ids[0] in serials or ids[1] in keys:
+            problem = 'revoked in onecrl'
         if problem:
             skipped.append(f'{common or subject.hex()}: {problem}')
             continue
@@ -284,21 +401,16 @@ def main():
     lines += ['', 'static const br_x509_trust_anchor g_roots[] = {'] + table + ['};', '',
               'static const unsigned long long g_root_ends[] = {']
     lines += ['    ' + ', '.join(str(end) for end in ends[at:at + 8]) + ',' for at in range(0, len(ends), 8)]
-    lines += ['};', '']
+    lines += ['};', ''] + digests('g_revoked_serials', serials) + [''] + digests('g_revoked_keys', keys) + ['']
     if max(len(line) for line in lines) > 120:
         fail('a line of the header is over 120 columns')
-    text = '\n'.join(lines)
-    try:
-        with open(out, encoding='ascii') as f:
-            same = f.read() == text
-    except OSError:
-        same = False
-    if not same:
-        with open(out, 'w', encoding='ascii', newline='\n') as f:
-            f.write(text)
+    if args[:1] == ['refresh']:
+        print(f'{len(records)} lines', 'written to' if save(path, '\n'.join(records) + '\n', 'utf-8') else 'in', path)
+    same = not save(out, '\n'.join(lines), 'ascii')
     for line in skipped:
         print('skipped', line)
-    print(f'{len(ends)} of {len(ders)} roots', 'in' if same else 'written to', out)
+    print(f'{len(ends)} of {len(ders)} roots and {len(serials) + len(keys)} onecrl revocations',
+          'in' if same else 'written to', out)
 
 
 if __name__ == '__main__':
