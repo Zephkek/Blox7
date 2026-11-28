@@ -81,17 +81,14 @@ static BOOL root_missing(DWORD error, DWORD bits) {
            !(bits & ~ROOT_MISSING);
 }
 
-static BOOL path_checked(const Trust *t, PCCERT_CHAIN_CONTEXT chain, size_t used) {
-    PCCERT_SIMPLE_CHAIN path;
+static BOOL path_checked(PCCERT_CHAIN_CONTEXT chain, size_t used) {
+    PCCERT_SIMPLE_CHAIN path = chain->rgpChain[0];
     size_t i;
 
-    if (chain->cChain != 1 || chain->rgpChain[0]->cElement < used) return FALSE;
-    path = chain->rgpChain[0];
     for (i = 0; i < used; i++) {
         PCCERT_CONTEXT cert = path->rgpElement[i]->pCertContext;
 
-        if (cert->cbCertEncoded != t->lengths[i] || memcmp(cert->pbCertEncoded, t->certs[i], t->lengths[i]) ||
-            (path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING) ||
+        if ((path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING) ||
             CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension))
             return FALSE;
     }
@@ -100,12 +97,17 @@ static BOOL path_checked(const Trust *t, PCCERT_CHAIN_CONTEXT chain, size_t used
 
 static const br_x509_pkey *trust_roots(Trust *t, PCCERT_CHAIN_CONTEXT chain) {
     const br_x509_class **x = &t->minimal.vtable;
+    PCCERT_SIMPLE_CHAIN path;
+    PCCERT_CONTEXT cert;
     FILETIME clock;
     ULONG64 now;
     size_t live = 0, used = 0, i;
     unsigned error;
 
-    if (!t->host[0]) return NULL;
+    if (!t->host[0] || chain->cChain != 1 || !chain->rgpChain[0]->cElement) return NULL;
+    path = chain->rgpChain[0];
+    cert = path->rgpElement[0]->pCertContext;
+    if (cert->cbCertEncoded != t->lengths[0] || memcmp(cert->pbCertEncoded, t->certs[0], t->lengths[0])) return NULL;
     GetSystemTimeAsFileTime(&clock);
     now = ((((ULONG64)clock.dwHighDateTime << 32) | clock.dwLowDateTime) - 116444736000000000ull) / 10000000;
     for (i = 0; i < sizeof(g_roots) / sizeof(g_roots[0]); i++)
@@ -120,18 +122,18 @@ static const br_x509_pkey *trust_roots(Trust *t, PCCERT_CHAIN_CONTEXT chain) {
     br_x509_minimal_set_minrsa(&t->minimal, 256);
     br_x509_minimal_set_time(&t->minimal, (uint32_t)(now / 86400 + 719528), (uint32_t)(now % 86400));
     (*x)->start_chain(x, t->host);
-    while (used < (size_t)t->count && t->minimal.err != BR_ERR_X509_OK) {
-        (*x)->start_cert(x, (uint32_t)t->lengths[used]);
-        (*x)->append(x, t->certs[used], t->lengths[used]);
+    while (used < path->cElement && t->minimal.err != BR_ERR_X509_OK) {
+        cert = path->rgpElement[used++]->pCertContext;
+        (*x)->start_cert(x, cert->cbCertEncoded);
+        (*x)->append(x, cert->pbCertEncoded, cert->cbCertEncoded);
         (*x)->end_cert(x);
-        used++;
     }
     error = (*x)->end_chain(x);
     if (error) {
         t->error = error;
         return NULL;
     }
-    if (!path_checked(t, chain, used)) return NULL;
+    if (!path_checked(chain, used)) return NULL;
     return (*x)->get_pkey(x, &t->usages);
 }
 
