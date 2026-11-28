@@ -2301,7 +2301,7 @@ bool MergeFeature(std::wstring* arguments, const wchar_t* key, const wchar_t* fe
 }
 
 std::wstring WithOldWindowsSwitches(std::wstring arguments) {
-  if (wv2_windows_major() >= 10 || g_app.runtime_folder.empty()) return arguments;
+  if (wv2_windows_major() >= 10) return arguments;
   if (MergeFeature(&arguments, L"--enable-features=", L"msMicrosoftRootStoreUsed"))
     Log("certificates are checked with Edge's own root store");
   if (MergeFeature(&arguments, L"--disable-features=", L"WebRtcHideLocalIpsWithMdns") &&
