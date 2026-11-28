@@ -3,6 +3,7 @@ usage: trust-anchors.py [<cacert.pem> <roots.h>]"""
 import base64
 import binascii
 import calendar
+import hashlib
 import os
 import re
 import sys
@@ -17,6 +18,13 @@ CURVES = {'1.2.840.10045.3.1.7': ('BR_EC_secp256r1', 32), '1.3.132.0.34': ('BR_E
           '1.3.132.0.35': ('BR_EC_secp521r1', 66)}
 RSA_BITS = 4096
 STRINGS = {0x0C: 'utf-8', 0x13: 'ascii', 0x16: 'ascii', 0x14: 'latin-1', 0x1E: 'utf-16-be', 0x1C: 'utf-32-be'}
+ENTRUST_NET_PREMIUM_2048 = '6dc47172e01cbcb0bf62580d895fe2b8ac9ad4f873801e0c10b9c837d21eb177'
+ENTRUST_ROOT_G2 = '43df5774b03e7fef5fe40d931a7bedf1bb2e6b42738c4e6d3841103d3aa7f339'
+ENTRUST_ROOT_EC1 = '02ed0eb28c14da45165c566791700d6451d7fb56f0b2ab1d3b8eb070e56edff5'
+IZENPE = '2530cc8e98321502bad96f9b1fba1b099e2d299e0f4548bb914f363bc0d4531f'
+TUBITAK_KAMU_SM_SSL_1 = '46edc3689046d53a453fb3104ab80dcaec658b2660ea1629dd7e867990648716'
+SERVER_DISTRUST_AFTER = (ENTRUST_NET_PREMIUM_2048, ENTRUST_ROOT_G2, ENTRUST_ROOT_EC1, IZENPE)
+NSS_NAME_CONSTRAINTS = (TUBITAK_KAMU_SM_SSL_1,)
 
 
 def fail(text):
@@ -222,6 +230,11 @@ def main():
     lines, table, ends, skipped = ['#pragma once', '', '#include <bearssl.h>'], [], [], []
     for der in ders:
         subject, common, end, key, problem = certificate(der)
+        digest = hashlib.sha256(der).hexdigest()
+        if digest in SERVER_DISTRUST_AFTER:
+            problem = 'distrusted for servers after a date'
+        elif digest in NSS_NAME_CONSTRAINTS:
+            problem = 'name constrained by nss'
         if problem:
             skipped.append(f'{common or subject.hex()}: {problem}')
             continue
