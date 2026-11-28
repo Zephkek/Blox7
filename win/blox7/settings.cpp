@@ -1431,8 +1431,10 @@ struct AdapterDriver {
 };
 
 bool newer_than_windows7_drivers(UINT vendor, const LARGE_INTEGER& version) {
-  const int build = HIWORD(version.LowPart), revision = LOWORD(version.LowPart);
-  return vendor == 0x10de && (build - 10) * 10000 + revision >= 48000;
+  const int major = HIWORD(version.HighPart), build = HIWORD(version.LowPart), revision = LOWORD(version.LowPart);
+  if (vendor == 0x10de) return (build - 10) * 10000 + revision >= 48000;
+  if (vendor == 0x1002) return major >= 30;
+  return false;
 }
 
 std::vector<AdapterDriver> adapter_drivers() {
