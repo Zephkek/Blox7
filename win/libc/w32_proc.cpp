@@ -151,6 +151,14 @@ Code code_ranges() {
 }
 
 
+unsigned xcr0_need(const char* name) {
+  static const char* const kYmm[] = {"avx", "avx2", "fma", "f16c", "xop", "fma4", "vaes", "vpclmulqdq"};
+  if (strncmp(name, "avx512", 6) == 0) return 0xe6;
+  for (const char* ymm : kYmm)
+    if (strcmp(name, ymm) == 0) return 6;
+  return strcmp(name, "xsave") == 0 ? 1 : 0;
+}
+
 void cpu_flags(Text& t) {
   struct Bit {
     unsigned leaf, sub, reg, bit;  // reg: 0 eax, 1 ebx, 2 ecx, 3 edx
@@ -186,12 +194,16 @@ void cpu_flags(Text& t) {
       {7, 0, 2, 22, "rdpid"}, {7, 0, 3, 4, "fsrm"}, {7, 0, 3, 18, "pconfig"}, {7, 0, 3, 26, "flush_l1d"},
       {7, 0, 3, 29, "arch_capabilities"},
   };
-  unsigned max_basic = 0, max_ext = 0, r[4];
+  unsigned max_basic = 0, max_ext = 0, xcr0 = 0, high = 0, r[4];
   __asm__("cpuid" : "=a"(max_basic), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(0), "c"(0));
   __asm__("cpuid" : "=a"(max_ext), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(0x80000000), "c"(0));
+  __asm__("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(1), "c"(0));
+  if (r[2] & (1u << 27)) __asm__ volatile("xgetbv" : "=a"(xcr0), "=d"(high) : "c"(0));
   bool first = true;
   for (const Bit& b : kBits) {
     if ((b.leaf < 0x80000000 && b.leaf > max_basic) || (b.leaf >= 0x80000000 && b.leaf > max_ext)) continue;
+    const unsigned need = xcr0_need(b.name);
+    if ((xcr0 & need) != need) continue;
     __asm__("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(b.leaf), "c"(b.sub));
     if (r[b.reg] & (1u << b.bit)) {
       t.add("%s%s", first ? "" : " ", b.name);
