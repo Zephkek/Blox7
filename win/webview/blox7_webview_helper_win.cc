@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../webview2/wv2setup.h"
 #include "WebView2.h"
 #include "delayload_guard.h"
 #include "runtime/display_size.h"
@@ -2156,13 +2157,56 @@ using BrowserVersionFn = HRESULT(STDAPICALLTYPE*)(PCWSTR, LPWSTR*);
 CreateEnvironmentFn g_create_environment;
 BrowserVersionFn g_browser_version;
 
+bool RuntimeSetting() {
+  const wchar_t* chosen = _wgetenv(L"BLOX7_WEBVIEW2_RUNTIME");
+  return chosen != nullptr && *chosen != 0 && wcscmp(chosen, L"installed") != 0;
+}
+
 bool RuntimeInstalled() {
+  if (!g_app.runtime_folder.empty()) return wv2_folder_usable(g_app.runtime_folder.c_str()) != 0;
   if (g_browser_version == nullptr) return true;
   LPWSTR version = nullptr;
-  const HRESULT result = g_browser_version(g_app.runtime_folder.empty() ? nullptr : g_app.runtime_folder.c_str(), &version);
+  const HRESULT result = g_browser_version(nullptr, &version);
   const bool found = SUCCEEDED(result) && version != nullptr;
   if (version != nullptr) CoTaskMemFree(version);
   return found;
+}
+
+std::string VersionText(const unsigned version[4]) {
+  return std::to_string(version[0]) + "." + std::to_string(version[1]) + "." + std::to_string(version[2]) + "." +
+         std::to_string(version[3]);
+}
+
+std::string FolderVersion(const std::wstring& folder) {
+  static constexpr std::wstring_view kStem = L"Microsoft.WebView2.FixedVersionRuntime.";
+  const std::size_t slash = folder.find_last_of(L"\\/");
+  const std::wstring name = folder.substr(slash == std::wstring::npos ? 0 : slash + 1);
+  unsigned version[4] = {};
+  if (name.size() > kStem.size() && _wcsnicmp(name.c_str(), kStem.data(), kStem.size()) == 0 &&
+      swscanf(name.c_str() + kStem.size(), L"%u.%u.%u.%u", &version[0], &version[1], &version[2], &version[3]) == 4) {
+    return VersionText(version);
+  }
+  const std::wstring exe = folder + L"\\msedgewebview2.exe";
+  DWORD handle = 0;
+  const DWORD size = GetFileVersionInfoSizeW(exe.c_str(), &handle);
+  std::vector<BYTE> data(size);
+  VS_FIXEDFILEINFO* info = nullptr;
+  UINT length = 0;
+  if (size == 0 || !GetFileVersionInfoW(exe.c_str(), 0, size, data.data()) ||
+      !VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &length) || info == nullptr ||
+      length < sizeof *info) {
+    return {};
+  }
+  const unsigned file[4] = {HIWORD(info->dwFileVersionMS), LOWORD(info->dwFileVersionMS),
+                            HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS)};
+  return VersionText(file);
+}
+
+std::string RuntimeVersion() {
+  if (!g_app.runtime_folder.empty()) return FolderVersion(g_app.runtime_folder);
+  LPWSTR version = nullptr;
+  if (g_browser_version == nullptr || FAILED(g_browser_version(nullptr, &version)) || version == nullptr) return {};
+  return TakeString(version);
 }
 
 // 7, 8 and 8.1 stop at webview2 109, so those get pointed at the update catalog
@@ -2191,8 +2235,11 @@ void ExplainMissingRuntime() {
 }
 
 void WebView2StartFailed(HRESULT result) {
-  Log("cannot start WebView2: 0x%08lx", static_cast<unsigned long>(result));
-  if (result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) ExplainMissingRuntime();
+  const char* reason = result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ? "start"
+                       : RuntimeSetting()                                  ? "setting"
+                                                                           : "missing";
+  Log("cannot start WebView2: 0x%08lx reason=%s", static_cast<unsigned long>(result), reason);
+  if (strcmp(reason, "missing") == 0) ExplainMissingRuntime();
   g_app.startup_failed = true;
   BeginTermination("WebView2 start-up failed");
 }
@@ -2245,11 +2292,10 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
 }
 
 std::string BrowserUserAgentKey() {
-  const wchar_t* folder = g_app.runtime_folder.empty() ? nullptr : g_app.runtime_folder.c_str();
-  LPWSTR version = nullptr;
-  if (g_browser_version == nullptr || FAILED(g_browser_version(folder, &version)) || version == nullptr) return {};
+  const std::string version = RuntimeVersion();
+  if (version.empty()) return {};
   const OSVERSIONINFOW os = WindowsVersion();
-  return TakeString(version) + " " + std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) +
+  return version + " " + std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) +
          "." + std::to_string(os.dwBuildNumber);
 }
 

@@ -385,9 +385,10 @@ def build_webview():
            '-static', '-o', out,
            os.path.join(WIN, 'webview', 'blox7_webview_helper_win.cc'),
            os.path.join(root, 'src', 'webview', 'webview_helper_policy.cc'),
+           os.path.join(WIN, 'webview2', 'wv2folder.cpp'),
            f'-isystem{sdk}/include', f'-I{root}/src', f'-I{root}/include', f'-I{OUT}/deps/include',
            '-Wl,--subsystem,windows:6.1', '-Wl,--major-os-version,6', '-Wl,--minor-os-version,1',
-           '-lole32', '-lws2_32', '-lgdi32', '-luser32', '-luuid', '-lcomctl32', '-lshell32']
+           '-lole32', '-lws2_32', '-lgdi32', '-luser32', '-luuid', '-lcomctl32', '-lshell32', '-lversion']
     subprocess.check_call(cmd)
     shutil.copyfile(f'{sdk}/x64/WebView2Loader.dll', os.path.join(OUT, 'WebView2Loader.dll'))
     print('built', out)
