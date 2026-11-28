@@ -1466,8 +1466,10 @@ std::vector<AdapterDriver> adapter_drivers() {
 bool modded_windows7_driver(const std::wstring& gpu) {
   if (!os_info().windows7()) return false;
   static const std::vector<AdapterDriver> adapters = adapter_drivers();
+  const bool present = std::any_of(adapters.begin(), adapters.end(),
+                                   [&gpu](const AdapterDriver& adapter) { return adapter.id == gpu; });
   return std::any_of(adapters.begin(), adapters.end(),
-                     [&gpu](const AdapterDriver& adapter) { return adapter.modded && (gpu.empty() || adapter.id == gpu); });
+                     [&](const AdapterDriver& adapter) { return adapter.modded && (!present || adapter.id == gpu); });
 }
 
 bool vulkan_held_back(const Settings& s) {
