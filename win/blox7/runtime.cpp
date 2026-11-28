@@ -509,6 +509,7 @@ void remove_old_runtimes(const Paths& paths) {
 
 void set_runtime_environment(const Paths& paths) {
   SetEnvironmentVariableW(L"BLOX7_ROOT", paths.data.c_str());
+  SetEnvironmentVariableW(L"BLOX7_LAUNCHER_EXE", paths.exe.c_str());
   for (const wchar_t* name : {L"HOME", L"XDG_CONFIG_HOME", L"XDG_DATA_HOME", L"XDG_CACHE_HOME", L"XDG_STATE_HOME",
                               L"XDG_RUNTIME_DIR"})
     SetEnvironmentVariableW(name, nullptr);
