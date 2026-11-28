@@ -9,6 +9,7 @@
 #include <cstring>
 #include <map>
 
+#include "../webview2/wv2setup.h"
 #include "payload_id.h"
 
 namespace blox7 {
@@ -515,6 +516,8 @@ void set_runtime_environment(const Paths& paths) {
   const std::string icon = posix_path(paths.runtime + L"\\share\\blox7\\blox7.png");
   SetEnvironmentVariableW(L"BLOX7_WINDOW_ICON_FILE", icon.empty() ? nullptr : widen(icon).c_str());
 }
+
+bool webview2_setup_wanted(const Paths& paths) { return paths.webview2.empty() && wv2_needs_setup(); }
 
 std::string posix_path(const std::wstring& path) {
   std::wstring p = path;

@@ -135,6 +135,7 @@ void prepare_data(const Paths& paths);
 void remove_old_runtimes(const Paths& paths);
 void hold_runtime(const Paths& paths);
 void set_runtime_environment(const Paths& paths);
+bool webview2_setup_wanted(const Paths& paths);
 std::string posix_path(const std::wstring& path);
 
 std::wstring roblox_version(const Paths& paths);

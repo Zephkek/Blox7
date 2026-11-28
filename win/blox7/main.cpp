@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../boot/boot.h"
+#include "../webview2/wv2setup.h"
 #include "blox7.h"
 
 extern "C" {
@@ -71,6 +72,8 @@ int play(int argc, wchar_t** argv) {
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int argc = 0;
   wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (argv && argc >= 2 && wcscmp(argv[1], WV2_SETUP_SWITCH) == 0)
+    return wv2_setup_run(argc >= 3 && wcscmp(argv[2], L"--now") == 0);
   if (argv && wants_play(argc, argv)) return play(argc, argv);
   if (argv && argc == 3 && wcscmp(argv[1], L"--render-ui") == 0) return blox7::render_ui(argv[2]);
   return blox7::run_launcher(instance, show);

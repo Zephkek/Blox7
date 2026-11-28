@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "../webview2/wv2setup.h"
 #include "blox7.h"
 
 namespace blox7 {
@@ -34,6 +35,7 @@ constexpr UINT kSelfUpdated = WM_APP + 3;
 constexpr UINT_PTR kAnimTimer = 1;
 constexpr UINT_PTR kWatchTimer = 2;
 constexpr UINT_PTR kCaretTimer = 3;
+constexpr UINT_PTR kWebView2Timer = 4;
 constexpr UINT kAboutCommand = 0x0010;
 
 constexpr float kMargin = 11, kMainWidth = 460, kCommandHeight = 45;
@@ -107,6 +109,7 @@ enum : int {
   kIconBrowse,
   kIconRemove,
   kModsLink,
+  kWebView2Link,
   kTabFirst = 100,
   kFlagRowFirst = 200,
   kBackdrop = 899,
@@ -251,6 +254,10 @@ struct App {
   bool window_seen = false;
   bool minimized_by_us = false;
   FILETIME launched{};
+
+  wv2_status webview2{};
+  bool webview2_job = false;
+  ULONGLONG webview2_wait = 0, webview2_ready = 0, webview2_failure = 0;
 };
 
 App g;
@@ -921,6 +928,73 @@ const wchar_t* nvidia_ended_line() {
                                    : L"NVIDIA's driver closed Roblox. Start it again.";
 }
 
+ULONGLONG webview2_failure_time() {
+  wchar_t home[MAX_PATH];
+  WIN32_FILE_ATTRIBUTE_DATA info;
+  if (!wv2_home(home, MAX_PATH) ||
+      !GetFileAttributesExW((std::wstring(home) + L"\\setup-error.txt").c_str(), GetFileExInfoStandard, &info))
+    return 0;
+  return (static_cast<ULONGLONG>(info.ftLastWriteTime.dwHighDateTime) << 32) | info.ftLastWriteTime.dwLowDateTime;
+}
+
+void end_webview2() {
+  const wv2_status last = g.webview2;
+  g.webview2 = {};
+  g.webview2_job = false;
+  g.webview2_wait = 0;
+  if (!webview2_setup_wanted(g.paths)) {
+    g.webview2.state = WV2_STATE_DONE;
+    g.webview2_ready = GetTickCount64() + 5000;
+    return;
+  }
+  int error = last.state == WV2_STATE_FAILED ? last.error : WV2_OK;
+  if (error == WV2_OK && webview2_failure_time() != g.webview2_failure) error = wv2_last_error(nullptr);
+  g.webview2.state = WV2_STATE_FAILED;
+  g.webview2.error = error == WV2_OK ? WV2_ERROR_INTERNAL : error;
+}
+
+void begin_webview2() {
+  g.webview2 = {};
+  g.webview2.state = WV2_STATE_PREPARING;
+  g.webview2_job = false;
+  g.webview2_failure = webview2_failure_time();
+  g.webview2_wait = GetTickCount64() + 60000;
+  if (!wv2_setup_spawn(g.paths.exe.c_str(), 0)) end_webview2();
+}
+
+bool webview2_row() {
+  return g.stage == Stage::Ready && g.webview2.state != WV2_STATE_IDLE &&
+         (g.webview2.state != WV2_STATE_FAILED || g.detail.empty());
+}
+
+bool webview2_failed() { return webview2_row() && g.webview2.state == WV2_STATE_FAILED; }
+bool webview2_retry() { return webview2_failed() && !g.webview2_job; }
+bool webview2_bar() { return webview2_row() && g.webview2.state < WV2_STATE_DONE; }
+
+float webview2_fraction() {
+  const wv2_status& s = g.webview2;
+  if (s.state == WV2_STATE_PREPARING || s.total <= 0) return -1;
+  return static_cast<float>(std::clamp<LONGLONG>(s.done, 0, s.total)) / static_cast<float>(s.total);
+}
+
+std::wstring webview2_line() {
+  const wv2_status& s = g.webview2;
+  const LONGLONG done = std::clamp<LONGLONG>(s.done, 0, std::max<LONGLONG>(s.total, 0));
+  wchar_t line[64];
+  if (s.state == WV2_STATE_DOWNLOADING && s.total > 0) {
+    std::swprintf(line, 64, L"Setting up WebView2: %d of %d MB", static_cast<int>(done / 1000000),
+                  static_cast<int>(s.total / 1000000));
+    return line;
+  }
+  if (s.state == WV2_STATE_UNPACKING && s.total > 0) {
+    std::swprintf(line, 64, L"Setting up WebView2: %d%%", static_cast<int>(done * 100 / s.total));
+    return line;
+  }
+  if (s.state == WV2_STATE_DONE) return L"WebView2 is ready.";
+  if (s.state != WV2_STATE_FAILED) return L"Setting up WebView2...";
+  return std::wstring(L"Couldn't set up WebView2: ") + wv2_error_text(s.error) + L".";
+}
+
 std::wstring status_line() {
   wchar_t line[160];
   switch (g.stage) {
@@ -936,7 +1010,7 @@ std::wstring status_line() {
       if (g.backend != L"Vulkan") std::swprintf(line, 160, L"It exited with code %lu.", g.exit_code);
       else std::swprintf(line, 160, L"It exited with code %lu. Try OpenGL ES in Settings if it keeps happening.", g.exit_code);
       return line;
-    default: return g.detail;
+    default: return webview2_row() ? webview2_line() : g.detail;
   }
 }
 
@@ -944,7 +1018,8 @@ float main_content_height() {
   float h = 101;
   if (!status_line().empty()) h += 20;
   if (g.stage == Stage::Failed && !g.wrong_date.empty()) h += 20;
-  if (busy()) h += 22;
+  if (webview2_retry()) h += 20;
+  if (busy() || webview2_bar()) h += 22;
   if (g.stage == Stage::Failed && g.details) h += 11 + 16 + 15 * static_cast<float>(std::max<size_t>(1, g.error_lines.size())) + 7 + 15;
   return h;
 }
@@ -988,7 +1063,7 @@ void draw_main() {
   y += 9;
   const std::wstring status = status_line();
   if (!status.empty()) {
-    text(status, g.fonts.body, rect(x, y, tw, 15), g.stage == Stage::Failed ? kError : kText);
+    text(status, g.fonts.body, rect(x, y, tw, 15), g.stage == Stage::Failed || webview2_failed() ? kError : kText);
     y += 20;
   }
   if (g.stage == Stage::Failed && !g.wrong_date.empty()) {
@@ -997,8 +1072,19 @@ void draw_main() {
     });
     y += 20;
   }
+  if (webview2_retry()) {
+    link(kWebView2Link, x, y, L"Try again", [] {
+      begin_webview2();
+      fit_main_window();
+    });
+    y += 20;
+  }
   if (busy()) {
     progress_bar(rect(x, y, tw, 15), static_cast<float>(g.unpacked.load()), g.stage == Stage::Launching);
+    y += 22;
+  } else if (webview2_bar()) {
+    const float done = webview2_fraction();
+    progress_bar(rect(x, y, tw, 15), done, done < 0);
     y += 22;
   }
   if (g.stage == Stage::Failed && g.details) {
@@ -2105,6 +2191,32 @@ void watch_child() {
   repaint(g.main);
 }
 
+void watch_webview2() {
+  const wv2_status before = g.webview2;
+  const bool job = g.webview2_job;
+  wv2_status status;
+  if (wv2_status_read(&status)) {
+    if (status.state == WV2_STATE_IDLE) status.state = WV2_STATE_PREPARING;
+    if (status.state == WV2_STATE_FAILED && status.error == WV2_OK) status.error = WV2_ERROR_INTERNAL;
+    g.webview2 = status;
+    g.webview2_job = true;
+    g.webview2_wait = 0;
+  } else if (g.webview2_job || (g.webview2_wait && (GetTickCount64() >= g.webview2_wait ||
+                                                    webview2_failure_time() != g.webview2_failure ||
+                                                    !webview2_setup_wanted(g.paths)))) {
+    end_webview2();
+  } else if (g.webview2.state == WV2_STATE_DONE && GetTickCount64() >= g.webview2_ready) {
+    g.webview2 = {};
+    KillTimer(g.main.hwnd, kWebView2Timer);
+  }
+  const wv2_status& now = g.webview2;
+  if (job == g.webview2_job && before.state == now.state && before.error == now.error && before.done == now.done &&
+      before.total == now.total)
+    return;
+  fit_main_window();
+  repaint(g.main);
+}
+
 Canvas* canvas_of(HWND hwnd) { return reinterpret_cast<Canvas*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA)); }
 
 void track_mouse(LPARAM lp) {
@@ -2328,6 +2440,7 @@ LRESULT handle(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case WM_TIMER:
       if (wp == kAnimTimer) step_animation();
       else if (wp == kWatchTimer) watch_child();
+      else if (wp == kWebView2Timer) watch_webview2();
       else if (wp == kCaretTimer) {
         g.caret_on = !g.caret_on;
         if (!g.focus) KillTimer(hwnd, kCaretTimer);
@@ -2576,7 +2689,16 @@ int render_ui(const std::wstring& dir) {
                {L"main-running", Stage::Running, false, 0},
                {L"main-failed", Stage::Failed, true, kDetailsButton},
                {L"main-clock", Stage::Failed, false, 0},
-               {L"main-old-gpu", Stage::Failed, false, 0}};
+               {L"main-old-gpu", Stage::Failed, false, 0},
+               {L"main-webview2-downloading", Stage::Ready, false, 0},
+               {L"main-webview2-unpacking", Stage::Ready, false, 0},
+               {L"main-webview2-ready", Stage::Ready, false, 0},
+               {L"main-webview2-failed", Stage::Ready, false, 0}};
+  const std::pair<const wchar_t*, wv2_status> setups[] = {
+      {L"main-webview2-downloading", {WV2_STATE_DOWNLOADING, WV2_OK, 0, 0, 37400000, 150552536}},
+      {L"main-webview2-unpacking", {WV2_STATE_UNPACKING, WV2_OK, 0, 0, 209302290, 465116199}},
+      {L"main-webview2-ready", {WV2_STATE_DONE, WV2_OK, 0, 0, 0, 0}},
+      {L"main-webview2-failed", {WV2_STATE_FAILED, WV2_ERROR_BLOCKED, 0, 0, 0, 0}}};
   struct DialogShot {
     const wchar_t* name;
     Tab tab;
@@ -2603,6 +2725,9 @@ int render_ui(const std::wstring& dir) {
       g.exit_code = 1;
       g.wrong_date = wcscmp(shot.name, L"main-clock") == 0 ? L"1 January 2018" : L"";
       g.gpu_too_old = wcscmp(shot.name, L"main-old-gpu") == 0;
+      g.webview2 = {};
+      for (const auto& [name, status] : setups)
+        if (wcscmp(shot.name, name) == 0) g.webview2 = status;
       g.detail = shot.stage == Stage::Launching ? L"Checking for a newer Roblox..." : L"";
       g.main.springs.clear();
       g.main.hot = shot.hot;
@@ -2679,9 +2804,11 @@ int run_launcher(HINSTANCE instance, int show) {
 
   g.main.draw = draw_main;
   if (!runtime_ready(g.paths)) g.stage = Stage::Unpacking;
+  if (webview2_setup_wanted(g.paths)) begin_webview2();
   HWND hwnd = create_window(g.main, kMainClass, L"Blox7", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 0, kMainWidth,
                             main_content_height() + kCommandHeight, nullptr);
   if (!hwnd) return 1;
+  if (g.webview2.state != WV2_STATE_IDLE) SetTimer(hwnd, kWebView2Timer, 500, nullptr);
   if (HMENU menu = GetSystemMenu(hwnd, FALSE)) {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, kAboutCommand, L"About Blox7...");
