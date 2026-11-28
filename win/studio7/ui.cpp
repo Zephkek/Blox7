@@ -640,7 +640,7 @@ void refresh_info() {
     g.version = widen(name);
   }
   g.webview = webview_version(webview, 64) ? webview : L"";
-  g.webview_wanted = windows_seven() && webview_wanted();
+  g.webview_wanted = windows_before_ten() && webview_wanted();
   g.webview_error = g.webview_wanted ? wv2_last_error(nullptr) : WV2_OK;
   g.automatic = updates_automatic(&g.paths);
 }
@@ -692,7 +692,7 @@ std::wstring headline() {
     case Stage::Starting: return L"Starting Roblox Studio";
     case Stage::Running: return L"Roblox Studio is running";
     case Stage::Failed: return g.failed_start ? L"Roblox Studio didn't start" : L"Roblox Studio couldn't be set up";
-    case Stage::Unsupported: return L"Studio7 is for Windows 7";
+    case Stage::Unsupported: return L"Studio7 is for Windows 7, 8 and 8.1";
     default: return L"Roblox Studio " + g.version + L" is ready";
   }
 }
@@ -971,9 +971,10 @@ void page_about(const D2D1_RECT_F& page) {
   draw_logo(x + 24, y + 24, 36);
   text(L"Studio7", g.fonts.instruction, rect(x + 60, y, w - 60, 21), kInstruction);
   text(L"Version " + widen(S7_VERSION), g.fonts.body, rect(x + 60, y + 24, w - 60, 15), kSecondary);
-  text(L"Roblox Studio ported back to Windows 7.", g.fonts.body, rect(x + 60, y + 39, w - 60, 15), kText);
+  text(L"Roblox Studio ported back to Windows 7, 8 and 8.1.", g.fonts.body, rect(x + 60, y + 39, w - 60, 15), kText);
   y += 66;
-  text(L"Runs Roblox's own Studio on Windows 7 by giving it the Windows functions it looks for. Part of Blox7.",
+  text(L"Runs Roblox's own Studio on Windows 7, 8 and 8.1 by giving it the Windows functions it looks for. "
+       L"Part of Blox7.",
        g.fonts.paragraph, rect(x, y, w, 32), kText);
   y += 40;
   text(L"Studio7 is not affiliated with or endorsed by Roblox Corporation or Microsoft. Roblox and the Roblox logo are "
@@ -1810,11 +1811,9 @@ int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::ws
   g.webview_started = webview_started ? GetTickCount64() : 0;
   refresh_info();
   g.webview_busy = webview_running();
-  if (!windows_seven()) {
-    DWORD major = 0, minor = 0, build = 0;
-    windows_version(&major, &minor, &build);
+  if (!windows_before_ten()) {
     g.stage = Stage::Unsupported;
-    g.detail = major >= 10 ? L"This Windows runs Roblox Studio from roblox.com as it is." : L"Windows 8 and 8.1 aren't supported yet.";
+    g.detail = L"This Windows runs Roblox Studio from roblox.com as it is.";
   } else if (!failure.empty()) {
     fail(true, failure);
   } else if (!g.version.empty()) {

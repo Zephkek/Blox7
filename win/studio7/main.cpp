@@ -15,10 +15,10 @@ std::wstring widen(const char* text) {
   return out;
 }
 
-bool windows_seven() {
+bool windows_before_ten() {
   DWORD major = 0, minor = 0, build = 0;
   windows_version(&major, &minor, &build);
-  return major == 6 && minor == 1;
+  return major == 6 && minor >= 1;
 }
 
 void start_background() {
@@ -44,7 +44,7 @@ bool self_updates(const Paths& paths) {
 
 bool update_self(const Paths& paths) {
   wchar_t self[MAX_PATH];
-  if (paths.custom || !windows_seven() || !self_updates(paths)) return false;
+  if (paths.custom || !windows_before_ten() || !self_updates(paths)) return false;
   const DWORD length = GetModuleFileNameW(nullptr, self, MAX_PATH);
   if (!length || length >= MAX_PATH) return false;
   UpdateInfo info;
@@ -126,14 +126,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     return 1;
   }
   if (argv && argc == 2 && wcscmp(argv[1], L"--background") == 0) {
-    if (!studio7::windows_seven()) return 0;
+    if (!studio7::windows_before_ten()) return 0;
     links_refresh(&paths);
     studio_background(&paths);
     studio7::update_self(paths);
     return 0;
   }
   const bool webview_started =
-      length && length < MAX_PATH && studio7::windows_seven() && webview_wanted() && wv2_setup_spawn(self, 0);
+      length && length < MAX_PATH && studio7::windows_before_ten() && webview_wanted() && wv2_setup_spawn(self, 0);
   std::wstring arguments, failure;
   bool open = false;
   if (argv && argc == 2 && is_link(argv[1])) {
@@ -146,6 +146,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   if (open && webview_started && !studio_running(&paths) && studio7::launcher_open() && studio7::hand_over(arguments))
     return 0;
   const bool wait = open && webview_started && !studio_running(&paths) && !studio7::launcher_open();
-  if (open && studio7::windows_seven() && !wait && open_now(paths, arguments, &failure)) return 0;
+  if (open && studio7::windows_before_ten() && !wait && open_now(paths, arguments, &failure)) return 0;
   return studio7::run_launcher(instance, show, paths, arguments, open && failure.empty(), failure, webview_started);
 }

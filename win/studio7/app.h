@@ -8,7 +8,7 @@
 namespace studio7 {
 
 std::wstring widen(const char* text);
-bool windows_seven();
+bool windows_before_ten();
 bool launcher_open();
 bool hand_over(const std::wstring& arguments);
 void start_background();

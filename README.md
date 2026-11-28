@@ -19,7 +19,7 @@ Windows 10 and 11 too.
   <img src="docs/lobby.jpg" width="32%" alt="A murder mystery lobby">
 </p>
 
-Studio7 is the second program here, and it runs Roblox Studio on Windows 7.
+Studio7 is the second program here, and it runs Roblox Studio on Windows 7, 8 and 8.1.
 
 <p align="center">
   <img src="docs/studio7fanart.jpg" alt="Roblox Studio running on Windows 7">
@@ -33,8 +33,8 @@ to download them once, they update themselves.
 Run `Blox7.exe` and press Play. The first start downloads Roblox (about 150 MB), then you sign in inside the Roblox
 window. It needs 64-bit Windows 7 SP1 or newer and a Vulkan or OpenGL driver.
 
-Run `Studio7.exe` and press Install. It downloads Roblox Studio (about 570 MB). It needs 64-bit Windows 7 SP1.
-Windows 8 and 8.1 aren't supported yet, and Windows 10 and 11 don't need it.
+Run `Studio7.exe` and press Install. It downloads Roblox Studio (about 570 MB). It needs 64-bit Windows 7 SP1, 8 or 8.1.
+Windows 10 and 11 don't need it.
 
 Both need the WebView2 Runtime for the sign-in page. Windows 7, 8 and 8.1 stop at WebView2 109.
 
