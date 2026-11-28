@@ -91,7 +91,8 @@ static BOOL path_checked(const Trust *t, PCCERT_CHAIN_CONTEXT chain, size_t used
         PCCERT_CONTEXT cert = path->rgpElement[i]->pCertContext;
 
         if (cert->cbCertEncoded != t->lengths[i] || memcmp(cert->pbCertEncoded, t->certs[i], t->lengths[i]) ||
-            (path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING))
+            (path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING) ||
+            CertFindExtension(szOID_NAME_CONSTRAINTS, cert->pCertInfo->cExtension, cert->pCertInfo->rgExtension))
             return FALSE;
     }
     return TRUE;
