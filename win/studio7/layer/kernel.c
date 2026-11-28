@@ -29,11 +29,21 @@ static BOOL search_flags_missing(void) {
     return state == 2;
 }
 
+static BOOL from_webview2_loader(void *at) {
+    HMODULE caller = NULL, loader = GetModuleHandleW(L"WebView2Loader.dll");
+
+    return loader &&
+           GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              (LPCWSTR)at, &caller) &&
+           caller == loader;
+}
+
 HMODULE WINAPI s7_LoadLibraryExW(LPCWSTR name, HANDLE file, DWORD flags) {
     WCHAR path[MAX_PATH];
     UINT length, i;
 
-    if (flags != LOAD_LIBRARY_SEARCH_SYSTEM32 || file || !name || !name[0] || !search_flags_missing())
+    if (flags != LOAD_LIBRARY_SEARCH_SYSTEM32 || file || !name || !name[0] || !search_flags_missing() ||
+        !from_webview2_loader(__builtin_return_address(0)))
         return LoadLibraryExW(name, file, flags);
     for (i = 0; name[i]; i++)
         if (name[i] == L'\\' || name[i] == L'/' || name[i] == L':') return LoadLibraryExW(name, file, flags);

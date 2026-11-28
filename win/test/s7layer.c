@@ -737,27 +737,46 @@ static void test_events(void) {
 }
 
 typedef HMODULE(WINAPI *LoadFn)(LPCWSTR, HANDLE, DWORD);
+typedef HMODULE(WINAPI *LoaderFn)(LPCWSTR, DWORD);
 
 static void test_load(void) {
     LoadFn ours = (LoadFn)(void *)GetProcAddress(GetModuleHandleW(L"s7kernel.dll"), "LoadLibraryExW");
     LoadFn real = (LoadFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryExW");
     BOOL known = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "AddDllDirectory") != NULL;
-    WCHAR system[MAX_PATH], copy[MAX_PATH], from[MAX_PATH], *slash;
-    HMODULE a, b, c;
+    WCHAR system[MAX_PATH], copy[MAX_PATH], from[MAX_PATH], helper[MAX_PATH], *slash;
+    HMODULE a, b, c, loader;
+    LoaderFn as_loader;
     DWORD ea, eb;
 
+    GetModuleFileNameW(NULL, helper, MAX_PATH);
+    slash = wcsrchr(helper, L'\\');
+    lstrcpyW(slash ? slash + 1 : helper, L"WebView2Loader.dll");
+    loader = LoadLibraryW(helper);
+    as_loader = loader ? (LoaderFn)(void *)GetProcAddress(loader, "s7_load_as_loader") : NULL;
+    if (!as_loader) {
+        check(0, "load: test loader", "no WebView2Loader.dll test copy next to the exe (error %lu)", GetLastError());
+        return;
+    }
     GetSystemDirectoryW(system, MAX_PATH);
     lstrcatW(system, L"\\version.dll");
     SetLastError(0);
     b = real(L"version.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     eb = GetLastError();
-    a = ours(L"version.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    a = as_loader(L"version.dll", LOAD_LIBRARY_SEARCH_SYSTEM32);
     check(ours && ours != real && a && a == GetModuleHandleW(system) &&
               (known ? a == b : !b && eb == ERROR_INVALID_PARAMETER),
-          "load: system32 by name", "stand-in %p, Windows %p (error %lu), %s", (void *)a, (void *)b, eb,
-          known ? "Windows knows the flag" : "Windows lacks the flag");
+          "load: system32 by name for webview2loader", "stand-in %p, Windows %p (error %lu), %s", (void *)a,
+          (void *)b, eb, known ? "Windows knows the flag" : "Windows lacks the flag");
     SetLastError(0);
-    a = ours(L"s7-not-there.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    c = ours(L"kernel32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    ea = GetLastError();
+    SetLastError(0);
+    b = real(L"kernel32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    eb = GetLastError();
+    check(c == b && (c || ea == eb), "load: other callers get what Windows gives",
+          "stand-in %p error %lu, Windows %p error %lu", (void *)c, ea, (void *)b, eb);
+    SetLastError(0);
+    a = as_loader(L"s7-not-there.dll", LOAD_LIBRARY_SEARCH_SYSTEM32);
     ea = GetLastError();
     check(!a && ea == ERROR_MOD_NOT_FOUND, "load: missing dll", "error %lu", ea);
 
@@ -770,7 +789,7 @@ static void test_load(void) {
         return;
     }
     SetLastError(0);
-    a = ours(L"s7loadtest.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    a = as_loader(L"s7loadtest.dll", LOAD_LIBRARY_SEARCH_SYSTEM32);
     ea = GetLastError();
     check(!a && ea == ERROR_MOD_NOT_FOUND, "load: only system32 is searched",
           "a dll next to the exe gives %p, error %lu", (void *)a, ea);

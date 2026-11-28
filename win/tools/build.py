@@ -599,6 +599,8 @@ def build_studio7():
     dlls = [os.path.join(layer, name + '.dll') for name, _, _, _ in S7_LAYER]
     for dll in dlls:
         shutil.copyfile(dll, os.path.join(test, os.path.basename(dll)))
+    subprocess.check_call([cc, '-O2', '-Wall', '-Wextra', '-shared', os.path.join(WIN, 'test', 's7loader.c'), '-o',
+                           os.path.join(test, 'WebView2Loader.dll'), '-static'] + WIN7)
     subprocess.check_call([cc, '-O2', '-Wall', '-Wextra', '-mconsole', os.path.join(WIN, 'test', 's7layer.c'), '-o',
                            os.path.join(test, 's7layer.exe')] + dlls + ['-lgdi32', '-lole32', '-static'] + WIN7)
     print('built', os.path.join(gen, 's7tool.exe'), 'and', os.path.join(test, 's7layer.exe'))
