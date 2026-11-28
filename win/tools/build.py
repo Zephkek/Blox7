@@ -509,7 +509,8 @@ Studio7.exe contains the software below, each under its own license.
  3. Mozilla CA certificate list - https://curl.se/docs/caextract.html
     The root certificates for that check, inside Studio7.exe, from Mozilla's certdata.txt as curl publishes it,
     under the Mozilla Public License 2.0. Its source is at
-    https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/certdata.txt.
+    https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/certdata.txt. Studio7 also refuses the
+    certificates Mozilla revoked in OneCRL.
 
  4. Microsoft Edge WebView2 Runtime - https://developer.microsoft.com/microsoft-edge/webview2/
     It isn't part of Studio7.exe: on Windows 7 Studio7 downloads WebView2 Runtime 109.0.1518.140 from

@@ -110,7 +110,8 @@ PARTS = [
     ('Mozilla CA certificate list', 'https://curl.se/docs/caextract.html', 'The trusted root certificates '
      '(root/etc/ssl/certs/ca-certificates.crt, and inside Blox7.exe for the BearSSL check above), from Mozilla\'s '
      'certdata.txt as curl publishes it, under the Mozilla Public License 2.0. Its source is at '
-     'https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/certdata.txt.', [f'{LIC}/mpl-2.0.txt']),
+     'https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/certdata.txt. Blox7.exe also refuses the '
+     'certificates Mozilla revoked in OneCRL.', [f'{LIC}/mpl-2.0.txt']),
 ]
 
 HEADER = """Blox7 third-party notices
