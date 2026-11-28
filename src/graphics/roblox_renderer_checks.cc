@@ -137,7 +137,7 @@ bool RobloxFindsVulkanDevice() {
       found = AnyDeviceRobloxPicks(get_proc, instance);
       const auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(
           get_proc(instance, "vkDestroyInstance"));
-      if (destroy != nullptr) {
+      if (!found && destroy != nullptr) {
         destroy(instance, nullptr);
       }
     }
