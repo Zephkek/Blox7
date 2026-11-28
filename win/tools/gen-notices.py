@@ -34,8 +34,8 @@ PARTS = [
     ('curl', 'https://curl.se', 'HTTP downloads.', [f'{SRC}/curl/COPYING']),
     ('BearSSL', 'https://bearssl.org', 'TLS for the check for a newer Blox7.exe and for the WebView2 109 download, '
      'inside Blox7.exe. Windows decides '
-     'which certificates are trusted, and when it doesn\'t have a site\'s root certificate, BearSSL checks the site '
-     'against the Mozilla CA certificate list below.', [f'{SRC}/bearssl/LICENSE.txt']),
+     'which certificates are trusted, and when it doesn\'t have a site\'s root certificate, or that root has expired, '
+     'BearSSL checks the site against the Mozilla CA certificate list below.', [f'{SRC}/bearssl/LICENSE.txt']),
     ('libyaml', 'https://github.com/yaml/libyaml', 'Reading config.yaml.', [f'{SRC}/libyaml/License']),
     ('Capstone', 'https://www.capstone-engine.org', 'Disassembly for the updater\'s compatibility checks.',
      [f'{SRC}/capstone/LICENSE.TXT', f'{SRC}/capstone/LICENSE_LLVM.TXT']),

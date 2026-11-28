@@ -503,8 +503,9 @@ Studio7.exe contains the software below, each under its own license.
     Unpacks Roblox's packages.
 
  2. BearSSL - https://bearssl.org
-    TLS 1.2 for the downloads. Windows decides which certificates are trusted, and when it doesn't have a site's
-    root certificate, BearSSL checks the site against the Mozilla CA certificate list below.
+    TLS 1.2 for the downloads. Windows decides which certificates are trusted, and when it doesn't have a
+    site's root certificate, or that root has expired, BearSSL checks the site against the Mozilla CA
+    certificate list below.
 
  3. Mozilla CA certificate list - https://curl.se/docs/caextract.html
     The root certificates for that check, inside Studio7.exe, from Mozilla's certdata.txt as curl publishes it,
