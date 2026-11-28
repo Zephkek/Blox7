@@ -641,7 +641,7 @@ void refresh_info() {
   g.vulkan_driver = vulkan_installed();
   g.backend = graphics_backend(g.paths);
   if (g.backend == L"Vulkan" && !g.vulkan_driver) g.backend = L"OpenGL ES (no Vulkan driver)";
-  else if (g.backend == L"Vulkan" && vulkan_held_back(load_settings(g.paths))) g.backend = L"OpenGL ES (modded Windows 7 driver)";
+  else if (g.backend == L"Vulkan" && vulkan_held_back(load_settings(g.paths))) g.backend = L"OpenGL ES (modded driver)";
   else if (g.backend == L"OpenGL ES" && load_settings(g.paths).angle) g.backend = L"ANGLE (OpenGL ES on Direct3D 11)";
 }
 
@@ -1061,13 +1061,13 @@ void page_graphics(const D2D1_RECT_F& page) {
   const bool held_back = vulkan_held_back(g.pending);
   group(rect(x, y, w, 50), L"Renderer");
   const wchar_t* vulkan_label = !g.vulkan_driver ? L"Vulkan (no Vulkan driver found)"
-                                : modded_windows7_driver(g.pending.gpu) ? L"Vulkan (modded Windows 7 driver, may not work)"
+                                : modded_driver(g.pending.gpu) ? L"Vulkan (modded driver, may not work)"
                                 : L"Vulkan (recommended, fastest)";
   const size_t renderer = vulkan && !held_back ? 0 : g.pending.angle ? 2 : 1;
   combo_row(L"Use:", ix, y + 16, 64, iw - 64, kRenderer, {vulkan_label, L"OpenGL ES", L"ANGLE (OpenGL ES on Direct3D 11)"},
             renderer, true, [](size_t i) {
               g.pending.backend = i == 0 ? L"direct-vulkan" : L"opengl";
-              g.pending.vulkan_on_modded_driver = i == 0 && modded_windows7_driver(g.pending.gpu);
+              g.pending.vulkan_on_modded_driver = i == 0 && modded_driver(g.pending.gpu);
               g.pending.angle = i == 2;
               mark_dirty();
             });

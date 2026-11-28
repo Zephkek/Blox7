@@ -1023,7 +1023,7 @@ void request_gpu(const std::wstring& gpu) {
 void apply_launch_settings(const Paths& paths, bool vulkan_driver) {
   Settings s = load_settings(paths);
   request_gpu(s.gpu);
-  // no vulkan driver (most intel gpus on win7) or a modded win7 driver: this launch runs opengl es, the saved choice stays
+  // no vulkan driver (most intel gpus on win7) or a modded win7/8 driver: this launch runs opengl es, the saved choice stays
   if ((!vulkan_driver && (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan")) ||
       vulkan_held_back(s)) {
     s.backend = L"opengl";
@@ -1463,8 +1463,8 @@ std::vector<AdapterDriver> adapter_drivers() {
 
 }  // namespace
 
-bool modded_windows7_driver(const std::wstring& gpu) {
-  if (!os_info().windows7()) return false;
+bool modded_driver(const std::wstring& gpu) {
+  if (os_info().major != 6) return false;
   static const std::vector<AdapterDriver> adapters = adapter_drivers();
   const bool present = std::any_of(adapters.begin(), adapters.end(),
                                    [&gpu](const AdapterDriver& adapter) { return adapter.id == gpu; });
@@ -1474,7 +1474,7 @@ bool modded_windows7_driver(const std::wstring& gpu) {
 
 bool vulkan_held_back(const Settings& s) {
   return (s.backend == L"direct-vulkan" || s.backend == L"vulkan" || s.backend == L"native-vulkan") &&
-         !s.vulkan_on_modded_driver && modded_windows7_driver(s.gpu);
+         !s.vulkan_on_modded_driver && modded_driver(s.gpu);
 }
 
 }  // namespace blox7

@@ -100,7 +100,7 @@ using Progress = std::function<void(double fraction)>;
 Settings load_settings(const Paths& paths);
 std::wstring save_settings(const Paths& paths, const Settings& settings);
 bool vulkan_installed();
-bool modded_windows7_driver(const std::wstring& gpu);
+bool modded_driver(const std::wstring& gpu);
 bool vulkan_held_back(const Settings& settings);
 void apply_launch_settings(const Paths& paths, bool vulkan_driver = vulkan_installed());
 void refresh_join_links(const Paths& paths);
