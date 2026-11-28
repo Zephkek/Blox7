@@ -39,6 +39,8 @@ int play(int argc, wchar_t** argv) {
   boot_prepare();
   opt_out_of_power_throttling();
   const blox7::Paths paths = blox7::resolve_paths();
+  if (wcscmp(argv[1], L"--w32-run") != 0 && blox7::webview2_setup_wanted(paths))
+    wv2_setup_spawn(paths.exe.c_str(), 0);
   const std::wstring error = blox7::install_runtime(paths, nullptr);
   if (!error.empty()) boot_fail(error.c_str(), 0);
   blox7::hold_runtime(paths);
