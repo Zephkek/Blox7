@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <cctype>
@@ -38,6 +39,7 @@ constexpr UINT kControlMessage = WM_APP + 1;
 constexpr UINT kControlClosed = WM_APP + 2;
 constexpr UINT_PTR kCookieTimer = 1;
 constexpr UINT_PTR kSetupTimer = 2;
+constexpr UINT_PTR kFailureTimer = 3;
 constexpr char kControlMagic[] = "MWVC";
 constexpr char kEventMagic[] = "MWVE";
 constexpr unsigned char kProtocolVersion = 1;
@@ -228,6 +230,11 @@ struct App {
   ULONGLONG setup_since = 0;
   ULONGLONG setup_deadline = 0;
   std::wstring setup_line;
+  const char* failure = nullptr;
+  HRESULT failure_result = S_OK;
+  bool visibility_set = false;
+  bool visible = false;
+  bool signed_in = false;
 };
 
 App g_app;
@@ -238,6 +245,8 @@ void AttachWebView(Surface* surface, std::function<void(Surface*)> ready);
 ICoreWebView2CookieManager* CookieManager(Surface* surface);
 void WaitForSetup();
 void PollSetup();
+void WebView2Failed(const char* reason, HRESULT result);
+void FinishFailure();
 
 // BLOX7_WEBVIEW_TRACE=<dir> (or 1 for <data>\trace-<time>): one jsonl timeline of everything the helper sees,
 // plus chromium's own netlog and log, to diff against the phone. passive only, no Runtime/Page domain,
@@ -2262,32 +2271,10 @@ OSVERSIONINFOW WindowsVersion() {
   return os;
 }
 
-void ExplainMissingRuntime() {
-  const bool old_windows = WindowsVersion().dwMajorVersion < 10;
-  const std::wstring text = std::wstring(L"Signing in needs Microsoft Edge WebView2, and it isn't installed.\n\n") +
-                            (old_windows ? L"This version of Windows needs WebView2 Runtime 109, the last one made for it.\n\n"
-                                         : L"") +
-                            L"Open the download page?";
-  const HWND owner = g_app.primary != nullptr ? g_app.primary->window : nullptr;
-  if (MessageBoxW(owner, text.c_str(), L"Blox7", MB_YESNO | MB_ICONINFORMATION) == IDYES)
-    ShellExecuteW(owner, L"open",
-                  old_windows ? L"https://www.catalog.update.microsoft.com/Search.aspx?q=WebView2%20Runtime%20109"
-                              : L"https://developer.microsoft.com/microsoft-edge/webview2/",
-                  nullptr, nullptr, SW_SHOWNORMAL);
-}
-
-void WebView2Failed(const char* reason, HRESULT result) {
-  Log("cannot start WebView2: 0x%08lx reason=%s", static_cast<unsigned long>(result), reason);
-  if (strcmp(reason, "missing") == 0) ExplainMissingRuntime();
-  g_app.startup_failed = true;
-  BeginTermination("WebView2 start-up failed");
-}
-
-void WebView2StartFailed(HRESULT result) {
-  WebView2Failed(result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) ? "start"
-                 : RuntimeSetting()                                  ? "setting"
-                                                                     : "missing",
-                 result);
+const char* StartFailure(HRESULT result) {
+  if (result != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) return "start";
+  if (RuntimeSetting()) return "setting";
+  return g_app.runtime_folder.empty() ? "missing" : "start";
 }
 
 bool IsUsableUserAgent(const std::string& agent) {
@@ -2304,7 +2291,8 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
   if (!user_agent_argument.empty()) arguments += (arguments.empty() ? L"" : L" ") + user_agent_argument;
   SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", arguments.empty() ? nullptr : arguments.c_str());
   if (!RuntimeInstalled()) {
-    WebView2StartFailed(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+    const HRESULT missing = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    WebView2Failed(StartFailure(missing), missing);
     return;
   }
   const HRESULT started = g_create_environment(
@@ -2312,7 +2300,7 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
       MakeHandler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, HRESULT, ICoreWebView2Environment*>(
           [](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
             if (FAILED(result) || environment == nullptr) {
-              WebView2StartFailed(result);
+              WebView2Failed(StartFailure(result), result);
               return S_OK;
             }
             environment->AddRef();
@@ -2334,7 +2322,7 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
             });
             return S_OK;
           }));
-  if (FAILED(started)) WebView2StartFailed(started);
+  if (FAILED(started)) WebView2Failed(StartFailure(started), started);
 }
 
 std::string BrowserUserAgentKey() {
@@ -2453,7 +2441,7 @@ bool NeedsSetup() {
 }
 
 void StartWebView2(const std::string& first_url) {
-  if (g_app.webview2_requested || g_app.terminating) return;
+  if (g_app.webview2_requested || g_app.terminating || g_app.failure != nullptr) return;
   g_app.webview2_requested = true;
   if (NeedsSetup()) {
     WaitForSetup();
@@ -2497,7 +2485,11 @@ void ApplyControl(const ControlCommand& command) {
       if (primary != nullptr) SetWindowTextW(primary->window, Wide(command.payload).c_str());
       break;
     case Op::kSetVisible:
-      if (primary != nullptr) {
+      g_app.visibility_set = true;
+      g_app.visible = command.flag;
+      if (g_app.failure != nullptr) {
+        FinishFailure();
+      } else if (primary != nullptr) {
         if (command.flag) {
           ShowWindow(primary->window, SW_SHOW);
           SetForegroundWindow(primary->window);
@@ -2541,6 +2533,7 @@ void ApplyControl(const ControlCommand& command) {
     case Op::kClearRobloxCookie:
     case Op::kRetainPersistentRobloxCookie:
       ClearSensitive(&g_app.pending_cookie);
+      g_app.signed_in = command.operation == Op::kSetRobloxCookie;
       if (command.operation == Op::kSetRobloxCookie) {
         g_app.pending_cookie = command.payload;
         g_app.cookie_operation = CookieOperation::kSet;
@@ -2582,6 +2575,9 @@ LRESULT CALLBACK MessageProc(HWND window, UINT message, WPARAM wparam, LPARAM lp
         RequestRobloxCookie();
       } else if (wparam == kSetupTimer) {
         PollSetup();
+      } else if (wparam == kFailureTimer) {
+        g_app.visible = true;
+        FinishFailure();
       } else if (wparam == kTraceTimer) {
         TraceWindowState();
         std::lock_guard<std::mutex> hold(g_trace.lock);
@@ -2604,18 +2600,18 @@ std::string DropForeignVariables() {
   return dropped;
 }
 
-bool LoadWebView2() {
+HRESULT LoadWebView2() {
   wchar_t path[MAX_PATH];
   GetModuleFileNameW(nullptr, path, MAX_PATH);
   if (wchar_t* slash = wcsrchr(path, L'\\')) wcscpy(slash + 1, L"WebView2Loader.dll");
   HMODULE loader = LoadLibraryW(path);
-  if (loader == nullptr) return false;
+  if (loader == nullptr) return HRESULT_FROM_WIN32(GetLastError());
   delayload_guard_loader = loader;
   g_create_environment =
       reinterpret_cast<CreateEnvironmentFn>(GetProcAddress(loader, "CreateCoreWebView2EnvironmentWithOptions"));
   g_browser_version =
       reinterpret_cast<BrowserVersionFn>(GetProcAddress(loader, "GetAvailableCoreWebView2BrowserVersionString"));
-  return g_create_environment != nullptr;
+  return g_create_environment != nullptr ? S_OK : HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
 }
 
 std::wstring OwnRuntimeFolder() {
@@ -2741,6 +2737,164 @@ void PollSetup() {
   StartWebView2(g_app.pending_url);
 }
 
+const char* RuntimeSourceName() {
+  if (RuntimeSetting()) return "setting";
+  if (g_app.runtime_folder.empty()) return "installed";
+  wchar_t own[MAX_PATH];
+  return wv2_folder(own, MAX_PATH) && _wcsicmp(own, g_app.runtime_folder.c_str()) == 0 ? "blox7" : "bundled";
+}
+
+void LogFailure(const char* reason, HRESULT result) {
+  OSVERSIONINFOEXW os{};
+  os.dwOSVersionInfoSize = sizeof os;
+  if (const auto get = reinterpret_cast<LONG(WINAPI*)(OSVERSIONINFOEXW*)>(
+          reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion")))) {
+    get(&os);
+  }
+  const HMODULE advapi = GetModuleHandleW(L"advapi32.dll");
+  const bool add_dll_directory = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "AddDllDirectory") != nullptr;
+  const bool event_set_information = advapi != nullptr && GetProcAddress(advapi, "EventSetInformation") != nullptr;
+  const std::string error = strcmp(reason, "setup") == 0 ? " error=" + std::to_string(wv2_last_error(nullptr)) : "";
+  const std::string version = RuntimeVersion();
+  Log("cannot start WebView2: 0x%08lx reason=%s%s windows=%d.%lu.%lu sp%u AddDllDirectory=%s EventSetInformation=%s "
+      "runtime=%s %s",
+      static_cast<unsigned long>(result), reason, error.c_str(), wv2_windows_major(),
+      *reinterpret_cast<const volatile ULONG*>(0x7FFE0270), os.dwBuildNumber,
+      static_cast<unsigned>(os.wServicePackMajor), add_dll_directory ? "yes" : "no",
+      event_set_information ? "yes" : "no", RuntimeSourceName(), version.empty() ? "none" : version.c_str());
+}
+
+bool FirstTimeTold(const char* reason) {
+  DWORD parent = 0;
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot != INVALID_HANDLE_VALUE) {
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof entry;
+    for (BOOL more = Process32FirstW(snapshot, &entry); more && parent == 0; more = Process32NextW(snapshot, &entry)) {
+      if (entry.th32ProcessID == GetCurrentProcessId()) parent = entry.th32ParentProcessID;
+    }
+    CloseHandle(snapshot);
+  }
+  FILETIME created{}, exited{}, kernel{}, user{};
+  if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, parent)) {
+    GetProcessTimes(process, &created, &exited, &kernel, &user);
+    CloseHandle(process);
+  }
+  const std::wstring session =
+      L"told-" + std::to_wstring(parent) + L"-" + std::to_wstring(FileTimeValue(created)) + L"-";
+  WIN32_FIND_DATAW found;
+  HANDLE search = FindFirstFileW((g_app.data_directory + L"\\told-*").c_str(), &found);
+  if (search != INVALID_HANDLE_VALUE) {
+    do {
+      if (wcsncmp(found.cFileName, session.c_str(), session.size()) != 0) {
+        DeleteFileW((g_app.data_directory + L"\\" + found.cFileName).c_str());
+      }
+    } while (FindNextFileW(search, &found));
+    FindClose(search);
+  }
+  HANDLE marker = CreateFileW((g_app.data_directory + L"\\" + session + Wide(reason)).c_str(), GENERIC_WRITE, 0,
+                              nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (marker == INVALID_HANDLE_VALUE) return GetLastError() != ERROR_FILE_EXISTS;
+  CloseHandle(marker);
+  return true;
+}
+
+void ShowExplanation() {
+  wchar_t exe[MAX_PATH];
+  const DWORD size = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  if (size == 0 || size >= MAX_PATH) return;
+  wchar_t result[16];
+  _snwprintf(result, 16, L"0x%08lX", static_cast<unsigned long>(g_app.failure_result));
+  std::wstring command = L"\"" + std::wstring(exe) + L"\" --explain " + Wide(g_app.failure) + L" --hr " + result +
+                         L" --purpose " + (g_app.security_check ? L"check" : L"page") + L" --signed-in " +
+                         (g_app.signed_in ? L"1" : L"0");
+  STARTUPINFOW startup{};
+  startup.cb = sizeof startup;
+  PROCESS_INFORMATION process{};
+  if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED, nullptr, nullptr, &startup,
+                      &process)) {
+    return;
+  }
+  AllowSetForegroundWindow(process.dwProcessId);
+  ResumeThread(process.hThread);
+  CloseHandle(process.hThread);
+  CloseHandle(process.hProcess);
+}
+
+void WebView2Failed(const char* reason, HRESULT result) {
+  if (g_app.failure != nullptr || g_app.terminating) return;
+  g_app.failure = reason;
+  g_app.failure_result = result;
+  g_app.startup_failed = true;
+  LogFailure(reason, result);
+  if (g_app.visibility_set) {
+    FinishFailure();
+  } else {
+    SetTimer(g_app.message_window, kFailureTimer, 5000, nullptr);
+  }
+}
+
+void FinishFailure() {
+  if (g_app.terminating || g_app.failure == nullptr) return;
+  KillTimer(g_app.message_window, kFailureTimer);
+  if (g_app.visible && GetEnvironmentVariableW(L"BLOX7_NO_DIALOGS", nullptr, 0) == 0 && FirstTimeTold(g_app.failure)) {
+    ShowExplanation();
+  }
+  BeginTermination("WebView2 start-up failed");
+}
+
+struct Explanation {
+  std::wstring reason;
+  HRESULT result = S_OK;
+  bool check = false;
+  bool signed_in = false;
+};
+
+std::wstring ExplanationText(const Explanation& explanation, bool* ask) {
+  const std::wstring quick =
+      L"You can still sign in: press Quick sign-in in the Roblox window and approve the code in the Roblox app on "
+      L"your phone (More > Quick sign in).";
+  const bool offer_quick = explanation.check && !explanation.signed_in;
+  if (explanation.reason == L"setup") {
+    const int error = wv2_last_error(nullptr);
+    const std::wstring why = wv2_error_text(error == WV2_OK ? WV2_ERROR_INTERNAL : error);
+    const std::wstring needs = L"WebView2, which Blox7 couldn't set up on this PC: " + why + L".\n\n";
+    if (offer_quick) return L"Roblox wants to check it's you, and that check needs " + needs + quick;
+    return L"This Roblox page needs " + needs + L"Open Blox7 and it will try again.";
+  }
+  if (explanation.reason == L"start") {
+    wchar_t text[128];
+    _snwprintf(text, 128, L"WebView2 couldn't start (error 0x%08lX). Windows or an antivirus may be blocking it.",
+               static_cast<unsigned long>(explanation.result));
+    return offer_quick ? std::wstring(text) + L"\n\n" + quick : std::wstring(text);
+  }
+  if (explanation.reason == L"loader") {
+    return L"Part of Blox7 is missing (WebView2Loader.dll). An antivirus may have removed it.";
+  }
+  if (explanation.reason == L"setting") {
+    const wchar_t* folder = _wgetenv(L"BLOX7_WEBVIEW2_RUNTIME");
+    return L"The webview2_runtime folder in launcher.ini isn't a WebView2 runtime:\n" +
+           std::wstring(folder != nullptr ? folder : L"");
+  }
+  *ask = wv2_windows_major() >= 10;
+  return std::wstring(L"This Roblox page needs Microsoft Edge WebView2, which isn't installed.") +
+         (*ask ? L"\n\nOpen Microsoft's WebView2 page?" : L"");
+}
+
+int Explain(const Explanation& explanation) {
+  SetProcessDPIAware();
+  bool ask = false;
+  const std::wstring text = ExplanationText(explanation, &ask);
+  const UINT style = (ask ? MB_YESNO : MB_OK) | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
+  if (MessageBoxW(nullptr, text.c_str(), L"Blox7", style) == IDYES && ask &&
+      SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
+    ShellExecuteW(nullptr, L"open", L"https://developer.microsoft.com/microsoft-edge/webview2/", nullptr, nullptr,
+                  SW_SHOWNORMAL);
+    CoUninitialize();
+  }
+  return EXIT_SUCCESS;
+}
+
 bool Connect(int port, const std::string& token) {
   WSADATA wsa;
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
@@ -2765,6 +2919,7 @@ bool Connect(int port, const std::string& token) {
 int wmain(int argc, wchar_t** argv) {
   int port = 0;
   std::string token;
+  Explanation explanation;
   for (int i = 1; i + 1 < argc; i += 2) {
     const std::wstring_view option = argv[i];
     if (option == L"--port") {
@@ -2777,8 +2932,17 @@ int wmain(int argc, wchar_t** argv) {
       g_app.icon = static_cast<HICON>(LoadImageW(nullptr, argv[i + 1], IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
     } else if (option == L"--owner") {
       g_app.owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(_wcstoui64(argv[i + 1], nullptr, 10)));
+    } else if (option == L"--explain") {
+      explanation.reason = argv[i + 1];
+    } else if (option == L"--hr") {
+      explanation.result = static_cast<HRESULT>(wcstoul(argv[i + 1], nullptr, 16));
+    } else if (option == L"--purpose") {
+      explanation.check = wcscmp(argv[i + 1], L"check") == 0;
+    } else if (option == L"--signed-in") {
+      explanation.signed_in = wcscmp(argv[i + 1], L"1") == 0;
     }
   }
+  if (!explanation.reason.empty()) return Explain(explanation);
   if (port <= 0 || port > 65535 || token.empty() || g_app.data_directory.empty()) {
     fprintf(stderr, "usage: blox7_webview_helper.exe --port <port> --token <token> --data <dir> [--icon <file>]\n");
     return EXIT_FAILURE;
@@ -2819,10 +2983,11 @@ int wmain(int argc, wchar_t** argv) {
   Surface* primary = CreateSurfaceWindow(true, nullptr);
   if (delayload_guard_needed()) AddVectoredExceptionHandler(1, delayload_guard_handler);
   const std::string ignored = DropForeignVariables();
-  if (primary == nullptr || !LoadWebView2()) {
+  if (primary == nullptr) {
     Log("WebView2 is unavailable: WebView2Loader.dll or the window could not be loaded");
     return EXIT_FAILURE;
   }
+  const HRESULT loaded = LoadWebView2();
   g_app.primary = primary;
   // ready once the window exists, webview2's first start can blow the readiness deadline
   if (!SendEvent(WebViewHelperEventType::kReady, {})) {
@@ -2850,6 +3015,7 @@ int wmain(int argc, wchar_t** argv) {
                                    {"arguments", Utf8(g_app.browser_arguments.c_str())}});
   SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
                           g_app.browser_arguments.empty() ? nullptr : g_app.browser_arguments.c_str());
+  if (FAILED(loaded)) WebView2Failed("loader", loaded);
 
   MSG message;
   while (GetMessageW(&message, nullptr, 0, 0) > 0) {
