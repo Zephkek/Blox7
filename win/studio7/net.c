@@ -9,6 +9,7 @@
 
 #define MAX_CHAIN 8
 #define MAX_CERT 8192
+#define ROOT_MISSING (CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_PARTIAL_CHAIN)
 
 typedef struct {
     const br_x509_class *vtable;
@@ -76,17 +77,31 @@ static void trust_end_cert(const br_x509_class **context) {
 }
 
 static BOOL root_missing(DWORD error, DWORD bits) {
-    DWORD missing = CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_PARTIAL_CHAIN;
-
-    return (error == (DWORD)CERT_E_UNTRUSTEDROOT || error == (DWORD)CERT_E_CHAINING) && (bits & missing) &&
-           !(bits & ~missing);
+    return (error == (DWORD)CERT_E_UNTRUSTEDROOT || error == (DWORD)CERT_E_CHAINING) && (bits & ROOT_MISSING) &&
+           !(bits & ~ROOT_MISSING);
 }
 
-static const br_x509_pkey *trust_roots(Trust *t) {
+static BOOL path_checked(const Trust *t, PCCERT_CHAIN_CONTEXT chain, size_t used) {
+    PCCERT_SIMPLE_CHAIN path;
+    size_t i;
+
+    if (chain->cChain != 1 || chain->rgpChain[0]->cElement < used) return FALSE;
+    path = chain->rgpChain[0];
+    for (i = 0; i < used; i++) {
+        PCCERT_CONTEXT cert = path->rgpElement[i]->pCertContext;
+
+        if (cert->cbCertEncoded != t->lengths[i] || memcmp(cert->pbCertEncoded, t->certs[i], t->lengths[i]) ||
+            (path->rgpElement[i]->TrustStatus.dwErrorStatus & ~ROOT_MISSING))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static const br_x509_pkey *trust_roots(Trust *t, PCCERT_CHAIN_CONTEXT chain) {
     const br_x509_class **x = &t->minimal.vtable;
     FILETIME clock;
     ULONG64 now;
-    size_t live = 0, i;
+    size_t live = 0, used = 0, i;
     unsigned error;
 
     if (!t->host[0]) return NULL;
@@ -97,16 +112,18 @@ static const br_x509_pkey *trust_roots(Trust *t) {
     br_x509_minimal_init_full(&t->minimal, t->roots, live);
     br_x509_minimal_set_time(&t->minimal, (uint32_t)(now / 86400 + 719528), (uint32_t)(now % 86400));
     (*x)->start_chain(x, t->host);
-    for (i = 0; i < (size_t)t->count; i++) {
-        (*x)->start_cert(x, (uint32_t)t->lengths[i]);
-        (*x)->append(x, t->certs[i], t->lengths[i]);
+    while (used < (size_t)t->count && t->minimal.err != BR_ERR_X509_OK) {
+        (*x)->start_cert(x, (uint32_t)t->lengths[used]);
+        (*x)->append(x, t->certs[used], t->lengths[used]);
         (*x)->end_cert(x);
+        used++;
     }
     error = (*x)->end_chain(x);
     if (error) {
         t->error = error;
         return NULL;
     }
+    if (!path_checked(t, chain, used)) return NULL;
     return (*x)->get_pkey(x, &t->usages);
 }
 
@@ -162,7 +179,7 @@ static unsigned trust_end_chain(const br_x509_class **context) {
             goto done;
         }
         t->usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
-    } else if (!root_missing(status.dwError, chain->TrustStatus.dwErrorStatus) || !(key = trust_roots(t))) {
+    } else if (!root_missing(status.dwError, chain->TrustStatus.dwErrorStatus) || !(key = trust_roots(t, chain))) {
         goto done;
     }
     t->key = *key;
