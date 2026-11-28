@@ -824,6 +824,27 @@ int run_poll(const Paths *paths, Run *run) {
     return RUN_SHOWN;
 }
 
+static void webview_remove(void) {
+    static const WCHAR *blox7[] = {L"launcher.ini", L"runtime", L"data"};
+    WCHAR home[MAX_PATH], base[MAX_PATH], path[MAX_PATH], *slash;
+    size_t i;
+
+    if (!wv2_home(home, MAX_PATH)) return;
+    wcscpy(base, home);
+    slash = wcsrchr(base, L'\\');
+    if (!slash) return;
+    *slash = 0;
+    for (i = 0; i < sizeof(blox7) / sizeof(blox7[0]); i++) {
+        join(path, base, blox7[i]);
+        if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) return;
+    }
+    if (!wv2_copy_remove()) return;
+    join(path, home, L"setup.log");
+    DeleteFileW(path);
+    RemoveDirectoryW(home);
+    RemoveDirectoryW(base);
+}
+
 BOOL studio_remove(const Paths *paths) {
     static const WCHAR *files[] = {L"studio7.ini", L"studio7.log", L"studio7.old.log", L"licenses.txt", L"window.ico",
                                    L"studio7.luau"};
@@ -854,6 +875,7 @@ BOOL studio_remove(const Paths *paths) {
         RemoveDirectoryW(path);
     }
     RemoveDirectoryW(paths->base);
+    webview_remove();
     give_turn();
     return TRUE;
 }
