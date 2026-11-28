@@ -32,8 +32,9 @@ PARTS = [
      [f'{SRC}/zlib/contrib/minizip/LICENSE.Info-Zip']),
     ('BoringSSL', 'https://boringssl.googlesource.com/boringssl', 'TLS and cryptography.', [f'{SRC}/boringssl/LICENSE']),
     ('curl', 'https://curl.se', 'HTTP downloads.', [f'{SRC}/curl/COPYING']),
-    ('BearSSL', 'https://bearssl.org', 'TLS for the check for a newer Blox7.exe, inside Blox7.exe. Windows itself '
-     'still decides which certificates are trusted.', [f'{SRC}/bearssl/LICENSE.txt']),
+    ('BearSSL', 'https://bearssl.org', 'TLS for the check for a newer Blox7.exe, inside Blox7.exe. Windows decides '
+     'which certificates are trusted, and when it doesn\'t have a site\'s root certificate, BearSSL checks the site '
+     'against the Mozilla CA certificate list below.', [f'{SRC}/bearssl/LICENSE.txt']),
     ('libyaml', 'https://github.com/yaml/libyaml', 'Reading config.yaml.', [f'{SRC}/libyaml/License']),
     ('Capstone', 'https://www.capstone-engine.org', 'Disassembly for the updater\'s compatibility checks.',
      [f'{SRC}/capstone/LICENSE.TXT', f'{SRC}/capstone/LICENSE_LLVM.TXT']),
@@ -106,9 +107,9 @@ PARTS = [
     ('AssetStudio Texture2DDecoderNative', 'https://github.com/Perfare/AssetStudio', 'ETC1 texture decoding in '
      'blox7.so.', [f'{LIC}/assetstudio-texture2ddecoder.txt']),
     ('Mozilla CA certificate list', 'https://curl.se/docs/caextract.html', 'The trusted root certificates '
-     '(root/etc/ssl/certs/ca-certificates.crt), from Mozilla\'s certdata.txt as curl publishes it, under the '
-     'Mozilla Public License 2.0. Its source is at https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/'
-     'certdata.txt.', [f'{LIC}/mpl-2.0.txt']),
+     '(root/etc/ssl/certs/ca-certificates.crt, and inside Blox7.exe for the BearSSL check above), from Mozilla\'s '
+     'certdata.txt as curl publishes it, under the Mozilla Public License 2.0. Its source is at '
+     'https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/certdata.txt.', [f'{LIC}/mpl-2.0.txt']),
 ]
 
 HEADER = """Blox7 third-party notices

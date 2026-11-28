@@ -502,9 +502,15 @@ Studio7.exe contains the software below, each under its own license.
     Unpacks Roblox's packages.
 
  2. BearSSL - https://bearssl.org
-    TLS 1.2 for the downloads. Windows itself still decides which certificates are trusted.
+    TLS 1.2 for the downloads. Windows decides which certificates are trusted, and when it doesn't have a site's
+    root certificate, BearSSL checks the site against the Mozilla CA certificate list below.
 
- 3. Microsoft Edge WebView2 Runtime - https://developer.microsoft.com/microsoft-edge/webview2/
+ 3. Mozilla CA certificate list - https://curl.se/docs/caextract.html
+    The root certificates for that check, inside Studio7.exe, from Mozilla's certdata.txt as curl publishes it,
+    under the Mozilla Public License 2.0. Its source is at
+    https://hg.mozilla.org/projects/nss/file/tip/lib/ckfw/builtins/certdata.txt.
+
+ 4. Microsoft Edge WebView2 Runtime - https://developer.microsoft.com/microsoft-edge/webview2/
     It isn't part of Studio7.exe: on Windows 7 Studio7 downloads WebView2 Runtime 109.0.1518.140 from
     Microsoft and sets it up for Roblox Studio. It includes Microsoft Defender SmartScreen, which collects and
     sends your information to Microsoft as disclosed in Microsoft's Privacy Statement at https://aka.ms/privacy
@@ -512,7 +518,7 @@ Studio7.exe contains the software below, each under its own license.
     https://learn.microsoft.com/en-us/microsoft-edge/privacy-whitepaper#smartscreen. On Windows 7 and 8.1 it may
     periodically check for updates, and download and install them without any additional notice.
 
- 4. LZMA SDK - https://www.7-zip.org/sdk.html
+ 5. LZMA SDK - https://www.7-zip.org/sdk.html
     Unpacks WebView2 109 from Microsoft's file: LzmaDec.c and Bcj2.c from the LZMA SDK 25.01 by Igor Pavlov,
     unmodified, which is in the public domain.
 """
@@ -548,6 +554,7 @@ def build_studio7():
     with open(os.path.join(root, 'NOTICE'), encoding='utf-8') as f:
         notices = f.read().replace('\r\n', '\n').strip('\n') + f'\n\n{rule}\n' + S7_NOTICES
     licenses = (('zlib', f'{deps}/zlib/LICENSE'), ('BearSSL', f'{deps}/bearssl/LICENSE.txt'),
+                ('Mozilla CA certificate list', os.path.join(WIN, 'licenses', 'mpl-2.0.txt')),
                 ('Microsoft Edge WebView2 Runtime', os.path.join(WIN, 'licenses', 'webview2-runtime.txt')))
     for number, (name, path) in enumerate(licenses, 1):
         with open(path, encoding='utf-8', errors='replace') as f:
