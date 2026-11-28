@@ -349,7 +349,8 @@ static unsigned trust_end_chain(const br_x509_class **context) {
     chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_OR;
     chain_para.RequestedUsage.Usage.cUsageIdentifier = 1;
     chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = usages;
-    if (!CertGetCertificateChain(NULL, leaf, NULL, store, &chain_para, CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL, NULL, &chain))
+    if (!CertGetCertificateChain(NULL, leaf, NULL, store, &chain_para, CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL, NULL,
+                                 &chain))
         goto done;
     MultiByteToWideChar(CP_ACP, 0, t->host, -1, host, 256);
     memset(&ssl, 0, sizeof(ssl));
@@ -622,8 +623,8 @@ static BOOL split_url(const char *url, char *host, size_t host_room, const char 
     return TRUE;
 }
 
-static BOOL get_once(const char *url, HttpSink sink, void *context, ULONG64 resume_from, HttpResult *result, char *moved,
-                     size_t moved_room) {
+static BOOL get_once(const char *url, HttpSink sink, void *context, ULONG64 resume_from, HttpResult *result,
+                     char *moved, size_t moved_room) {
     Link *l = calloc(1, sizeof(Link));
     char host[256], request[2400], head[8192], *port;
     const char *path, *value;
