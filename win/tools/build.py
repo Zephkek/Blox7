@@ -414,6 +414,10 @@ def write_forced_flags(gen):
         f.write('};\n')
 
 
+def write_roots():
+    subprocess.check_call([sys.executable, '-I', os.path.join(HERE, 'trust-anchors.py')])
+
+
 def update_jobs(deps):
     includes = [f'-I{deps}/bearssl/inc', f'-I{deps}/zlib']
     flags = ['-O2', '-Wall', '-Wextra', '-ffunction-sections', '-fdata-sections'] + includes
@@ -440,6 +444,7 @@ def build_blox7():
     subprocess.check_call([sys.executable, '-I', os.path.join(HERE, 'pack-blox7.py'), os.path.join(OUT, 'dist'), gen])
     write_default_config(gen)
     write_forced_flags(gen)
+    write_roots()
     src = os.path.join(WIN, 'blox7')
     res = os.path.join(gen, 'blox7.res.o')
     subprocess.check_call([f'{MINGW}/bin/llvm-windres.exe', '-I', src, '-I', gen, '-O', 'coff',
@@ -537,6 +542,7 @@ def build_studio7():
     layer = os.path.join(gen, 'layer')
     cc, cxx = f'{MINGW}/bin/clang.exe', f'{MINGW}/bin/clang++.exe'
     build_studio7_layer(layer)
+    write_roots()
     rule = '=' * 110
     root = os.path.dirname(WIN)
     with open(os.path.join(root, 'NOTICE'), encoding='utf-8') as f:
