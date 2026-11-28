@@ -182,6 +182,23 @@ Status LaunchRobloxWebSurface(
   return Status::Ok();
 }
 
+class ExitUnlessTaken final {
+ public:
+  explicit ExitUnlessTaken(WebViewHelperExitObserver* observer)
+      : observer_(observer) {}
+  ~ExitUnlessTaken() {
+    if (observer_->valid()) {
+      observer_->on_exit(observer_->context.get());
+    }
+  }
+
+  ExitUnlessTaken(const ExitUnlessTaken&) = delete;
+  ExitUnlessTaken& operator=(const ExitUnlessTaken&) = delete;
+
+ private:
+  WebViewHelperExitObserver* const observer_;
+};
+
 template <typename Value>
 bool SetField(JNIEnv* env, jobject object, jclass clazz, const char* name,
               const char* signature, Value value);
@@ -570,6 +587,7 @@ Status RobloxExperienceComposition::OpenWebSurface(
     return Invalid("WebView surface open request is incomplete");
   }
   std::lock_guard<std::mutex> operation_lock(web_surface_operation_mutex_);
+  const ExitUnlessTaken exit_unless_taken(&exit_observer);
 
   std::shared_ptr<WebViewHelperProcess> current;
   SecureWebViewRobloxCookie cookie;

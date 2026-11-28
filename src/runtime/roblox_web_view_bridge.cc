@@ -1267,7 +1267,8 @@ Status RobloxWebViewBridge::DispatchOpenRequest(
       }
       if (!status.ok()) {
         std::lock_guard<std::mutex> target_lock(exit_context->target->mutex);
-        if (exit_context->target->active_generation == generation) {
+        if (exit_context->target->active_generation == generation &&
+            !exit_context->target->close_queued) {
           exit_context->target->active_generation = previous_generation;
           exit_context->target->active_source = previous_source;
           exit_context->target->close_queued = previous_close_queued;
