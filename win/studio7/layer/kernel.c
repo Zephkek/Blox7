@@ -22,6 +22,28 @@ BOOL WINAPI s7_PrefetchVirtualMemory(HANDLE process, ULONG_PTR count, PVOID rang
     return TRUE;
 }
 
+static BOOL search_flags_missing(void) {
+    static volatile LONG state;
+
+    if (!state) state = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "AddDllDirectory") ? 1 : 2;
+    return state == 2;
+}
+
+HMODULE WINAPI s7_LoadLibraryExW(LPCWSTR name, HANDLE file, DWORD flags) {
+    WCHAR path[MAX_PATH];
+    UINT length, i;
+
+    if (flags != LOAD_LIBRARY_SEARCH_SYSTEM32 || file || !name || !name[0] || !search_flags_missing())
+        return LoadLibraryExW(name, file, flags);
+    for (i = 0; name[i]; i++)
+        if (name[i] == L'\\' || name[i] == L'/' || name[i] == L':') return LoadLibraryExW(name, file, flags);
+    length = GetSystemDirectoryW(path, MAX_PATH);
+    if (!length || length + 1 + i >= MAX_PATH) return LoadLibraryExW(name, file, flags);
+    path[length] = L'\\';
+    memcpy(path + length + 1, name, (i + 1) * sizeof(WCHAR));
+    return LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+}
+
 BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {

@@ -9,7 +9,8 @@ LAYER = os.path.join(os.path.dirname(HERE), 'studio7', 'layer')
 OURS = {
     'kernel32': ('s7kernel', ['WaitOnAddress', 'WakeByAddressSingle', 'WakeByAddressAll', 'GetSystemTimePreciseAsFileTime',
                               'GetCurrentThreadStackLimits', 'CreateFile2', 'CopyFile2', 'PrefetchVirtualMemory',
-                              'VerifyVersionInfoW'], ['S7Anchor'], ['WakeAllConditionVariable', 'WakeConditionVariable']),
+                              'VerifyVersionInfoW'], ['S7Anchor'], ['WakeAllConditionVariable', 'WakeConditionVariable',
+                                                                    'LoadLibraryExW']),
     'user32': ('s7user', ['GetDpiForWindow', 'GetDpiForSystem', 'GetSystemMetricsForDpi', 'AdjustWindowRectExForDpi',
                           'GetCurrentInputMessageSource'], [], ['RegisterClassExW', 'SendMessageW']),
     'ws2_32': ('s7ws2', ['GetAddrInfoExW', 'GetAddrInfoExCancel', 'GetAddrInfoExOverlappedResult'], [], []),

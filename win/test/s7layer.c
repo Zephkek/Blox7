@@ -736,6 +736,60 @@ static void test_events(void) {
     if (b) unreg(b);
 }
 
+typedef HMODULE(WINAPI *LoadFn)(LPCWSTR, HANDLE, DWORD);
+
+static void test_load(void) {
+    LoadFn ours = (LoadFn)(void *)GetProcAddress(GetModuleHandleW(L"s7kernel.dll"), "LoadLibraryExW");
+    LoadFn real = (LoadFn)(void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryExW");
+    BOOL known = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "AddDllDirectory") != NULL;
+    WCHAR system[MAX_PATH], copy[MAX_PATH], from[MAX_PATH], *slash;
+    HMODULE a, b, c;
+    DWORD ea, eb;
+
+    GetSystemDirectoryW(system, MAX_PATH);
+    lstrcatW(system, L"\\version.dll");
+    SetLastError(0);
+    b = real(L"version.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    eb = GetLastError();
+    a = ours(L"version.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    check(ours && ours != real && a && a == GetModuleHandleW(system) &&
+              (known ? a == b : !b && eb == ERROR_INVALID_PARAMETER),
+          "load: system32 by name", "stand-in %p, Windows %p (error %lu), %s", (void *)a, (void *)b, eb,
+          known ? "Windows knows the flag" : "Windows lacks the flag");
+    SetLastError(0);
+    a = ours(L"s7-not-there.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    ea = GetLastError();
+    check(!a && ea == ERROR_MOD_NOT_FOUND, "load: missing dll", "error %lu", ea);
+
+    GetModuleFileNameW(GetModuleHandleW(L"s7bcp.dll"), from, MAX_PATH);
+    lstrcpyW(copy, from);
+    slash = wcsrchr(copy, L'\\');
+    lstrcpyW(slash ? slash + 1 : copy, L"s7loadtest.dll");
+    if (!CopyFileW(from, copy, FALSE)) {
+        check(0, "load: next to the exe", "could not copy s7bcp.dll (error %lu)", GetLastError());
+        return;
+    }
+    SetLastError(0);
+    a = ours(L"s7loadtest.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    ea = GetLastError();
+    check(!a && ea == ERROR_MOD_NOT_FOUND, "load: only system32 is searched",
+          "a dll next to the exe gives %p, error %lu", (void *)a, ea);
+    c = ours(L"s7loadtest.dll", NULL, 0);
+    check(c != NULL, "load: other flags unchanged", "flags 0 found it next to the exe: %p", (void *)c);
+    SetLastError(0);
+    b = real(copy, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    eb = GetLastError();
+    SetLastError(0);
+    a = ours(copy, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    ea = GetLastError();
+    check(a == b && (a || ea == eb), "load: a path is passed on", "stand-in %p error %lu, Windows %p error %lu",
+          (void *)a, ea, (void *)b, eb);
+    if (a) FreeLibrary(a);
+    if (b) FreeLibrary(b);
+    if (c) FreeLibrary(c);
+    DeleteFileW(copy);
+}
+
 DEFINE_GUID(LowLatencyMode, 0x9c27891a, 0xed7a, 0x40e1, 0x88, 0xe8, 0xb2, 0x27, 0x27, 0xa0, 0x24, 0xee);
 
 static HRESULT video_type(IMFMediaType **type, REFGUID format, UINT32 width, UINT32 height, BOOL encoded) {
@@ -880,8 +934,8 @@ done:
 int main(int argc, char **argv) {
     static const struct { const char *name; void (*run)(void); } tests[] = {
         {"wait", test_wait}, {"time", test_time}, {"stack", test_stack}, {"files", test_files},
-        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"events", test_events}, {"media", test_media},
-        {"exit", test_exit},
+        {"dns", test_dns}, {"user", test_user}, {"misc", test_misc}, {"events", test_events}, {"load", test_load},
+        {"media", test_media}, {"exit", test_exit},
     };
     int i, j;
 

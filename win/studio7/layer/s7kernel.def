@@ -834,7 +834,7 @@ EXPORTS
     LoadAppInitDlls = kernel32.LoadAppInitDlls @832
     LoadLibraryA = kernel32.LoadLibraryA @833
     LoadLibraryExA = kernel32.LoadLibraryExA @834
-    LoadLibraryExW = kernel32.LoadLibraryExW @835
+    LoadLibraryExW = s7_LoadLibraryExW @835
     LoadLibraryW = kernel32.LoadLibraryW @836
     LoadModule = kernel32.LoadModule @837
     LoadResource = kernel32.LoadResource @838
