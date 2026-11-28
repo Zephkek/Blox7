@@ -224,6 +224,7 @@ struct App {
   bool show_domain_as_title = false;
   bool terminating = false;
   bool startup_failed = false;
+  HRESULT surface_result = S_OK;
   bool security_check = false;
   bool setting_up = false;
   bool setup_seen = false;
@@ -2185,6 +2186,7 @@ void AttachWebView(Surface* surface, std::function<void(Surface*)> ready) {
                     auto* surface = reinterpret_cast<Surface*>(GetWindowLongPtrW(window, GWLP_USERDATA));
                     if (surface == nullptr || FAILED(result) || controller == nullptr) {
                       Log("cannot create a WebView2 surface: 0x%08lx", static_cast<unsigned long>(result));
+                      g_app.surface_result = FAILED(result) ? result : E_FAIL;
                       ready(nullptr);
                       return S_OK;
                     }
@@ -2308,8 +2310,7 @@ void CreatePageBrowser(const std::wstring& user_agent_argument) {
             TraceEnvironment(environment);
             AttachWebView(g_app.primary, [](Surface* surface) {
               if (surface == nullptr) {
-                g_app.startup_failed = true;
-                BeginTermination("primary WebView2 surface failed");
+                WebView2Failed("start", g_app.surface_result);
                 return;
               }
               Log("WebView2 ready");
