@@ -31,6 +31,7 @@ constexpr wchar_t kDialogClass[] = L"Studio7.Settings";
 constexpr UINT kProgress = WM_APP + 1;
 constexpr UINT kJobDone = WM_APP + 2;
 constexpr UINT kSelfUpdated = WM_APP + 3;
+constexpr ULONG_PTR kOpenLink = 0x53374C4B;
 constexpr UINT_PTR kAnimTimer = 1;
 constexpr UINT_PTR kWatchTimer = 2;
 constexpr UINT_PTR kWebviewTimer = 3;
@@ -1501,6 +1502,21 @@ LRESULT handle(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     case kSelfUpdated:
       restart_if_idle();
       return 0;
+    case WM_COPYDATA: {
+      const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(lp);
+      if (c != &g.main || data == nullptr || data->dwData != kOpenLink || data->cbData < sizeof(wchar_t) ||
+          data->cbData % sizeof(wchar_t))
+        return 0;
+      g.arguments.assign(static_cast<const wchar_t*>(data->lpData), data->cbData / sizeof(wchar_t) - 1);
+      if (g.stage == Stage::Ready) {
+        open_studio();
+      } else if (!g.webview_wait) {
+        g.open_when_ready = true;
+      }
+      ShowWindow(hwnd, SW_RESTORE);
+      SetForegroundWindow(hwnd);
+      return 1;
+    }
     case WM_CLOSE:
       if (c == &g.dialog) {
         close_settings();
@@ -1758,6 +1774,20 @@ int render_ui(const std::wstring& dir) {
   }
   release(wic);
   return written ? 0 : 1;
+}
+
+bool hand_over(const std::wstring& arguments) {
+  HWND other = FindWindowW(kMainClass, nullptr);
+  if (other == nullptr) return false;
+  COPYDATASTRUCT data{};
+  data.dwData = kOpenLink;
+  data.cbData = static_cast<DWORD>((arguments.size() + 1) * sizeof(wchar_t));
+  data.lpData = const_cast<wchar_t*>(arguments.c_str());
+  DWORD_PTR answer = 0;
+  AllowSetForegroundWindow(ASFW_ANY);
+  return SendMessageTimeoutW(other, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG, 10000,
+                             &answer) &&
+         answer == 1;
 }
 
 int run_launcher(HINSTANCE instance, int show, const Paths& paths, const std::wstring& arguments, bool open_when_ready,

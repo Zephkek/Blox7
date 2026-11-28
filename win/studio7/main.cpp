@@ -143,6 +143,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     arguments = after_program(after_program(GetCommandLineW()));
     open = true;
   }
+  if (open && webview_started && !studio_running(&paths) && studio7::launcher_open() && studio7::hand_over(arguments))
+    return 0;
   const bool wait = open && webview_started && !studio_running(&paths) && !studio7::launcher_open();
   if (open && studio7::windows_seven() && !wait && open_now(paths, arguments, &failure)) return 0;
   return studio7::run_launcher(instance, show, paths, arguments, open && failure.empty(), failure, webview_started);
