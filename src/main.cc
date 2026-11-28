@@ -34,6 +34,7 @@
 #include "runtime/external_launch_broker.h"
 #include "runtime/fleasion.h"
 #include "runtime/graphics_launch_policy.h"
+#include "runtime/luau_codegen_policy.h"
 #include "runtime/memory_limit.h"
 #include "runtime/payload_update_preflight.h"
 #include "runtime/performance_policy.h"
@@ -723,8 +724,23 @@ int main(int argc, char* argv[]) {
                 << command_line_error << '\n';
       return EXIT_FAILURE;
     }
+    const blox7::runtime::AvxState avx = blox7::runtime::DetectAvxState();
+    std::string luau_codegen_overrides;
+    if (!blox7::runtime::MergeLuauCodegenClientSettingsOverrides(
+            avx, audio_capture_overrides, &luau_codegen_overrides,
+            &command_line_error)) {
+      std::cerr << "[FATAL] Cannot apply Luau codegen policy: "
+                << command_line_error << '\n';
+      return EXIT_FAILURE;
+    }
+    if (avx.luau_codegen_off()) {
+      std::cout << "  [runtime] luau native code off: cpu has avx, windows "
+                   "has avx state off (osxsave="
+                << avx.osxsave << " xcr0=0x" << std::hex << avx.xcr0
+                << std::dec << ")\n";
+    }
     if (setenv("BLOX7_CLIENT_SETTINGS_OVERRIDES_JSON",
-               audio_capture_overrides.c_str(), 1) != 0) {
+               luau_codegen_overrides.c_str(), 1) != 0) {
       std::cerr << "[FATAL] Cannot export runtime client-settings policy\n";
       return EXIT_FAILURE;
     }

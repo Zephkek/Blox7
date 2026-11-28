@@ -215,6 +215,7 @@ add_library(blox7_runtime STATIC
   src/runtime/game_session_coordinator.cc
   src/runtime/graphics_launch_policy.cc
   src/runtime/http_client_policy.cc
+  src/runtime/luau_codegen_policy.cc
   src/runtime/memory_limit.cc
   src/runtime/owned_pthread.cc
   src/runtime/performance_policy.cc
