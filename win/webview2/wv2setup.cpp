@@ -492,7 +492,11 @@ int verdict(const Outcome* last) {
   bool answered = true;
   for (int i = 0; i < kSourceCount; ++i) {
     if (last[i] == kNetwork) continue;
-    ++answers;
+    bool again = false;
+    for (int j = 0; j < i; ++j)
+      again = again || (last[j] != kNetwork && kSources[j].https == kSources[i].https &&
+                        std::strcmp(kSources[j].host, kSources[i].host) == 0);
+    if (!again) ++answers;
     gone = gone && last[i] == kGone;
     answered = answered && (last[i] == kGone || last[i] == kBad);
   }
