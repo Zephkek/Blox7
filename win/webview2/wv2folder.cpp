@@ -212,7 +212,8 @@ int wv2_setup_spawn(const wchar_t* exe, int now) {
   startup.cb = sizeof startup;
   startup.dwFlags = STARTF_FORCEOFFFEEDBACK;
   PROCESS_INFORMATION process{};
-  const DWORD flags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | (now ? 0 : BELOW_NORMAL_PRIORITY_CLASS);
+  const DWORD flags =
+      CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | (now ? NORMAL_PRIORITY_CLASS : BELOW_NORMAL_PRIORITY_CLASS);
   if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &startup, &process)) {
     return 0;
   }
